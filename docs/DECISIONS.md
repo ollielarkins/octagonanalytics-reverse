@@ -78,3 +78,17 @@ Running log of the decisions behind the schema and semantic layer. Each entry: t
 **Why.** Consultant was referenced three ways (UUID FK, bigint id, free-text name); "…by consultant/team" answers would otherwise disagree. One canonical key fixes it.
 
 **Status:** Proposed. No destructive schema change needed now (recruitcrm_id already unique); enforced in the sync + view layer.
+
+---
+
+## D8 — RecruitCRM is the single source of truth (SSOT); Supabase is a live mirror
+
+**Decision.** RecruitCRM is the **single source of truth**. Supabase is a live, always-current mirror of the RecruitCRM API output (via the M2 sync), and everything downstream (semantic layer, dashboards, Claude) reads from that mirror. The current data is a stale one-off hand-import and will be **replaced** by the live sync.
+
+**Consequences.**
+- The "Ratios 2025-26" spreadsheet is **NOT** the source of truth — it becomes a *validation reference* only (see [[octagon-ratios-spec]]).
+- Where the spreadsheet disagrees with RecruitCRM, the platform reports the **RecruitCRM** figure. Closing the gap is a **data-entry/process** fix (get the activity logged in RecruitCRM), not a reason to bend the platform to the sheet.
+- A live mirror guarantees `Supabase == RecruitCRM`; it does **not** guarantee `Supabase == spreadsheet`. That's expected and acceptable under SSOT.
+- The chosen canonical funnel source (D1) must be whatever RecruitCRM actually feeds once the sync is live; revisit D1 against real synced data (candidate_stage_events had almost no pre-2026 history in the stale import).
+
+**Status:** **Decided by the user 2026-08-03.** Blocked only on a valid RecruitCRM API token to build/run the sync (current token 401).
