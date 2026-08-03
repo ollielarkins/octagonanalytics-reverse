@@ -1,7 +1,7 @@
 // recruitcrm-sync — RecruitCRM → Supabase mirror. Locked (verify_jwt=true).
-// Modes: backfill (entity,start_page,max_pages) | incremental (?mode=incremental)
-//        | reconcile (?mode=reconcile&entity=jobs|clients|consultants) — soft-
-//          deletes mirror rows no longer present in RecruitCRM (delete detection).
+// Modes: backfill | incremental (?mode=incremental) | reconcile (?mode=reconcile&entity=...)
+// Long reconciles (clients/jobs) run as background tasks (EdgeRuntime.waitUntil)
+// and log their result to sync_state('reconcile:<entity>').
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const BASE = "https://api.recruitcrm.io/v1";
@@ -63,8 +63,7 @@ async function incremental(entity: string, ep: string, mapRow: (x: any) => any, 
   while (more && !caught && done < CAP) {
     const r = await crm(`/${ep}?page=${page}&sort_by=updatedon&sort_order=desc&limit=100`);
     if (!r.ok) { stopped = r.status; break; }
-    const recs = r.json?.data ?? [];
-    const rows = recs.map((rec: any) => {
+    const rows = (r.json?.data ?? []).map((rec: any) => {
       const upd = Date.parse(rec.updated_on ?? rec.created_on ?? "");
       if (upd) { maxSeen = Math.max(maxSeen, upd); if (upd <= since) caught = true; }
       return mapRow(rec);
@@ -94,7 +93,7 @@ async function reconcilePaged(entity: string, ep: string, table: string) {
     const r = await crm(`/${ep}?page=${page}&limit=100`);
     if (!r.ok) { stopped = r.status; break; }
     for (const rec of (r.json?.data ?? [])) if (rec?.id != null) ids.push(rec.id);
-    more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(80);
+    more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(40);
   }
   const complete = !stopped && !more;
   if (!complete) return { entity, complete: false, stopped, pages: done, live_ids: ids.length, note: "partial fetch — reconcile skipped" };
@@ -108,6 +107,10 @@ async function reconcileConsultants() {
   const ids = arr.map((u: any) => u.id).filter((x: any) => x != null);
   const { data, error } = await db.rpc("reconcile_entity", { p_table: "consultants", p_live_ids: ids });
   return { entity: "consultants", complete: true, live_ids: ids.length, result: error ? String(error.message) : data };
+}
+async function runReconcileBg(entity: string, fn: () => Promise<any>) {
+  try { const res = await fn(); await db.from("sync_state").upsert({ entity: `reconcile:${entity}`, last_run_at: new Date().toISOString(), last_status: JSON.stringify(res).slice(0, 300) }, { onConflict: "entity" }); }
+  catch (e) { await db.from("sync_state").upsert({ entity: `reconcile:${entity}`, last_run_at: new Date().toISOString(), last_status: "error:" + String(e).slice(0, 200) }, { onConflict: "entity" }); }
 }
 
 Deno.serve(async (req) => {
@@ -127,12 +130,14 @@ Deno.serve(async (req) => {
 
     if (mode === "reconcile") {
       if (entity === "consultants") return Response.json(await reconcileConsultants());
-      if (entity === "clients") return Response.json(await reconcilePaged("clients", "companies", "clients"));
-      if (entity === "jobs") return Response.json(await reconcilePaged("jobs", "jobs", "jobs"));
-      return Response.json({ error: "reconcile needs entity=consultants|clients|jobs" }, { status: 400 });
+      const fn = entity === "clients" ? () => reconcilePaged("clients", "companies", "clients")
+               : entity === "jobs" ? () => reconcilePaged("jobs", "jobs", "jobs") : null;
+      if (!fn) return Response.json({ error: "reconcile needs entity=consultants|clients|jobs" }, { status: 400 });
+      const bg = runReconcileBg(entity, fn);
+      try { (globalThis as any).EdgeRuntime?.waitUntil(bg); } catch { /* ignore */ }
+      return Response.json({ mode: "reconcile", entity, status: "started (background); result in sync_state('reconcile:" + entity + "')" }, { status: 202 });
     }
 
-    // backfill
     const startPage = parseInt(url.searchParams.get("start_page") ?? "1", 10);
     const maxPages = parseInt(url.searchParams.get("max_pages") ?? "1", 10);
     if (entity === "consultants") return Response.json(await syncConsultants());
