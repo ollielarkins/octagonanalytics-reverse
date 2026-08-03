@@ -1,14 +1,9 @@
-// recruitcrm-sync — Phase 1 master-data sync (RecruitCRM → Supabase mirror).
-// Entities: consultants (users), clients (companies), jobs.
-// Read-only from RecruitCRM; upserts into Supabase via the service role (D6).
-// Idempotent (upsert on recruitcrm_id) and resumable; robust to 429 (stops
-// gracefully and returns resume_next_page instead of erroring); throttled.
-//
-// Deployed with verify_jwt=true — invoke server-side (cron/service role), not publicly.
-//
-// Query params: entity=consultants|clients|jobs, start_page (default 1), max_pages (default 1).
-// Keep max_pages so a call stays under the ~60s edge wall-clock (≈80 job pages/call).
-
+// recruitcrm-sync — RecruitCRM → Supabase mirror. Locked (verify_jwt=true).
+// Modes:
+//   backfill (default): entity=consultants|clients|jobs, start_page, max_pages.
+//   incremental (?mode=incremental[&entity=all|...]): pages by updatedon desc,
+//     stops at the sync_state cursor — cheap "stay live" poll. Driven by pg_cron
+//     (see migration 0005; every 15 min).
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const BASE = "https://api.recruitcrm.io/v1";
@@ -24,61 +19,100 @@ async function crm(path: string) {
 }
 const fullName = (u: any) => ([u.first_name, u.last_name].filter(Boolean).join(" ").trim() || null);
 
-async function syncConsultants() {
-  const r = await crm(`/users`);
-  if (!r.ok) return { entity: "consultants", stopped: r.status, resume_next_page: 1 };
-  const arr = Array.isArray(r.json) ? r.json : r.json?.data ?? [];
-  const rows = arr.map((u: any) => ({
-    recruitcrm_id: u.id, name: fullName(u), email: u.email ?? null,
-    team: Array.isArray(u.teams) && u.teams.length ? (u.teams[0]?.name ?? String(u.teams[0])) : null,
-    active: typeof u.status === "string" ? u.status.toLowerCase() === "active" : true,
-  }));
-  if (rows.length) await db.from("consultants").upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
-  return { entity: "consultants", total_upserted: rows.length, resume_next_page: null };
-}
-
-async function pageLoop(entity: string, startPage: number, maxPages: number, path: (p: number) => string, mapRow: (x: any) => any, table: string, conflict: string) {
-  let page = startPage, more = true, done = 0, upserted = 0, stopped: any = null;
-  while (more && done < maxPages) {
-    const r = await crm(path(page));
-    if (!r.ok) { stopped = r.status; break; }
-    const rows = (r.json?.data ?? []).map(mapRow);
-    if (rows.length) await db.from(table).upsert(rows, { onConflict: conflict }).throwOnError();
-    upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1;
-    await sleep(120);
-  }
-  return { entity, pages_processed: done, total_upserted: upserted, stopped, resume_next_page: (stopped || more) ? page : null };
-}
-
-async function syncJobs(startPage: number, maxPages: number) {
-  const [{ data: cons }, { data: cls }] = await Promise.all([
-    db.from("consultants").select("id,recruitcrm_id"),
-    db.from("clients").select("id,company_slug"),
-  ]);
-  const consByRid = new Map((cons ?? []).map((c: any) => [c.recruitcrm_id, c.id]));
-  const clientBySlug = new Map((cls ?? []).map((c: any) => [c.company_slug, c.id]));
-  return pageLoop("jobs", startPage, maxPages, (p) => `/jobs?page=${p}`, (job: any) => ({
+const mapConsultant = (u: any) => ({
+  recruitcrm_id: u.id, name: fullName(u), email: u.email ?? null,
+  team: Array.isArray(u.teams) && u.teams.length ? (u.teams[0]?.name ?? String(u.teams[0])) : null,
+  active: typeof u.status === "string" ? u.status.toLowerCase() === "active" : true,
+});
+const mapClient = (c: any) => ({
+  recruitcrm_id: c.id, company_name: c.company_name ?? null, company_slug: c.slug ?? null, country: c.country ?? null, active: true,
+});
+function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
+  return (job: any) => ({
     recruitcrm_id: job.id, slug: job.slug ?? null, title: job.name ?? null,
     client_id: clientBySlug.get(job.company_slug) ?? null,
     consultant_id: consByRid.get(job.owner) ?? null,
     status: job.job_status?.label ?? (typeof job.job_status === "string" ? job.job_status : null),
     salary_min: job.min_annual_salary ?? null, salary_max: job.max_annual_salary ?? null,
     created_date: job.created_on ?? null,
-  }), "jobs", "recruitcrm_id");
+  });
+}
+
+async function jobMaps() {
+  const [{ data: cons }, { data: cls }] = await Promise.all([
+    db.from("consultants").select("id,recruitcrm_id"),
+    db.from("clients").select("id,company_slug"),
+  ]);
+  return [new Map((cons ?? []).map((c: any) => [c.recruitcrm_id, c.id])), new Map((cls ?? []).map((c: any) => [c.company_slug, c.id]))] as const;
+}
+
+// ---- backfill (bulk, paged) ----
+async function backfillLoop(entity: string, startPage: number, maxPages: number, ep: string, mapRow: (x: any) => any, table: string) {
+  let page = startPage, more = true, done = 0, upserted = 0, stopped: any = null;
+  while (more && done < maxPages) {
+    const r = await crm(`/${ep}?page=${page}&limit=100`);
+    if (!r.ok) { stopped = r.status; break; }
+    const rows = (r.json?.data ?? []).map(mapRow);
+    if (rows.length) await db.from(table).upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
+    upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(120);
+  }
+  return { entity, pages_processed: done, total_upserted: upserted, stopped, resume_next_page: (stopped || more) ? page : null };
+}
+
+// ---- incremental (updatedon desc, stop at cursor) ----
+async function incremental(entity: string, ep: string, mapRow: (x: any) => any, table: string) {
+  const { data: st } = await db.from("sync_state").select("last_synced_at").eq("entity", entity).maybeSingle();
+  const since = st?.last_synced_at ? Date.parse(st.last_synced_at) : 0;
+  let page = 1, more = true, caught = false, upserted = 0, maxSeen = since, stopped: any = null, done = 0;
+  const CAP = 40;
+  while (more && !caught && done < CAP) {
+    const r = await crm(`/${ep}?page=${page}&sort_by=updatedon&sort_order=desc&limit=100`);
+    if (!r.ok) { stopped = r.status; break; }
+    const recs = r.json?.data ?? [];
+    const rows = recs.map((rec: any) => {
+      const upd = Date.parse(rec.updated_on ?? rec.created_on ?? "");
+      if (upd) { maxSeen = Math.max(maxSeen, upd); if (upd <= since) caught = true; }
+      return mapRow(rec);
+    });
+    if (rows.length) await db.from(table).upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
+    upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(120);
+  }
+  const newSince = new Date(Math.max(maxSeen, since)).toISOString();
+  await db.from("sync_state").upsert({ entity, last_synced_at: newSince, last_run_at: new Date().toISOString(), last_status: stopped ? `stopped:${stopped}` : caught ? "caught_up" : "page_cap" }, { onConflict: "entity" });
+  return { entity, pages: done, upserted, caught, stopped };
+}
+
+async function syncConsultants() {
+  const r = await crm(`/users`);
+  if (!r.ok) return { entity: "consultants", stopped: r.status };
+  const arr = Array.isArray(r.json) ? r.json : r.json?.data ?? [];
+  const rows = arr.map(mapConsultant);
+  if (rows.length) await db.from("consultants").upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
+  await db.from("sync_state").upsert({ entity: "consultants", last_synced_at: new Date().toISOString(), last_run_at: new Date().toISOString(), last_status: "ok" }, { onConflict: "entity" });
+  return { entity: "consultants", upserted: rows.length };
 }
 
 Deno.serve(async (req) => {
   try {
     if (!TOKEN) return Response.json({ error: "token not set" }, { status: 500 });
     const url = new URL(req.url);
-    const entity = url.searchParams.get("entity");
+    const mode = url.searchParams.get("mode") ?? "backfill";
+    const entity = url.searchParams.get("entity") ?? "all";
+
+    if (mode === "incremental") {
+      const out: any = { mode: "incremental", results: [] };
+      if (entity === "all" || entity === "consultants") out.results.push(await syncConsultants());
+      if (entity === "all" || entity === "clients") out.results.push(await incremental("clients", "companies", mapClient, "clients"));
+      if (entity === "all" || entity === "jobs") { const [cb, sb] = await jobMaps(); out.results.push(await incremental("jobs", "jobs", mapJobFactory(cb, sb), "jobs")); }
+      return Response.json(out);
+    }
+
+    // backfill
     const startPage = parseInt(url.searchParams.get("start_page") ?? "1", 10);
     const maxPages = parseInt(url.searchParams.get("max_pages") ?? "1", 10);
     if (entity === "consultants") return Response.json(await syncConsultants());
-    if (entity === "clients") return Response.json(await pageLoop("clients", startPage, maxPages, (p) => `/companies?page=${p}`, (c: any) => ({
-      recruitcrm_id: c.id, company_name: c.company_name ?? null, company_slug: c.slug ?? null, country: c.country ?? null, active: true,
-    }), "clients", "recruitcrm_id"));
-    if (entity === "jobs") return Response.json(await syncJobs(startPage, maxPages));
+    if (entity === "clients") return Response.json(await backfillLoop("clients", startPage, maxPages, "companies", mapClient, "clients"));
+    if (entity === "jobs") { const [cb, sb] = await jobMaps(); return Response.json(await backfillLoop("jobs", startPage, maxPages, "jobs", mapJobFactory(cb, sb), "jobs")); }
     return Response.json({ error: "entity must be consultants|clients|jobs" }, { status: 400 });
   } catch (e) {
     return Response.json({ error: String(e) }, { status: 500 });
