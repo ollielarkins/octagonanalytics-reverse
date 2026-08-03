@@ -1,0 +1,13 @@
+# Secrets — never commit RecruitCRM tokens, Supabase service keys, or env files
+.env
+.env.*
+*.key
+secrets/
+
+# Supabase local
+.branches/
+.temp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
