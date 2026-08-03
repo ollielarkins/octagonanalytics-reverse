@@ -1,9 +1,7 @@
 // recruitcrm-sync — RecruitCRM → Supabase mirror. Locked (verify_jwt=true).
-// Modes:
-//   backfill (default): entity=consultants|clients|jobs, start_page, max_pages.
-//   incremental (?mode=incremental[&entity=all|...]): pages by updatedon desc,
-//     stops at the sync_state cursor — cheap "stay live" poll. Driven by pg_cron
-//     (see migration 0005; every 15 min).
+// Modes: backfill (entity,start_page,max_pages) | incremental (?mode=incremental)
+//        | reconcile (?mode=reconcile&entity=jobs|clients|consultants) — soft-
+//          deletes mirror rows no longer present in RecruitCRM (delete detection).
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const BASE = "https://api.recruitcrm.io/v1";
@@ -37,7 +35,6 @@ function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
     created_date: job.created_on ?? null,
   });
 }
-
 async function jobMaps() {
   const [{ data: cons }, { data: cls }] = await Promise.all([
     db.from("consultants").select("id,recruitcrm_id"),
@@ -46,7 +43,6 @@ async function jobMaps() {
   return [new Map((cons ?? []).map((c: any) => [c.recruitcrm_id, c.id])), new Map((cls ?? []).map((c: any) => [c.company_slug, c.id]))] as const;
 }
 
-// ---- backfill (bulk, paged) ----
 async function backfillLoop(entity: string, startPage: number, maxPages: number, ep: string, mapRow: (x: any) => any, table: string) {
   let page = startPage, more = true, done = 0, upserted = 0, stopped: any = null;
   while (more && done < maxPages) {
@@ -59,7 +55,6 @@ async function backfillLoop(entity: string, startPage: number, maxPages: number,
   return { entity, pages_processed: done, total_upserted: upserted, stopped, resume_next_page: (stopped || more) ? page : null };
 }
 
-// ---- incremental (updatedon desc, stop at cursor) ----
 async function incremental(entity: string, ep: string, mapRow: (x: any) => any, table: string) {
   const { data: st } = await db.from("sync_state").select("last_synced_at").eq("entity", entity).maybeSingle();
   const since = st?.last_synced_at ? Date.parse(st.last_synced_at) : 0;
@@ -92,6 +87,29 @@ async function syncConsultants() {
   return { entity: "consultants", upserted: rows.length };
 }
 
+// ---- reconcile (delete detection): collect COMPLETE live id set, soft-delete missing ----
+async function reconcilePaged(entity: string, ep: string, table: string) {
+  let page = 1, more = true, done = 0, stopped: any = null; const ids: number[] = []; const CAP = 120;
+  while (more && done < CAP) {
+    const r = await crm(`/${ep}?page=${page}&limit=100`);
+    if (!r.ok) { stopped = r.status; break; }
+    for (const rec of (r.json?.data ?? [])) if (rec?.id != null) ids.push(rec.id);
+    more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(80);
+  }
+  const complete = !stopped && !more;
+  if (!complete) return { entity, complete: false, stopped, pages: done, live_ids: ids.length, note: "partial fetch — reconcile skipped" };
+  const { data, error } = await db.rpc("reconcile_entity", { p_table: table, p_live_ids: ids });
+  return { entity, complete: true, pages: done, live_ids: ids.length, result: error ? String(error.message) : data };
+}
+async function reconcileConsultants() {
+  const r = await crm(`/users`);
+  if (!r.ok) return { entity: "consultants", complete: false, stopped: r.status };
+  const arr = Array.isArray(r.json) ? r.json : r.json?.data ?? [];
+  const ids = arr.map((u: any) => u.id).filter((x: any) => x != null);
+  const { data, error } = await db.rpc("reconcile_entity", { p_table: "consultants", p_live_ids: ids });
+  return { entity: "consultants", complete: true, live_ids: ids.length, result: error ? String(error.message) : data };
+}
+
 Deno.serve(async (req) => {
   try {
     if (!TOKEN) return Response.json({ error: "token not set" }, { status: 500 });
@@ -105,6 +123,13 @@ Deno.serve(async (req) => {
       if (entity === "all" || entity === "clients") out.results.push(await incremental("clients", "companies", mapClient, "clients"));
       if (entity === "all" || entity === "jobs") { const [cb, sb] = await jobMaps(); out.results.push(await incremental("jobs", "jobs", mapJobFactory(cb, sb), "jobs")); }
       return Response.json(out);
+    }
+
+    if (mode === "reconcile") {
+      if (entity === "consultants") return Response.json(await reconcileConsultants());
+      if (entity === "clients") return Response.json(await reconcilePaged("clients", "companies", "clients"));
+      if (entity === "jobs") return Response.json(await reconcilePaged("jobs", "jobs", "jobs"));
+      return Response.json({ error: "reconcile needs entity=consultants|clients|jobs" }, { status: 400 });
     }
 
     // backfill
