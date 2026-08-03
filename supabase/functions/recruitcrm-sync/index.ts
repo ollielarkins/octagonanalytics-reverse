@@ -1,7 +1,6 @@
 // recruitcrm-sync — RecruitCRM → Supabase mirror. Locked (verify_jwt=true).
-// Modes: backfill | incremental (?mode=incremental) | reconcile (?mode=reconcile&entity=...)
-// Long reconciles (clients/jobs) run as background tasks (EdgeRuntime.waitUntil)
-// and log their result to sync_state('reconcile:<entity>').
+// Entities: consultants, clients, jobs, candidates.
+// Modes: backfill | incremental | reconcile. (history mode added separately.)
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const BASE = "https://api.recruitcrm.io/v1";
@@ -15,15 +14,21 @@ async function crm(path: string) {
   let json: any = null; try { json = JSON.parse(text); } catch {}
   return { ok: res.ok, status: res.status, json, text };
 }
-const fullName = (u: any) => ([u.first_name, u.last_name].filter(Boolean).join(" ").trim() || null);
+const nm = (a: any, b: any) => ([a, b].filter(Boolean).join(" ").trim() || null);
 
 const mapConsultant = (u: any) => ({
-  recruitcrm_id: u.id, name: fullName(u), email: u.email ?? null,
+  recruitcrm_id: u.id, name: nm(u.first_name, u.last_name), email: u.email ?? null,
   team: Array.isArray(u.teams) && u.teams.length ? (u.teams[0]?.name ?? String(u.teams[0])) : null,
   active: typeof u.status === "string" ? u.status.toLowerCase() === "active" : true,
 });
 const mapClient = (c: any) => ({
   recruitcrm_id: c.id, company_name: c.company_name ?? null, company_slug: c.slug ?? null, country: c.country ?? null, active: true,
+});
+const mapCandidate = (c: any) => ({
+  recruitcrm_id: c.id, slug: c.slug ?? null, first_name: c.first_name ?? null, last_name: c.last_name ?? null,
+  name: nm(c.first_name, c.last_name), email: c.email ?? null, owner_recruitcrm_id: c.owner ?? null,
+  city: c.city ?? null, country: c.country ?? null, source: c.source ?? null,
+  created_date: c.created_on ?? null, updated_date: c.updated_on ?? null,
 });
 function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
   return (job: any) => ({
@@ -50,7 +55,7 @@ async function backfillLoop(entity: string, startPage: number, maxPages: number,
     if (!r.ok) { stopped = r.status; break; }
     const rows = (r.json?.data ?? []).map(mapRow);
     if (rows.length) await db.from(table).upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
-    upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(120);
+    upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(100);
   }
   return { entity, pages_processed: done, total_upserted: upserted, stopped, resume_next_page: (stopped || more) ? page : null };
 }
@@ -69,7 +74,7 @@ async function incremental(entity: string, ep: string, mapRow: (x: any) => any, 
       return mapRow(rec);
     });
     if (rows.length) await db.from(table).upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
-    upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(120);
+    upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(100);
   }
   const newSince = new Date(Math.max(maxSeen, since)).toISOString();
   await db.from("sync_state").upsert({ entity, last_synced_at: newSince, last_run_at: new Date().toISOString(), last_status: stopped ? `stopped:${stopped}` : caught ? "caught_up" : "page_cap" }, { onConflict: "entity" });
@@ -86,9 +91,8 @@ async function syncConsultants() {
   return { entity: "consultants", upserted: rows.length };
 }
 
-// ---- reconcile (delete detection): collect COMPLETE live id set, soft-delete missing ----
 async function reconcilePaged(entity: string, ep: string, table: string) {
-  let page = 1, more = true, done = 0, stopped: any = null; const ids: number[] = []; const CAP = 120;
+  let page = 1, more = true, done = 0, stopped: any = null; const ids: number[] = []; const CAP = 200;
   while (more && done < CAP) {
     const r = await crm(`/${ep}?page=${page}&limit=100`);
     if (!r.ok) { stopped = r.status; break; }
@@ -108,9 +112,9 @@ async function reconcileConsultants() {
   const { data, error } = await db.rpc("reconcile_entity", { p_table: "consultants", p_live_ids: ids });
   return { entity: "consultants", complete: true, live_ids: ids.length, result: error ? String(error.message) : data };
 }
-async function runReconcileBg(entity: string, fn: () => Promise<any>) {
-  try { const res = await fn(); await db.from("sync_state").upsert({ entity: `reconcile:${entity}`, last_run_at: new Date().toISOString(), last_status: JSON.stringify(res).slice(0, 300) }, { onConflict: "entity" }); }
-  catch (e) { await db.from("sync_state").upsert({ entity: `reconcile:${entity}`, last_run_at: new Date().toISOString(), last_status: "error:" + String(e).slice(0, 200) }, { onConflict: "entity" }); }
+async function runBg(entity: string, fn: () => Promise<any>) {
+  try { const res = await fn(); await db.from("sync_state").upsert({ entity, last_run_at: new Date().toISOString(), last_status: JSON.stringify(res).slice(0, 300) }, { onConflict: "entity" }); }
+  catch (e) { await db.from("sync_state").upsert({ entity, last_run_at: new Date().toISOString(), last_status: "error:" + String(e).slice(0, 200) }, { onConflict: "entity" }); }
 }
 
 Deno.serve(async (req) => {
@@ -124,6 +128,7 @@ Deno.serve(async (req) => {
       const out: any = { mode: "incremental", results: [] };
       if (entity === "all" || entity === "consultants") out.results.push(await syncConsultants());
       if (entity === "all" || entity === "clients") out.results.push(await incremental("clients", "companies", mapClient, "clients"));
+      if (entity === "all" || entity === "candidates") out.results.push(await incremental("candidates", "candidates", mapCandidate, "candidates"));
       if (entity === "all" || entity === "jobs") { const [cb, sb] = await jobMaps(); out.results.push(await incremental("jobs", "jobs", mapJobFactory(cb, sb), "jobs")); }
       return Response.json(out);
     }
@@ -131,10 +136,10 @@ Deno.serve(async (req) => {
     if (mode === "reconcile") {
       if (entity === "consultants") return Response.json(await reconcileConsultants());
       const fn = entity === "clients" ? () => reconcilePaged("clients", "companies", "clients")
+               : entity === "candidates" ? () => reconcilePaged("candidates", "candidates", "candidates")
                : entity === "jobs" ? () => reconcilePaged("jobs", "jobs", "jobs") : null;
-      if (!fn) return Response.json({ error: "reconcile needs entity=consultants|clients|jobs" }, { status: 400 });
-      const bg = runReconcileBg(entity, fn);
-      try { (globalThis as any).EdgeRuntime?.waitUntil(bg); } catch { /* ignore */ }
+      if (!fn) return Response.json({ error: "reconcile needs entity=consultants|clients|candidates|jobs" }, { status: 400 });
+      try { (globalThis as any).EdgeRuntime?.waitUntil(runBg(`reconcile:${entity}`, fn)); } catch {}
       return Response.json({ mode: "reconcile", entity, status: "started (background); result in sync_state('reconcile:" + entity + "')" }, { status: 202 });
     }
 
@@ -142,8 +147,9 @@ Deno.serve(async (req) => {
     const maxPages = parseInt(url.searchParams.get("max_pages") ?? "1", 10);
     if (entity === "consultants") return Response.json(await syncConsultants());
     if (entity === "clients") return Response.json(await backfillLoop("clients", startPage, maxPages, "companies", mapClient, "clients"));
+    if (entity === "candidates") return Response.json(await backfillLoop("candidates", startPage, maxPages, "candidates", mapCandidate, "candidates"));
     if (entity === "jobs") { const [cb, sb] = await jobMaps(); return Response.json(await backfillLoop("jobs", startPage, maxPages, "jobs", mapJobFactory(cb, sb), "jobs")); }
-    return Response.json({ error: "entity must be consultants|clients|jobs" }, { status: 400 });
+    return Response.json({ error: "entity must be consultants|clients|candidates|jobs" }, { status: 400 });
   } catch (e) {
     return Response.json({ error: String(e) }, { status: 500 });
   }
