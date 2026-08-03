@@ -1,6 +1,6 @@
 // recruitcrm-sync — RecruitCRM → Supabase mirror. Locked (verify_jwt=true).
 // Entities: consultants, clients, jobs, candidates.
-// Modes: backfill | incremental | reconcile. (history mode added separately.)
+// Modes: backfill | incremental | reconcile | history (candidate_stage_events).
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const BASE = "https://api.recruitcrm.io/v1";
@@ -117,12 +117,62 @@ async function runBg(entity: string, fn: () => Promise<any>) {
   catch (e) { await db.from("sync_state").upsert({ entity, last_run_at: new Date().toISOString(), last_status: "error:" + String(e).slice(0, 200) }, { onConflict: "entity" }); }
 }
 
+// ---- history: rebuild candidate_stage_events from per-candidate /history ----
+async function syncHistory(maxCandidates: number) {
+  const [{ data: sl }, { data: cons }, { data: st }] = await Promise.all([
+    db.from("stage_lookup").select("recruitcrm_stage_id,stage_metric,stage_name"),
+    db.from("consultants").select("recruitcrm_id,name"),
+    db.from("sync_state").select("cursor,last_status").eq("entity", "history").maybeSingle(),
+  ]);
+  if (st?.last_status === "complete") return { entity: "history", complete: true, note: "already complete" };
+  const byId = new Map((sl ?? []).map((s: any) => [s.recruitcrm_stage_id, s]));
+  const byLabel = new Map((sl ?? []).map((s: any) => [String(s.stage_name).toLowerCase(), s]));
+  const consName = new Map((cons ?? []).map((c: any) => [c.recruitcrm_id, c.name]));
+  let cursor = st?.cursor ? Number(st.cursor) : 0;
+
+  const { data: cands } = await db.from("candidates").select("recruitcrm_id,slug,name").gt("recruitcrm_id", cursor).order("recruitcrm_id", { ascending: true }).limit(maxCandidates);
+  if (!cands || cands.length === 0) {
+    await db.from("sync_state").upsert({ entity: "history", last_run_at: new Date().toISOString(), last_status: "complete" }, { onConflict: "entity" });
+    return { entity: "history", complete: true, processed: 0 };
+  }
+  let events = 0, processed = 0, skipped = 0, stopped: any = null;
+  for (const cand of cands) {
+    const r = await crm(`/candidates/${cand.slug}/history`);
+    if (!r.ok) {
+      if (r.status === 429) { stopped = 429; break; }   // back off; don't advance cursor
+      skipped++; cursor = cand.recruitcrm_id; continue;   // 404/etc: skip candidate, advance
+    }
+    const arr = Array.isArray(r.json) ? r.json : [];
+    const rows: any[] = [];
+    for (const e of arr) {
+      const s = byId.get(e.candidate_status_id) ?? byLabel.get(String(e.candidate_status ?? "").toLowerCase());
+      if (!s || !e.updated_on || !e.job_slug) continue;
+      rows.push({
+        candidate_id: cand.recruitcrm_id, candidate_slug: cand.slug, candidate_name: cand.name,
+        job_slug: e.job_slug, job_title: e.job_name ?? null,
+        consultant_id: e.updated_by ?? null, consultant: consName.get(e.updated_by) ?? null,
+        stage_name: s.stage_name, stage_metric: s.stage_metric,
+        event_timestamp: e.updated_on, event_date: String(e.updated_on).slice(0, 10),
+      });
+    }
+    if (rows.length) await db.from("candidate_stage_events").upsert(rows, { onConflict: "candidate_slug,job_slug,stage_metric,event_timestamp" }).throwOnError();
+    events += rows.length; processed++; cursor = cand.recruitcrm_id; await sleep(50);
+  }
+  await db.from("sync_state").upsert({ entity: "history", cursor: String(cursor), last_run_at: new Date().toISOString(), last_status: stopped ? `stopped:${stopped}@${cursor}` : `cursor=${cursor} +${events}ev` }, { onConflict: "entity" });
+  return { entity: "history", processed, skipped, events, cursor, stopped };
+}
+
 Deno.serve(async (req) => {
   try {
     if (!TOKEN) return Response.json({ error: "token not set" }, { status: 500 });
     const url = new URL(req.url);
     const mode = url.searchParams.get("mode") ?? "backfill";
     const entity = url.searchParams.get("entity") ?? "all";
+
+    if (mode === "history") {
+      const maxC = parseInt(url.searchParams.get("max_candidates") ?? "70", 10);
+      return Response.json(await syncHistory(maxC));
+    }
 
     if (mode === "incremental") {
       const out: any = { mode: "incremental", results: [] };
@@ -140,7 +190,7 @@ Deno.serve(async (req) => {
                : entity === "jobs" ? () => reconcilePaged("jobs", "jobs", "jobs") : null;
       if (!fn) return Response.json({ error: "reconcile needs entity=consultants|clients|candidates|jobs" }, { status: 400 });
       try { (globalThis as any).EdgeRuntime?.waitUntil(runBg(`reconcile:${entity}`, fn)); } catch {}
-      return Response.json({ mode: "reconcile", entity, status: "started (background); result in sync_state('reconcile:" + entity + "')" }, { status: 202 });
+      return Response.json({ mode: "reconcile", entity, status: "started (background)" }, { status: 202 });
     }
 
     const startPage = parseInt(url.searchParams.get("start_page") ?? "1", 10);
