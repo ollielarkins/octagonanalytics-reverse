@@ -39,6 +39,14 @@ function render(D){
   const gen = new Date(D.generated_at).toLocaleString("en-GB",{dateStyle:"medium",timeStyle:"short"});
   add('<h1>Octagon Recruitment Analytics — live</h1><p>Live from RecruitCRM. No styling yet — plain data + monochrome charts. Per-consultant figures attributed by job owner. 2026 is the reliable logging window. <b>Data as of '+gen+'</b> · re-fetches every 5 min.</p>');
 
+  // Sync-health banner: never let stale data look fresh. Driven by D.health.
+  (function(){ const h=D.health; if(!h) return;
+    const bad=(h.entities||[]).filter(e=>e.status!=="ok");
+    if(h.overall==="ok"){ add('<p><small>&#9679; Sync healthy — all feeds fresh.</small></p>'); return; }
+    const icon=h.overall==="critical"?"&#128308; SYNC ALERT":"&#128993; Sync warning";
+    add('<p><b>'+icon+'</b> — the numbers below may be stale:<br>'
+      + bad.map(e=>'&nbsp;&nbsp;• '+e.entity+': '+e.reason).join("<br>")+'</p>'); })();
+
   const k = D.kpis;
   add('<h2>1. Firm overview (KPIs)</h2><table border="1" cellpadding="6" cellspacing="0"><tr><th align="left">Metric</th><th align="left">Value</th><th align="left">Note</th></tr>'
     + trow("CVs sent",num(k.cv_2026),"2026 YTD") + trow("Placements",num(k.placed_2026),"2026 YTD")
