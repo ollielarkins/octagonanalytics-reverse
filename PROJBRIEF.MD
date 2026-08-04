@@ -76,14 +76,26 @@ Claude reads and writes through a **mediated layer** (a custom API / scoped acce
 
 ## 5. Current state of the build
 
-The project was started but is early-stage. As of this brief:
+> **Note (2026-08-04):** the sections below (§7–§13) describe the *original* early-stage
+> findings and plan. They are kept for context. For the **as-built** state — what is actually
+> deployed and running today — see [`README.md`](README.md). Summary of where we are:
 
-- A Supabase project exists — **"Reporting for CRM"** (`eu-west-1`, project ref `kzcmssldvtjnbwwunuwm`). It was found **paused** (free tier) and restored for inspection.
-- It contains **8 tables** but **no data** — the schema is scaffolded, nothing has been synced yet.
-- **No sync pipeline, edge functions, or migration history exist yet.** The schema appears to have been built by hand.
-- An **audit of the schema** surfaced issues to fix before data lands (see §7 and §8).
+- The Supabase project **"Reporting for CRM"** (`eu-west-1`, `kzcmssldvtjnbwwunuwm`) is live,
+  on a non-pausing tier, with a **version-controlled migration history** (0000–0014).
+- The schema audit's issues are **fixed** (RLS + policies on every table, `jobs.slug`, consultant
+  identity unified on `recruitcrm_id`, stage-id lookup, audit table).
+- A **live sync** (edge function `recruitcrm-sync`) mirrors RecruitCRM into Supabase:
+  full backfill done, incremental every 2 min, nightly soft-delete reconcile, per-candidate
+  hiring-stage history. Live scale: 21 consultants, 4,582 clients, 5,968 jobs, ~9,515 candidates,
+  16,536 stage events.
+- A **canonical semantic layer** (15 `security_invoker` views) drives both surfaces.
+- **Dashboards** (M4): a public JSON API + a static page, plus a session-start hook that opens
+  each new chat with the live dashboard.
+- **Claude interface**: the `octagon-mcp` connector exposes read tools (`get_dashboard`,
+  `funnel_report`) and **gated** write tools (`update_hiring_stage`, `assign_candidate`).
+  Write-back is fail-safe **disabled** until an `OCTAGON_WRITE_KEY` secret is set.
 
-Being empty is an advantage: the data model can be corrected now at near-zero cost, before months of data make changes painful.
+Milestones **M0–M5 are done; M6 is built but gated off; M7 (rollout/hardening) is partial.**
 
 ---
 

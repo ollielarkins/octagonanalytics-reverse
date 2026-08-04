@@ -6,6 +6,24 @@
 
 ---
 
+## Status (as of 2026-08-04)
+
+| Milestone | Status |
+|---|---|
+| **M0** Foundations & access | ✅ Done |
+| **M1** Data model | ✅ Done — migrations 0000–0001 |
+| **M2** Ingestion / sync | ✅ Done — backfill + incremental (2 min) + reconcile + history |
+| **M3** Semantic layer | ✅ Done — 15 canonical views, 0 security lints |
+| **M4** Dashboards | ✅ Done — JSON API + static page + session-start auto-render |
+| **M5** Claude query layer | ✅ Done — `get_dashboard`, `funnel_report` via `octagon-mcp` |
+| **M6** Claude action layer | ⚠️ Built but **gated off** — needs `OCTAGON_WRITE_KEY` + one live write test |
+| **M7** Hardening & rollout | ◻️ Partial — connector rollout + throwaway-function cleanup outstanding |
+
+See [`README.md`](README.md) for the as-built detail. The milestone descriptions below are the
+original plan, kept for reference.
+
+---
+
 ## Milestone 0 — Foundations & Access
 
 *Purpose: remove the blockers that would stall every later milestone. Nothing gets built on sand.*

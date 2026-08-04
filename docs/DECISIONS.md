@@ -12,7 +12,7 @@ Running log of the decisions behind the schema and semantic layer. Each entry: t
 - `deal_stage_events` is deal-level, not candidate-level, and had RLS off — it's demoted to deal-stage-history only.
 - `daily_activity` is a pre-aggregated import of **unconfirmed provenance** (open question in the brief). It is kept as a *separate* "reported activity" fact and surfaced in its own view, clearly labelled as a different source — never summed together with event-derived counts.
 
-**Status:** Proposed — please confirm. (This is the main judgement call in the rebuild.)
+**Status:** **Confirmed as-built.** `candidate_stage_events` is now populated by the live sync's `history` mode (hiring-stage history per candidate, mapped via `stage_lookup`), and is the sole source for every funnel/consultant metric and for `funnel_report` (0014). Pre-2026 history is sparse in RecruitCRM, so reporting defaults to a 2026-onward window — see [D8].
 
 ---
 
@@ -22,7 +22,7 @@ Running log of the decisions behind the schema and semantic layer. Each entry: t
 
 **Why.** The legacy views mixed the two (one funnel view keyed off `stage_name`, others off `stage_metric`), so they silently diverged. Picking one canonical key removes that class of bug. RecruitCRM uses integer stage IDs, so a lookup is needed anyway.
 
-**Status:** Proposed.
+**Status:** **As-built.** `stage_lookup` maps confirmed RecruitCRM stage ids → `stage_metric` (0008); the sync's `history` mode and all views key off `stage_metric`.
 
 ---
 
@@ -34,7 +34,7 @@ Running log of the decisions behind the schema and semantic layer. Each entry: t
 
 **Open question:** who are Laura/Matthew/Aimee and why excluded (directors/managers not measured on consultant productivity)? Confirm the list is correct and complete before data lands.
 
-**Status:** Proposed.
+**Status:** Superseded in practice. With owner attribution ([D9]) and a 2026-onward window ([D8]), the funnel is driven by who *owns* jobs; non-producing directors simply own few/no jobs and fall out naturally, and leavers are handled as `active = false` rather than a hardcoded name list. The `reporting_exclusions` table remains available as an override but is not the primary mechanism.
 
 ---
 
@@ -44,7 +44,7 @@ Running log of the decisions behind the schema and semantic layer. Each entry: t
 
 **Why.** Mixing the two silently double-counts or disagrees. Keep the funnel internally consistent (all from one source), and treat `placements` as the authoritative money view, then reconcile.
 
-**Status:** Proposed — revisit once real data exists.
+**Status:** **As-built** for the funnel — the canonical "placement" is the event-stream `placed` count, and write-back sets `create_placement=true` when moving a candidate to Placed (so the two stay coupled at source). `placements`-table fee reconciliation remains a follow-up.
 
 ---
 
@@ -77,7 +77,7 @@ Running log of the decisions behind the schema and semantic layer. Each entry: t
 
 **Why.** Consultant was referenced three ways (UUID FK, bigint id, free-text name); "…by consultant/team" answers would otherwise disagree. One canonical key fixes it.
 
-**Status:** Proposed. No destructive schema change needed now (recruitcrm_id already unique); enforced in the sync + view layer.
+**Status:** **As-built.** The sync resolves consultant identity on `recruitcrm_id`; views join on it; owner attribution ([D9]) rests on this key.
 
 ---
 
@@ -91,4 +91,23 @@ Running log of the decisions behind the schema and semantic layer. Each entry: t
 - A live mirror guarantees `Supabase == RecruitCRM`; it does **not** guarantee `Supabase == spreadsheet`. That's expected and acceptable under SSOT.
 - The chosen canonical funnel source (D1) must be whatever RecruitCRM actually feeds once the sync is live; revisit D1 against real synced data (candidate_stage_events had almost no pre-2026 history in the stale import).
 
-**Status:** **Decided by the user 2026-08-03.** Blocked only on a valid RecruitCRM API token to build/run the sync (current token 401).
+**Status:** **Decided by the user 2026-08-03; now realised.** The live sync (M2) is running; the mirror equals RecruitCRM to ~2-min freshness. The leg-A finding confirmed the sheet was a *manual tally the CRM never contained*: ratios agree (~0.21–0.36) but absolute counts diverge (Jan 2025: mirror 107 vs sheet 223) because pre-2026 activity was never logged. The platform reports the CRM figure; the divergence is a data-entry/process gap, exactly as this decision anticipated.
+
+---
+
+## D9 — Per-consultant attribution is by job owner, not `updated_by`
+
+**Decision.** Every per-consultant metric credits the **owning consultant of the job** the
+event belongs to (`jobs.consultant_id`), **not** the user who logged the event
+(`updated_by`). `funnel_report` (0014) and the dashboard's consultant table both use owner
+attribution.
+
+**Why.** RecruitCRM's `updated_by` records whoever *clicked*, which includes admins, coordinators,
+and colleagues moving stages on each other's candidates. Attributing by `updated_by` produced
+**impossible funnels** — one consultant credited with 62 CVs but 289 first interviews. Job owner
+is the stable "whose desk is this" key and matches how the firm thinks about performance.
+
+**Consequence.** `updated_by` is still captured and set on **write-back** (so RecruitCRM's own
+activity log attributes the acting consultant), but it is never the reporting attribution key.
+
+**Status:** **Decided & as-built 2026-08-04.**
