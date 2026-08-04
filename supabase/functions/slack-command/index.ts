@@ -1,15 +1,20 @@
 // slack-command — Slack slash-command endpoint for /dashboard.
-// One-way webhooks can't answer commands, so this is a request endpoint Slack POSTs
-// to. It verifies Slack's signing secret (only your workspace can call it), then
-// returns the live dashboard (same data Claude shows), visible to the whole channel.
+//
+// Slack enforces a hard 3-second reply on slash commands. Cold start + a DB call can
+// exceed that, so we ACK immediately (empty 200) and deliver the dashboard a moment
+// later via Slack's response_url. No heavy imports → minimal cold start.
+//
+// Security: we verify Slack's signing secret BEFORE trusting anything — including the
+// response_url in the body (which we POST to), so a forged request can't make us send
+// data to an attacker's URL.
 //
 // Setup (admin):
 //   1. Supabase secret: SLACK_SIGNING_SECRET = your Slack app's Signing Secret.
 //   2. Slack app -> Slash Commands -> /dashboard, Request URL =
 //      https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/slack-command
-// Deployed verify_jwt=false (Slack can't send a Supabase JWT); auth is the Slack signature.
-import { createClient } from "jsr:@supabase/supabase-js@2";
-const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+// Deployed verify_jwt=false; auth is the Slack signature.
+
+const DASHBOARD_DATA_URL = "https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/dashboard-data";
 
 async function hmacHex(secret: string, msg: string): Promise<string> {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -21,7 +26,7 @@ function timingEq(a: string, b: string): boolean {
   let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return r === 0;
 }
-const gbp = (n: any) => "£" + Math.round(Number(n) || 0).toLocaleString("en-GB");
+const gbp = (n: any) => "£" + (Math.round(Number(n) || 0)).toLocaleString("en-GB");
 const num = (n: any) => (Number(n) || 0).toLocaleString("en-GB");
 
 function formatDashboard(D: any): string {
@@ -29,9 +34,7 @@ function formatDashboard(D: any): string {
   const conv = k.cv_2026 ? ((k.placed_2026 / k.cv_2026) * 100).toFixed(1) + "%" : "—";
   const gen = String(D.generated_at ?? "").slice(0, 16).replace("T", " ");
   const top = (D.consultants ?? []).slice(0, 3).map((c: any) => `${c.name} ${c.cv_sent}`).join(" · ") || "—";
-  const stale = h.overall && h.overall !== "ok"
-    ? `  :warning: *sync ${h.overall}* — figures may be stale`
-    : "";
+  const stale = h.overall && h.overall !== "ok" ? `  :warning: *sync ${h.overall}* — figures may be stale` : "";
   return [
     `*Octagon dashboard* — as of ${gen} UTC · sync: ${h.overall ?? "?"}${stale}`,
     `*KPIs (2026):* ${num(k.cv_2026)} CVs · ${num(k.placed_2026)} placed (${conv} CV→placed) · ${num(k.candidates)} candidates · ${num(k.open_jobs)}/${num(k.jobs)} open jobs · ${num(k.clients)} clients · ${num(k.consultants)} consultants`,
@@ -41,12 +44,23 @@ function formatDashboard(D: any): string {
   ].join("\n");
 }
 
+async function deliver(responseUrl: string) {
+  let text: string;
+  try {
+    const r = await fetch(DASHBOARD_DATA_URL, { cache: "no-store" });
+    text = formatDashboard(await r.json());
+  } catch (e) {
+    text = "Couldn't load the dashboard right now: " + String(e).slice(0, 120);
+  }
+  await fetch(responseUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ response_type: "in_channel", text }) });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "GET") return new Response(JSON.stringify({ name: "octagon-slack-command", ok: true }), { headers: { "Content-Type": "application/json" } });
   if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
 
   const secret = Deno.env.get("SLACK_SIGNING_SECRET");
-  if (!secret) return new Response(JSON.stringify({ text: "Slack command endpoint isn't configured: SLACK_SIGNING_SECRET is not set." }), { status: 200, headers: { "Content-Type": "application/json" } });
+  if (!secret) return new Response(JSON.stringify({ response_type: "ephemeral", text: "Slack command isn't configured yet: SLACK_SIGNING_SECRET is not set in Supabase." }), { status: 200, headers: { "Content-Type": "application/json" } });
 
   const raw = await req.text();
   const ts = req.headers.get("x-slack-request-timestamp") ?? "";
@@ -55,9 +69,9 @@ Deno.serve(async (req) => {
   const expected = "v0=" + await hmacHex(secret, `v0:${ts}:${raw}`);
   if (!timingEq(expected, sig)) return new Response("bad signature", { status: 401 });
 
-  // Verified as a genuine Slack request. Return the dashboard.
-  const { data, error } = await db.rpc("dashboard_json");
-  const text = error ? `Couldn't load the dashboard: ${error.message}` : formatDashboard(data);
-  // in_channel = visible to everyone in the channel (not just the person who ran it).
-  return new Response(JSON.stringify({ response_type: "in_channel", text }), { status: 200, headers: { "Content-Type": "application/json" } });
+  // Verified genuine Slack request. Ack now; deliver the dashboard via response_url.
+  const params = new URLSearchParams(raw);
+  const responseUrl = params.get("response_url");
+  if (responseUrl) { try { (globalThis as any).EdgeRuntime?.waitUntil(deliver(responseUrl)); } catch { deliver(responseUrl); } }
+  return new Response(JSON.stringify({ response_type: "in_channel", text: "Fetching the live dashboard…" }), { status: 200, headers: { "Content-Type": "application/json" } });
 });
