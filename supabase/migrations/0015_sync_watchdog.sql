@@ -77,8 +77,8 @@ as $function$
   );
 $function$;
 
-revoke all on function public.sync_health() from public, anon;
-grant execute on function public.sync_health() to service_role, authenticated;
+revoke all on function public.sync_health() from public, anon, authenticated;
+grant execute on function public.sync_health() to service_role;
 
 -- ---------------------------------------------------------------------------
 -- 2. Config + alert-log tables

@@ -94,21 +94,36 @@ PROJBRIEF.MD, ROADMAP.MD
 - Data API: `https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/dashboard-data`
 - MCP connector: `https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp`
 
-### MCP tools (`octagon-mcp`)
+### MCP tools (`octagon-mcp`, v3)
 
 | Tool | Kind | What it does |
 |---|---|---|
-| `get_dashboard` | read | Returns `dashboard_json()` — KPIs, funnel, monthly, per-consultant, pipeline. |
-| `funnel_report` | read | Owner-attributed funnel with conversion ratios; filter by date/consultant/team. |
+| `get_dashboard` | read | `dashboard_json()` — KPIs, funnel, monthly, per-consultant, pipeline, **sync health**. |
+| `funnel_report` | read | Owner-attributed funnel + conversion ratios; filter by date/consultant/team. |
+| `client_report` | read | Per-client (account) activity, open/total jobs, CV→placed rate, ranked. |
+| `time_to_fill` | read | Days from job open → first placement: firm avg/median + per-consultant. |
+| `cold_jobs` | read | Open roles with no candidate activity in N days (default 14). No PII. |
+| `placements_report` | read | Placed count (event-stream) + Won revenue, by consultant/client. |
+| `consultant_leaderboard` | read | Consultants ranked by placed / cv_sent / first_interview. |
 | `update_hiring_stage` | **write** | Moves a candidate's hiring stage in RecruitCRM (`create_placement` on Placed). |
 | `assign_candidate` | **write** | Assigns a candidate to a job in RecruitCRM. |
 
-**Write safety.** Writes are **fail-safe disabled** until the `OCTAGON_WRITE_KEY` secret is
-set. Every write is: two-phase **preview → confirm**; **optimistic concurrency**
-(`expected_status_id` — refuses if the live stage changed since preview); an **audit_log**
-insert (who/what/when/before→after); then a **write-through** re-pull of `/history` so the
-mirror updates within seconds. `updated_by` is set to the acting consultant's RecruitCRM id
-so the action is attributed in RecruitCRM's own activity log.
+**MCP prompts** (one-click templates via `prompts/list`): `weekly_team_review`,
+`my_cold_roles` (arg: consultant), `client_health` (arg: client), `month_in_review`
+(arg: month `YYYY-MM`). Each expands into an instruction that drives the read tools above.
+
+**Authentication (per-user bearer tokens).** *Every* tool call must present a valid token
+(`Authorization: Bearer <t>`, `x-octagon-token` header, or `auth_token` arg). Tokens map to a
+consultant via `mcp_tokens` and are stored only as SHA-256 hashes. This closes read access to
+the public and — crucially — the **acting identity is derived from the token server-side**, so
+it can't be spoofed by a tool argument (protecting the audit trail). `can_write` is per token,
+so write access is granted/revoked per person.
+
+**Write safety.** A write requires a token with `can_write=true`. Every write is: two-phase
+**preview → confirm**; **optimistic concurrency** (`expected_status_id` — refuses if the live
+stage changed since preview); an **audit_log** insert (who/what/when/before→after); then a
+**write-through** re-pull of `/history` so the mirror updates within seconds. `updated_by` is
+the token's consultant id, so the action is attributed in RecruitCRM's own activity log.
 
 ---
 
@@ -117,7 +132,10 @@ so the action is attributed in RecruitCRM's own activity log.
 | Secret | Used by | Notes |
 |---|---|---|
 | `RECRUIT_CRM_API_TOKEN` | `recruitcrm-sync`, `octagon-mcp` | Account-level RecruitCRM Open API token (Business+ plan, Account-Owner-only). ~120 chars. **Never paste into chat.** |
-| `OCTAGON_WRITE_KEY` | `octagon-mcp` | Enables write-back. Until set, writes refuse. The connector must send it as header `x-octagon-key` (or `auth_key` arg). |
+
+Access to the connector is by **per-user token** (table `mcp_tokens`), not a server secret —
+see *Access tokens* below. (The old `OCTAGON_WRITE_KEY` shared-secret gate was replaced by
+per-user tokens in v3 and is no longer used.)
 
 `.gitignore` excludes `.env`, `*.key`, and `secrets/`.
 
@@ -144,12 +162,16 @@ Applied in order (`supabase/migrations/`):
 | 0012 | schedule_history_backfill | (temporary backfill cron — since unscheduled) |
 | 0013 | dashboard_json_function | `dashboard_json()` — all dashboard aggregates as one jsonb |
 | 0014 | funnel_report | `funnel_report()` — owner-attributed funnel behind the MCP read tool |
+| 0015 | sync_watchdog | `sync_health()` classifier; `check_sync_health()` watchdog + `sync_alerts`/`app_settings`; embeds health in `dashboard_json()`; 5-min cron |
+| 0016 | mcp_read_functions | `client_report`, `time_to_fill`, `cold_jobs`, `placements_report`, `consultant_leaderboard` |
+| 0017 | mcp_auth | `mcp_tokens` (hashed per-user tokens) + `mint_mcp_token()` admin helper |
 
 ### Cron schedule
 
 | When | Job |
 |---|---|
 | every 2 min | incremental sync (RecruitCRM → mirror) |
+| every 5 min | sync-health watchdog (`check_sync_health`) |
 | 03:00 / 03:10 / 03:20 nightly | soft-delete reconcile (consultants / clients / jobs) |
 
 Freshness: edits show in the mirror within ~2 min (or seconds after a Claude write-through).
@@ -185,16 +207,33 @@ Hard deletes propagate at the nightly reconcile.
 curl -X POST "https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/recruitcrm-sync?mode=incremental"
 ```
 
-**Enable write-back** (admin, one-time):
-1. Set the Supabase secret `OCTAGON_WRITE_KEY` to a strong random string.
-2. Configure the claude.ai connector to send it — header `x-octagon-key: <key>`.
-3. Test one real write on a **safe** candidate/job first.
+**Access tokens** (admin, per user). Mint in the Supabase SQL editor — the plaintext is
+returned once and only its hash is stored:
+```sql
+-- read-only token for a recruiter (find the id via GET /v1/users or the consultants table)
+select public.mint_mcp_token(<recruitcrm_user_id>, 'Keelan – read', false);
+-- write-enabled token
+select public.mint_mcp_token(<recruitcrm_user_id>, 'Keelan – write', true);
+```
+Give each recruiter their token to paste into the connector's auth field. Revoke with
+`update mcp_tokens set active=false where label='…';`.
+
+**Enable write-back** (admin): mint a token with `can_write=true` (above) and test one real
+write on a **safe** candidate/job first. There is no longer a global write switch — write
+access is per token.
+
+**Sync alerts** (admin, optional): to get pinged on a sync stall, set a Slack/Discord webhook:
+```sql
+update app_settings set value='https://hooks.slack.com/…' where key='alert_webhook_url';
+```
+The 5-min watchdog posts on critical/recovery. Without a webhook it still logs to `sync_alerts`
+and the dashboard shows a staleness banner.
 
 **Roll the connector out to the team** (admin, in claude.ai):
-1. Add the `octagon-mcp` URL as an **org connector** (Settings → Connectors).
+1. Add the `octagon-mcp` URL as an **org connector** (Settings → Connectors); each member
+   authorizes it with their own token.
 2. Create a **shared Project** whose instructions say *"at the start of each chat call
    `get_dashboard` and present it."*
-3. Members may need to authorize the connector once (Team plan).
 
 ---
 
@@ -207,6 +246,6 @@ curl -X POST "https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/recruitcrm-s
 | M2 Ingestion / sync | ✅ Done (backfill + incremental + reconcile + history) |
 | M3 Semantic layer | ✅ Done (15 canonical views, 0 security lints) |
 | M4 Dashboards | ✅ Done (JSON API + static page + session-start auto-render) |
-| M5 Claude query layer | ✅ Built (`get_dashboard`, `funnel_report`) |
-| M6 Claude action layer | ⚠️ Built but **gated off** — needs `OCTAGON_WRITE_KEY` + one live write test |
-| M7 Hardening & rollout | ◻️ Partial — connector rollout + throwaway-function cleanup outstanding |
+| M5 Claude query layer | ✅ Done — 7 read tools + 4 prompts, per-user auth |
+| M6 Claude action layer | ⚠️ Built + auth'd (per-user write tokens) — one live write test still not run |
+| M7 Hardening & rollout | ◻️ Partial — ✅ per-user auth, ✅ sync monitoring/alerts; connector rollout + throwaway-function cleanup outstanding |
