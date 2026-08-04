@@ -16,7 +16,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.0.0" };
+const SERVER = { name: "octagon-analytics", version: "3.1.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -54,6 +54,10 @@ async function refreshCandidate(candidate: string) {
   return rows.length;
 }
 async function audit(entry: any) { try { await db.from("audit_log").insert(entry); } catch (_e) {} }
+// Fire-and-forget usage telemetry (no PII args) — feeds admin_digest()/the Slack bot.
+function logCall(actorId: any, tool: string, ok = true) {
+  db.from("mcp_call_log").insert({ consultant_recruitcrm_id: actorId ?? null, tool, ok }).then(() => {}, () => {});
+}
 
 // ---- Auth ------------------------------------------------------------------
 async function sha256hex(s: string): Promise<string> {
@@ -134,6 +138,7 @@ async function callTool(name: string, args: any, req: Request) {
   const auth = await authenticate(req, args);
   if (!auth.ok) return toolText({ error: auth.reason });
   const actor = auth.actor;
+  logCall(actor.id, name);
 
   if (name === "get_dashboard") { const { data, error } = await db.rpc("dashboard_json"); return toolText(error ? { error: error.message } : data); }
   if (name === "funnel_report") {

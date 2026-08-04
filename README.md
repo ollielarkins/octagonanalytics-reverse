@@ -87,6 +87,7 @@ PROJBRIEF.MD, ROADMAP.MD
 | `dashboard-data` | false | Public JSON API — `dashboard_json()` aggregates only, no PII. Feeds `web/dashboard.html`. |
 | `octagon-mcp` | false | Remote MCP server (Streamable HTTP / JSON-RPC 2.0). Tools below. |
 | `recruitcrm-probe` | true | **Throwaway** diagnostic, locked + gutted. Safe to delete. |
+| `recruitcrm-discover` | true | **Throwaway** discovery probe (pipelines / BD fields), locked + gutted. Safe to delete. |
 | `dashboard` | false | **Defunct** early attempt (Supabase can't serve HTML — see below). Safe to delete. |
 | `storage-upload` | true | **Throwaway**, locked. Safe to delete. |
 
@@ -165,6 +166,9 @@ Applied in order (`supabase/migrations/`):
 | 0015 | sync_watchdog | `sync_health()` classifier; `check_sync_health()` watchdog + `sync_alerts`/`app_settings`; embeds health in `dashboard_json()`; 5-min cron |
 | 0016 | mcp_read_functions | `client_report`, `time_to_fill`, `cold_jobs`, `placements_report`, `consultant_leaderboard` |
 | 0017 | mcp_auth | `mcp_tokens` (hashed per-user tokens) + `mint_mcp_token()` admin helper |
+| 0018 | stage_lookup_additions | Map the two real-but-dropped stages `3rd Interview` (394846) + `Shortlist` (511685) |
+| 0019 | admin_telemetry | `mcp_call_log` + `admin_digest()` + `post_admin_digest()` (Slack) + daily cron |
+| 0020 | fix_cold_jobs_count | Bugfix: `cold_jobs.cold_count` counted the limited set, not the true total |
 
 ### Cron schedule
 
@@ -172,6 +176,7 @@ Applied in order (`supabase/migrations/`):
 |---|---|
 | every 2 min | incremental sync (RecruitCRM → mirror) |
 | every 5 min | sync-health watchdog (`check_sync_health`) |
+| 08:00 daily | admin digest to Slack (`post_admin_digest`) |
 | 03:00 / 03:10 / 03:20 nightly | soft-delete reconcile (consultants / clients / jobs) |
 
 Freshness: edits show in the mirror within ~2 min (or seconds after a Claude write-through).
@@ -196,6 +201,17 @@ Hard deletes propagate at the nightly reconcile.
    static page** (`web/dashboard.html`) — not an HTML edge function.
 4. **~39% of jobs have an unresolved `client_id`** — they reference companies absent from the
    `/companies` listing (likely archived). Known gap, low impact on funnel metrics.
+5. **Three hiring pipelines, and no "Internal Interview" stage** (discovered 2026-08-04). RecruitCRM
+   has `Master`, `Calnex`, and `Executive` pipelines. The real stage set is Assigned, Applied,
+   Shortlist, CV Sent, Interview Request, 1st/2nd/**3rd** Interview, Rejected-Client/Consultant,
+   Offered, Placed. "Internal Interview" is **not** a stage. `3rd Interview` (394846) and `Shortlist`
+   (511685) were unmapped and being dropped — now mapped (0018); a history resync is needed to
+   backfill their past events.
+6. **The client/BD funnel lives in the company "Company Status" custom field**, not the contact
+   pipeline (only 15 contacts exist). 3,072 / 4,584 companies are classified: Prospect 2,806,
+   Client 170, Passive 60, Blocklisted 26, Engaged 6, Do-not-contact 4. There is **no "Lead"**
+   status, and "Pitched candidates" / "Job order form complete" aren't captured there — building
+   a BD funnel means syncing this custom field and deciding how to represent those three.
 
 ---
 
@@ -228,6 +244,15 @@ update app_settings set value='https://hooks.slack.com/…' where key='alert_web
 ```
 The 5-min watchdog posts on critical/recovery. Without a webhook it still logs to `sync_alerts`
 and the dashboard shows a staleness banner.
+
+**Admin digest** (admin, optional): a daily 08:00 Slack summary of connector usage
+(who's using it, top tools, calls/errors), write actions, active tokens, sync health, and a
+business pulse (CVs / placements / cold roles). Set the webhook:
+```sql
+update app_settings set value='https://hooks.slack.com/…' where key='admin_webhook_url';
+```
+Usage comes from `mcp_call_log` (every tool call is logged — no PII). Claude *plan* usage
+(seats/spend) is Anthropic-side and not wired in yet — see the note in `0019_admin_telemetry.sql`.
 
 **Roll the connector out to the team** (admin, in claude.ai):
 1. Add the `octagon-mcp` URL as an **org connector** (Settings → Connectors); each member
