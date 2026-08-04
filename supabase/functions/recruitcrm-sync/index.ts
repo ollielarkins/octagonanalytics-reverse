@@ -21,8 +21,15 @@ const mapConsultant = (u: any) => ({
   team: Array.isArray(u.teams) && u.teams.length ? (u.teams[0]?.name ?? String(u.teams[0])) : null,
   active: typeof u.status === "string" ? u.status.toLowerCase() === "active" : true,
 });
+function customField(obj: any, nameRe: RegExp) {
+  const arr = Array.isArray(obj?.custom_fields) ? obj.custom_fields : [];
+  const f = arr.find((x: any) => nameRe.test(String(x?.field_name ?? x?.label ?? x?.name ?? "")));
+  const v = f ? (f.value ?? f.field_value ?? f.val ?? null) : null;
+  return (v != null && String(v).trim() !== "") ? String(v).trim() : null;
+}
 const mapClient = (c: any) => ({
   recruitcrm_id: c.id, company_name: c.company_name ?? null, company_slug: c.slug ?? null, country: c.country ?? null, active: true,
+  company_status: customField(c, /company status/i),
 });
 const mapCandidate = (c: any) => ({
   recruitcrm_id: c.id, slug: c.slug ?? null, first_name: c.first_name ?? null, last_name: c.last_name ?? null,
