@@ -106,6 +106,7 @@ PROJBRIEF.MD, ROADMAP.MD
 | `cold_jobs` | read | Open roles with no candidate activity in N days (default 14). No PII. |
 | `placements_report` | read | Placed count (event-stream) + Won revenue, by consultant/client. |
 | `consultant_leaderboard` | read | Consultants ranked by placed / cv_sent / first_interview. |
+| `bd_report` | read | Client/BD funnel — companies by "Company Status" (Prospect / Client / …). |
 | `update_hiring_stage` | **write** | Moves a candidate's hiring stage in RecruitCRM (`create_placement` on Placed). |
 | `assign_candidate` | **write** | Assigns a candidate to a job in RecruitCRM. |
 
@@ -169,6 +170,8 @@ Applied in order (`supabase/migrations/`):
 | 0018 | stage_lookup_additions | Map the two real-but-dropped stages `3rd Interview` (394846) + `Shortlist` (511685) |
 | 0019 | admin_telemetry | `mcp_call_log` + `admin_digest()` + `post_admin_digest()` (Slack) + daily cron |
 | 0020 | fix_cold_jobs_count | Bugfix: `cold_jobs.cold_count` counted the limited set, not the true total |
+| 0021 | third_interview_in_funnel | Surface `3rd Interview` (= "Internal Interview") in `funnel_report` + `dashboard_json` |
+| 0022 | bd_funnel | `clients.company_status` + `bd_report()` (client/BD funnel from the company "Company Status" field) |
 
 ### Cron schedule
 
@@ -176,6 +179,7 @@ Applied in order (`supabase/migrations/`):
 |---|---|
 | every 2 min | incremental sync (RecruitCRM → mirror) |
 | every 5 min | sync-health watchdog (`check_sync_health`) |
+| every 1 min | **temporary** history resync (`history-resync`) — backfills 3rd Interview + Shortlist; self-completes then can be unscheduled |
 | 08:00 daily | admin digest to Slack (`post_admin_digest`) |
 | 03:00 / 03:10 / 03:20 nightly | soft-delete reconcile (consultants / clients / jobs) |
 

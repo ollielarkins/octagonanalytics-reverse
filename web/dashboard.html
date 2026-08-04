@@ -59,7 +59,7 @@ function render(D){
     + trow("CVs sent (all-time)",num(k.cv_all),"incl. under-logged 2025")
     + trow("Placements (all-time)",num(k.placed_all),"—") + '</table>');
 
-  const fo = [["CV Sent","cv_sent"],["Interview Request","interview_request"],["1st Interview","first_interview"],["2nd Interview","second_interview"],["Offered","offered"],["Placed","placed"]];
+  const fo = [["CV Sent","cv_sent"],["Interview Request","interview_request"],["1st Interview","first_interview"],["2nd Interview","second_interview"],["3rd Interview","third_interview"],["Offered","offered"],["Placed","placed"]];
   const cv = D.funnel.cv_sent || 0;
   add('<h2>2. Firm-wide funnel — 2026 YTD</h2>');
   (function(){ const W=560,rh=30,lab=130,bm=W-lab-90,max=cv||1,H=fo.length*rh+10; const s=svgEl(W,H);
@@ -76,8 +76,8 @@ function render(D){
     [0,5,11,15,m.length-1].forEach(i=>{ if(m[i]) s.appendChild(TX(x(i),H-10,m[i].month.slice(2),10,"middle",0.6)); });
     function ln(key,dash,label){ const dp=m.map((d,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(d[key]).toFixed(1)).join(" "); const p=E("path",{d:dp,fill:"none",stroke:"currentColor","stroke-width":1.8}); if(dash)p.setAttribute("stroke-dasharray",dash); s.appendChild(p); s.appendChild(TX(x(m.length-1)+5,y(m[m.length-1][key])+3,label,10,null,0.8)); }
     ln("cv_sent","","CV"); ln("interview_request","6 3","IR"); ln("first_interview","2 3","1st"); root.appendChild(s); })();
-  add('<table border="1" cellpadding="6" cellspacing="0"><tr><th align="left">Month</th><th>CV Sent</th><th>Interview Req</th><th>1st Interview</th><th>2nd Interview</th><th>Offered</th><th>Placed</th></tr>'
-    + D.monthly.map(d=>'<tr><td>'+d.month+'</td><td align="right">'+d.cv_sent+'</td><td align="right">'+d.interview_request+'</td><td align="right">'+d.first_interview+'</td><td align="right">'+d.second_interview+'</td><td align="right">'+d.offered+'</td><td align="right">'+d.placed+'</td></tr>').join("")+'</table>');
+  add('<table border="1" cellpadding="6" cellspacing="0"><tr><th align="left">Month</th><th>CV Sent</th><th>Interview Req</th><th>1st Interview</th><th>2nd Interview</th><th>3rd Interview</th><th>Offered</th><th>Placed</th></tr>'
+    + D.monthly.map(d=>'<tr><td>'+d.month+'</td><td align="right">'+d.cv_sent+'</td><td align="right">'+d.interview_request+'</td><td align="right">'+d.first_interview+'</td><td align="right">'+d.second_interview+'</td><td align="right">'+(d.third_interview||0)+'</td><td align="right">'+d.offered+'</td><td align="right">'+d.placed+'</td></tr>').join("")+'</table>');
 
   add('<h2>4. Consultant performance — 2026 (attributed by job owner)</h2><p><small>Chart: CVs sent per consultant with CV→1st-Interview % labelled.</small></p>');
   const cs = D.consultants;
