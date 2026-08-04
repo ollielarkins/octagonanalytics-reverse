@@ -4,6 +4,15 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Octagon Recruitment Analytics — live</title>
+<style>
+  /* Legibility only (not design): guarantee contrast in light AND dark mode.
+     Canvas/CanvasText are system colors that always contrast; charts use
+     currentColor so they inherit CanvasText and stay visible either way. */
+  :root { color-scheme: light dark; }
+  body { background: Canvas; color: CanvasText; }
+  table { border-color: currentColor; }
+  td, th { border: 1px solid currentColor; }
+</style>
 </head>
 <body>
 <div id="root">Loading live data…</div>
