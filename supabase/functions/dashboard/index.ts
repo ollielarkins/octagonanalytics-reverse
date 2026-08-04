@@ -1,0 +1,67 @@
+// dashboard — public live dashboard (verify_jwt=false). Renders aggregate data
+// (no PII) server-side on every request from public.dashboard_json(); auto-refresh
+// every 5 min. "Open with the link" — the function URL is the shareable link.
+// Deliberately public per the user's decision; exposes staff names + ratios, no PII.
+// ASCII-only source (HTML entities + \u escapes) to avoid charset issues.
+import { createClient } from "jsr:@supabase/supabase-js@2";
+const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+
+function renderClient(D: any) {
+  const NS = "http://www.w3.org/2000/svg";
+  const root = document.getElementById("root")!;
+  const num = (n: any) => Number(n).toLocaleString("en-GB");
+  const gbp = (n: any) => "£" + Math.round(Number(n)).toLocaleString("en-GB");
+  const pct = (a: any, b: any) => b ? ((a / b * 100).toFixed(1) + "%") : "—";
+  const add = (html: string) => { const d = document.createElement("div"); d.innerHTML = html; root.appendChild(d); return d; };
+  const svgEl = (w: number, h: number) => { const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 " + w + " " + h); s.setAttribute("width", "100%"); (s as any).style.maxWidth = w + "px"; (s as any).style.height = "auto"; (s as any).style.overflow = "visible"; return s; };
+  const E = (t: string, a: any) => { const e = document.createElementNS(NS, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const TX = (x: any, y: any, s: any, size?: any, anchor?: any, op?: any) => { const t = E("text", { x, y, "font-size": size || 11, fill: "currentColor" }); if (anchor) t.setAttribute("text-anchor", anchor); if (op) t.setAttribute("fill-opacity", op); t.textContent = s; return t; };
+  const rowfn = (a: any, b: any, c: any) => '<tr><td>' + a + '</td><td>' + b + '</td><td>' + c + '</td></tr>';
+
+  const gen = new Date(D.generated_at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" });
+  add('<h1>Octagon Recruitment Analytics &mdash; live</h1><p>Live from RecruitCRM. No styling yet &mdash; plain data + monochrome charts. Per-consultant figures attributed by job owner. 2026 is the reliable logging window. <b>Generated ' + gen + '</b> &middot; auto-refreshes every 5 min.</p>');
+
+  const k = D.kpis;
+  add('<h2>1. Firm overview (KPIs)</h2><table border="1" cellpadding="6" cellspacing="0"><tr><th align="left">Metric</th><th align="left">Value</th><th align="left">Note</th></tr>'
+    + rowfn("CVs sent", num(k.cv_2026), "2026 YTD") + rowfn("Placements", num(k.placed_2026), "2026 YTD")
+    + rowfn("CV&rarr;placed conversion", pct(k.placed_2026, k.cv_2026), "firm-wide, 2026")
+    + rowfn("Candidates in funnel", num(k.candidates), "all-time")
+    + rowfn("Total jobs", num(k.jobs), num(k.open_jobs) + " open")
+    + rowfn("Clients", num(k.clients), "&mdash;") + rowfn("Consultants", num(k.consultants), "&mdash;")
+    + rowfn("Open pipeline value", gbp(k.open_pipeline), "deals not Won/Lost")
+    + rowfn("Won value", gbp(k.won), "deals marked Won")
+    + rowfn("CVs sent (all-time)", num(k.cv_all), "incl. under-logged 2025")
+    + rowfn("Placements (all-time)", num(k.placed_all), "&mdash;") + '</table>');
+
+  const fo = [["CV Sent", "cv_sent"], ["Interview Request", "interview_request"], ["1st Interview", "first_interview"], ["2nd Interview", "second_interview"], ["Offered", "offered"], ["Placed", "placed"]];
+  const cv = D.funnel.cv_sent || 0;
+  add('<h2>2. Firm-wide funnel &mdash; 2026 YTD</h2>');
+  (function () { const W = 560, rh = 30, lab = 130, bm = W - lab - 90, max = cv || 1, H = fo.length * rh + 10; const s = svgEl(W, H); fo.forEach((f, i) => { const v = D.funnel[f[1]] || 0, y = i * rh + 6; s.appendChild(TX(0, y + 18, f[0], 12)); const w = Math.max(2, v / max * bm); s.appendChild(E("rect", { x: lab, y: y + 4, width: w, height: 20, rx: 2, fill: "currentColor", "fill-opacity": (0.85 - i * 0.11).toFixed(2) })); s.appendChild(TX(lab + w + 6, y + 18, num(v) + (i ? " (" + pct(v, cv) + ")" : ""), 11, null, 0.75)); }); root.appendChild(s); })();
+  add('<table border="1" cellpadding="6" cellspacing="0"><tr><th align="left">Stage</th><th align="left">Count</th><th align="left">% of CVs</th></tr>' + fo.map((f, i) => '<tr><td>' + f[0] + '</td><td align="right">' + num(D.funnel[f[1]] || 0) + '</td><td align="right">' + (i ? pct(D.funnel[f[1]] || 0, cv) : "100.0%") + '</td></tr>').join("") + '</table>');
+
+  add('<h2>3. Monthly funnel &mdash; last 18 months (firm-wide)</h2><p><small>Lines: CV Sent (solid), Interview Request (dashed), 1st Interview (dotted).</small></p>');
+  (function () { const m = D.monthly; const W = 680, H = 240, pl = 36, pr = 54, pt = 12, pb = 28; const max = Math.max.apply(null, m.map((d: any) => d.cv_sent)) * 1.08 || 1; const x = (i: number) => pl + (W - pl - pr) * i / (m.length - 1), y = (v: number) => H - pb - (H - pt - pb) * v / max; const s = svgEl(W, H); [0, Math.round(max / 2), Math.round(max)].forEach((t) => { s.appendChild(E("line", { x1: pl, x2: W - pr, y1: y(t), y2: y(t), stroke: "currentColor", "stroke-opacity": 0.15 })); s.appendChild(TX(pl - 6, y(t) + 3, t, 10, "end", 0.6)); }); [0, 5, 11, 15, m.length - 1].forEach((i) => { if (m[i]) s.appendChild(TX(x(i), H - 10, m[i].month.slice(2), 10, "middle", 0.6)); }); function ln(key: string, dash: string, label: string) { const dp = m.map((d: any, i: number) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(d[key]).toFixed(1)).join(" "); const p = E("path", { d: dp, fill: "none", stroke: "currentColor", "stroke-width": 1.8 }); if (dash) p.setAttribute("stroke-dasharray", dash); s.appendChild(p); s.appendChild(TX(x(m.length - 1) + 5, y(m[m.length - 1][key]) + 3, label, 10, null, 0.8)); } ln("cv_sent", "", "CV"); ln("interview_request", "6 3", "IR"); ln("first_interview", "2 3", "1st"); root.appendChild(s); })();
+  add('<table border="1" cellpadding="6" cellspacing="0"><tr><th align="left">Month</th><th>CV Sent</th><th>Interview Req</th><th>1st Interview</th><th>2nd Interview</th><th>Offered</th><th>Placed</th></tr>' + D.monthly.map((d: any) => '<tr><td>' + d.month + '</td><td align="right">' + d.cv_sent + '</td><td align="right">' + d.interview_request + '</td><td align="right">' + d.first_interview + '</td><td align="right">' + d.second_interview + '</td><td align="right">' + d.offered + '</td><td align="right">' + d.placed + '</td></tr>').join("") + '</table>');
+
+  add('<h2>4. Consultant performance &mdash; 2026 (attributed by job owner)</h2><p><small>Chart: CVs sent per consultant with CV&rarr;1st-Interview % labelled.</small></p>');
+  const cs = D.consultants;
+  (function () { const W = 560, rh = 26, lab = 130, bm = W - lab - 150, max = (cs[0] ? cs[0].cv_sent : 1) || 1, H = cs.length * rh + 8; const s = svgEl(W, H); cs.forEach((r: any, i: number) => { const y = i * rh + 4; s.appendChild(TX(0, y + 16, r.name, 11)); const w = Math.max(2, r.cv_sent / max * bm); s.appendChild(E("rect", { x: lab, y: y + 3, width: w, height: 16, rx: 2, fill: "currentColor", "fill-opacity": 0.8 })); s.appendChild(TX(lab + w + 6, y + 16, r.cv_sent + "  (CV→1st " + pct(r.first_interview, r.cv_sent) + ")", 10, null, 0.75)); }); root.appendChild(s); })();
+  add('<table border="1" cellpadding="6" cellspacing="0"><tr><th align="left">Consultant</th><th>CV Sent</th><th>Interview Req</th><th>1st Interview</th><th>Offered</th><th>Placed</th><th>CV&rarr;IR</th><th>CV&rarr;1st IV</th><th>CV&rarr;Placed</th></tr>' + cs.map((r: any) => '<tr><td>' + r.name + '</td><td align="right">' + r.cv_sent + '</td><td align="right">' + r.interview_request + '</td><td align="right">' + r.first_interview + '</td><td align="right">' + r.offered + '</td><td align="right">' + r.placed + '</td><td align="right">' + pct(r.interview_request, r.cv_sent) + '</td><td align="right">' + pct(r.first_interview, r.cv_sent) + '</td><td align="right">' + pct(r.placed, r.cv_sent) + '</td></tr>').join("") + '</table>');
+
+  add('<h2>5. Deal pipeline by stage</h2>');
+  const pp = D.pipeline;
+  (function () { const W = 560, rh = 26, lab = 140, bm = W - lab - 90, max = Math.max.apply(null, pp.map((p: any) => Number(p.value))) || 1, H = pp.length * rh + 8; const s = svgEl(W, H); pp.forEach((p: any, i: number) => { const y = i * rh + 4; s.appendChild(TX(0, y + 16, p.stage, 11)); const w = Math.max(2, Number(p.value) / max * bm); s.appendChild(E("rect", { x: lab, y: y + 3, width: w, height: 16, rx: 2, fill: "currentColor", "fill-opacity": 0.7 })); s.appendChild(TX(lab + w + 6, y + 16, gbp(p.value), 10, null, 0.75)); }); root.appendChild(s); })();
+  add('<table border="1" cellpadding="6" cellspacing="0"><tr><th align="left">Deal stage</th><th>Deals</th><th>Value</th></tr>' + pp.map((p: any) => '<tr><td>' + p.stage + '</td><td align="right">' + p.deals + '</td><td align="right">' + gbp(p.value) + '</td></tr>').join("") + '</table>');
+
+  add('<p><small>Source: RecruitCRM (system of record), live via the shared semantic layer. Figures reflect hiring-stage events actually logged in RecruitCRM; the manual spreadsheet reports ~2&times; higher CV volumes never logged as events. Aggregates only &mdash; no candidate PII. Public link.</small></p>');
+}
+
+const SHELL = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="300"><title>Octagon Recruitment Analytics</title></head><body><div id="root"></div>__SCRIPT__</body></html>';
+
+Deno.serve(async () => {
+  const { data, error } = await db.rpc("dashboard_json");
+  if (error) return new Response("dashboard error: " + error.message, { status: 500, headers: { "Content-Type": "text/plain" } });
+  const script = "<scr" + "ipt>(" + renderClient.toString() + ")(" + JSON.stringify(data) + ");</scr" + "ipt>";
+  const html = SHELL.replace("__SCRIPT__", script);
+  return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } });
+});
