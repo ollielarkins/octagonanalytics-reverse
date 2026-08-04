@@ -86,6 +86,7 @@ PROJBRIEF.MD, ROADMAP.MD
 | `recruitcrm-sync` | true | Sync engine. Modes: `backfill`, `incremental`, `reconcile`, `history`. Invoked by cron / server-side. |
 | `dashboard-data` | false | Public JSON API — `dashboard_json()` aggregates only, no PII. Feeds `web/dashboard.html`. |
 | `octagon-mcp` | false | Remote MCP server (Streamable HTTP / JSON-RPC 2.0). Tools below. |
+| `slack-command` | false | Slack slash-command endpoint (`/dashboard`). Verifies the Slack signing secret; returns the live dashboard. |
 | `recruitcrm-probe` | true | **Throwaway** diagnostic, locked + gutted. Safe to delete. |
 | `recruitcrm-discover` | true | **Throwaway** discovery probe (pipelines / BD fields), locked + gutted. Safe to delete. |
 | `dashboard` | false | **Defunct** early attempt (Supabase can't serve HTML — see below). Safe to delete. |
@@ -257,6 +258,13 @@ update app_settings set value='https://hooks.slack.com/…' where key='admin_web
 ```
 Usage comes from `mcp_call_log` (every tool call is logged — no PII). Claude *plan* usage
 (seats/spend) is Anthropic-side and not wired in yet — see the note in `0019_admin_telemetry.sql`.
+
+**Slack `/dashboard` command** (admin, optional): a slash command that returns the live
+dashboard in Slack. (1) Set the Supabase secret `SLACK_SIGNING_SECRET` to your Slack app's
+Signing Secret. (2) In the Slack app → **Slash Commands** → add `/dashboard` with Request URL
+`https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/slack-command`. The endpoint verifies
+the Slack signature, so it stays fail-safe (refuses) until the secret is set. Replies are
+ephemeral (only the person who runs it sees the result).
 
 **Roll the connector out to the team** (admin, in claude.ai):
 1. Add the `octagon-mcp` URL as an **org connector** (Settings → Connectors); each member
