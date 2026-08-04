@@ -1,7 +1,7 @@
 // slack-command — Slack slash-command endpoint for /dashboard.
 // One-way webhooks can't answer commands, so this is a request endpoint Slack POSTs
 // to. It verifies Slack's signing secret (only your workspace can call it), then
-// returns the live dashboard (same data Claude shows) as an ephemeral Slack message.
+// returns the live dashboard (same data Claude shows), visible to the whole channel.
 //
 // Setup (admin):
 //   1. Supabase secret: SLACK_SIGNING_SECRET = your Slack app's Signing Secret.
@@ -58,5 +58,6 @@ Deno.serve(async (req) => {
   // Verified as a genuine Slack request. Return the dashboard.
   const { data, error } = await db.rpc("dashboard_json");
   const text = error ? `Couldn't load the dashboard: ${error.message}` : formatDashboard(data);
-  return new Response(JSON.stringify({ response_type: "ephemeral", text }), { status: 200, headers: { "Content-Type": "application/json" } });
+  // in_channel = visible to everyone in the channel (not just the person who ran it).
+  return new Response(JSON.stringify({ response_type: "in_channel", text }), { status: 200, headers: { "Content-Type": "application/json" } });
 });
