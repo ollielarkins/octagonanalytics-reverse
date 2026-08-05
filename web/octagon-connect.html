@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Connect Octagon Analytics</title>
+  <style>
+    body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;max-width:420px;margin:8vh auto;padding:0 20px;color:#111}
+    h1{font-size:1.2rem}p{color:#555;font-size:.9rem}
+    input[type=password]{width:100%;padding:10px;font-size:1rem;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}
+    button{margin-top:12px;width:100%;padding:10px;font-size:1rem;border:0;border-radius:8px;background:#111;color:#fff;cursor:pointer}
+    .err{color:#b00;font-size:.85rem}
+  </style>
+</head>
+<body>
+  <h1>Connect Octagon Analytics</h1>
+  <p>Paste your Octagon access token to connect. Ask an admin if you don't have one.</p>
+  <p id="err" class="err" style="display:none"></p>
+  <!-- Posts to the Supabase function, which validates the token, issues a PKCE auth code,
+       and 302-redirects back to Claude. This page is just the form. -->
+  <form id="f" method="POST" action="https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp/authorize">
+    <input type="password" name="token" placeholder="oct_..." autocomplete="off" autofocus>
+    <button type="submit">Authorize</button>
+  </form>
+  <script>
+    // Carry the OAuth params Claude put on our URL through to the POST as hidden fields.
+    var q = new URLSearchParams(location.search);
+    var keep = ["client_id","redirect_uri","state","code_challenge","code_challenge_method","response_type","scope","resource"];
+    var f = document.getElementById("f");
+    keep.forEach(function(k){
+      var i = document.createElement("input");
+      i.type = "hidden"; i.name = k; i.value = q.get(k) || "";
+      f.appendChild(i);
+    });
+    if (q.get("error")) { var e = document.getElementById("err"); e.style.display = "block"; e.textContent = "Invalid or inactive token - check it and try again."; }
+  </script>
+</body>
+</html>
