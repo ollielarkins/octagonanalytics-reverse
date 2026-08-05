@@ -62,15 +62,20 @@ actual dashboard, **not** an in-chat markdown table. Include, in this order:
 2. **KPI headline** — as **stat cards**: placements (2026 and all-time), open jobs, open pipeline £,
    Won £, and firm totals (candidates, clients, jobs, active consultants).
 3. **2026 funnel** — as a bar/funnel chart, in stage order (§2).
-4. **Per-consultant performance** — attributed by job owner (table or bar chart).
-5. **Deal pipeline** — stages with deal counts and value.
+4. **Deal pipeline** — stages with deal counts and value.
+5. **The viewer's OWN scorecard** — their weekly KPIs-vs-target and billing-vs-target, from
+   `payload.viewer` (`my_weekly`, `my_billing`). This is the *only* per-recruiter KPI/target detail a
+   regular recruiter sees.
+6. **Whole-team per-recruiter breakdown** — include this **only if `payload.consultants` is present**
+   (the server sends it to admins/managers only). Never expose other recruiters' KPIs or targets to a
+   regular recruiter — the payload simply won't contain them.
 
 Make it clean, readable, and theme-aware (works in light and dark); self-contained (inline CSS/JS,
 no external requests). Follow the same layout every time so the dashboard looks identical for everyone.
-`/dashboard` = full; `/kpi` = the headline stat cards only; `/weekly_kpis` = per-recruiter
-actuals-vs-target; `/billing` = quarterly billing vs target. If the user gives `/dashboard "descriptive
-text"`, build an artifact matching that description. (This artifact rule applies to the dashboard/
-overview; ad-hoc one-off figures can still be a quick in-chat table.)
+Default (no descriptive text) is always the **one standard main dashboard**. `/kpi` = the headline
+stat cards only; `/weekly_kpis` = the viewer's actuals-vs-target; `/billing` = quarterly billing vs
+target. Only when the user gives `/dashboard "descriptive text"` do you build a custom artifact to
+match it. (Ad-hoc one-off figures elsewhere can still be a quick in-chat table.)
 
 ## §4 — What the metrics mean (so you never disagree with the dashboards)
 
