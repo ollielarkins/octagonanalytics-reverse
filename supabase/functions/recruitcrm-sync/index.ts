@@ -35,6 +35,7 @@ const mapCandidate = (c: any) => ({
   recruitcrm_id: c.id, slug: c.slug ?? null, first_name: c.first_name ?? null, last_name: c.last_name ?? null,
   name: nm(c.first_name, c.last_name), email: c.email ?? null, owner_recruitcrm_id: c.owner ?? null,
   city: c.city ?? null, country: c.country ?? null, source: c.source ?? null,
+  skill: Array.isArray(c.skill) ? c.skill.join(", ") : (c.skill ?? null),
   created_date: c.created_on ?? null, updated_date: c.updated_on ?? null,
 });
 function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
