@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.16.0" };
+const SERVER = { name: "octagon-analytics", version: "3.16.1" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -369,7 +369,7 @@ async function validateOctagonToken(token: string) {
 }
 // Supabase can't serve rendered HTML (text/plain + nosniff on the *.supabase.co domain), so the
 // login form is hosted off-Supabase and just POSTs back here. GET hands off to it; POST does the work.
-const LOGIN_URL = "https://www.octagongroup.co.uk/octagon-connect.html";
+const LOGIN_URL = "https://octagongroup.co.uk/octagon-connect.html/";
 const OAUTH_PASSTHRU = ["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "response_type", "scope", "resource"];
 async function handleAuthorize(req: Request): Promise<Response> {
   const u = new URL(req.url);
