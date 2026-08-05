@@ -86,7 +86,7 @@ PROJBRIEF.MD, ROADMAP.MD
 | `recruitcrm-sync` | true | Sync engine. Entities: consultants, clients, jobs, candidates, **calls** (Devyce call-logs). Modes: `backfill`, `incremental`, `reconcile`, `history`. Cron / server-side. |
 | `dashboard-data` | false | Public JSON API — `dashboard_json()` aggregates only, no PII. Feeds `web/dashboard.html`. |
 | `octagon-mcp` | false | Remote MCP server (Streamable HTTP / JSON-RPC 2.0). Tools below. |
-| `slack-command` | false | Team-wide Slack slash commands `/dashboard` (+ optional text view) and `/kpis`. Verifies the Slack signing secret. |
+| `slack-command` | false | Slack slash-command endpoint (`/dashboard`). Verifies the Slack signing secret; returns the live dashboard. |
 | `recruitcrm-probe` | true | **Throwaway** diagnostic, locked + gutted. Safe to delete. |
 | `recruitcrm-discover` | true | **Throwaway** discovery probe (pipelines / BD fields), locked + gutted. Safe to delete. |
 | `dashboard` | false | **Defunct** early attempt (Supabase can't serve HTML — see below). Safe to delete. |
@@ -114,15 +114,22 @@ PROJBRIEF.MD, ROADMAP.MD
 | `my_day` | read | One consultant's attention list; auto-scopes to the caller's token (PII). |
 | `match_candidates` | read | JD→candidate: rank candidates by skill match, with matched skills + roles (PII). |
 | `call_activity` | read | Telephony activity (Devyce→RecruitCRM): calls, connect rate, talk-time, by consultant/category. |
+| `weekly_kpis` | read | This-week actuals vs each recruiter's weekly targets (`kpis_report()`): cv_sent, interview_request, first_interview, bd/client calls, placed. |
 | `update_hiring_stage` | **write** | Moves a candidate's hiring stage in RecruitCRM (`create_placement` on Placed). |
 | `assign_candidate` | **write** | Assigns a candidate to a job in RecruitCRM. |
 | `add_note` | **write** | Adds a note to a candidate or job (POST /v1/notes), attributed to the actor. |
 
-**MCP prompts** (one-click templates via `prompts/list`): `weekly_team_review`,
-`my_cold_roles` (arg: consultant), `client_health` (arg: client), `month_in_review`
-(arg: month `YYYY-MM`), `my_day` (your attention list), and `match_jd` (paste a job
-description → ranked candidates with explained fit). Each expands into an instruction
-that drives the read tools above.
+**MCP prompts** (one-click inline Claude-chat commands via `prompts/list`, 19 total):
+- *Reporting:* `dashboard`, `kpi` (firm headline totals), `weekly_kpis` (per-recruiter
+  actuals vs weekly targets), `weekly_team_review`, `my_day`, `my_cold_roles` (arg:
+  consultant), `client_health` (arg: client), `month_in_review` (arg: month `YYYY-MM`).
+- *New-job admin pack:* `job_kickoff`, `job_advert`, `job_boolean`, `job_inmail`,
+  `client_pitch`, `job_shortlist` (arg: job; pull context via `job_pipeline` + `match_candidates`).
+- *Candidate lifecycle:* `candidate_intake` (call/Devyce notes → intake template + gap-flag),
+  `candidate_summary`, `candidate_thankyou`, `interview_prep` (arg: candidate), plus `match_jd`.
+
+Each expands into an instruction that drives the read tools above. (There is no Slack `/kpis`
+command — the weekly KPI scorecard is the inline `weekly_kpis` prompt.)
 
 **Authentication (per-user bearer tokens).** *Every* tool call must present a valid token
 (`Authorization: Bearer <t>`, `x-octagon-token` header, or `auth_token` arg). Tokens map to a
@@ -187,7 +194,8 @@ Applied in order (`supabase/migrations/`):
 | 0025 | refine_attention | Bound "needs attention" to open roles + a recent window (kills 1000-day-old noise) |
 | 0026 | candidate_matching | `candidates.skill` + `match_candidates()` (JD→candidate skill matching, pg_trgm) |
 | 0027 | call_activity | `call_activity` table + `call_activity_report()` (Devyce calls via RecruitCRM `/call-logs`) |
-| 0028 | weekly_kpis | `weekly_targets` table + `kpis_report()` (this-week actuals vs targets, for `/kpis`) |
+| 0028 | weekly_kpis | `weekly_targets` table + `kpis_report()` (this-week actuals vs targets, for the inline `weekly_kpis` prompt) |
+| 0029 | kpis_expand | Expand `kpis_report()` to the full weekly KPI set (interview_request, BD/client call split) + load firm-wide targets |
 
 ### Cron schedule
 
@@ -282,28 +290,12 @@ update app_settings set value='https://hooks.slack.com/…' where key='standup_w
 ```
 Recruiters can also pull their own list any time via the `my_day` prompt/tool in Claude.
 
-**Slack slash commands** (team-wide): `/dashboard` and `/kpis`. (1) Set the Supabase secret
-`SLACK_SIGNING_SECRET` to your Slack app's Signing Secret. (2) In the Slack app → **Slash
-Commands**, add both `/dashboard` and `/kpis`, each with Request URL
+**Slack `/dashboard` command** (admin, optional): a slash command that returns the live
+dashboard in Slack. (1) Set the Supabase secret `SLACK_SIGNING_SECRET` to your Slack app's
+Signing Secret. (2) In the Slack app → **Slash Commands** → add `/dashboard` with Request URL
 `https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/slack-command`. The endpoint verifies
-the Slack signature (fail-safe until the secret is set) and posts the result to the channel.
-- `/dashboard` — the standard live dashboard.
-- `/dashboard <text>` — a specific view; the text is routed by keyword / month / consultant
-  name, e.g. `/dashboard july funnel`, `/dashboard Keelan`, `/dashboard bd`, `/dashboard calls`,
-  `/dashboard leaderboard q2`, `/dashboard cold`, `/dashboard time to fill`. Unrecognised text
-  falls back to the overview with a hint.
-- `/kpis` — this-week actuals vs weekly targets, per recruiter.
-
-**Load weekly KPI targets** (admin) for `/kpis`. One row per consultant per metric
-(`cv_sent`, `calls`, `first_interview`, `placed`); find ids in the `consultants` table:
-```sql
-insert into weekly_targets (consultant_recruitcrm_id, metric, weekly_target) values
-  (<recruitcrm_id>, 'cv_sent', 10),
-  (<recruitcrm_id>, 'calls', 100),
-  (<recruitcrm_id>, 'first_interview', 3),
-  (<recruitcrm_id>, 'placed', 1)
-on conflict (consultant_recruitcrm_id, metric) do update set weekly_target = excluded.weekly_target;
-```
+the Slack signature, so it stays fail-safe (refuses) until the secret is set. Replies are
+ephemeral (only the person who runs it sees the result).
 
 **Roll the connector out to the team** (admin, in claude.ai):
 1. Add the `octagon-mcp` URL as an **org connector** (Settings → Connectors); each member
