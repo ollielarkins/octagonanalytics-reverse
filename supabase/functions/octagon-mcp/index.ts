@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.19.0" };
+const SERVER = { name: "octagon-analytics", version: "3.20.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -355,7 +355,9 @@ async function callTool(name: string, args: any, req: Request) {
     if (!actor.is_admin) delete data.consultants;   // hide the whole-team per-recruiter breakdown from regular recruiters
     // MCP Apps: structuredContent drives the inline widget; content is the model-facing fallback.
     const k = data?.kpis ?? {};
-    const summary = `Octagon dashboard (shown as an inline widget). Placed 2026: ${k.placed_2026 ?? "?"}, all-time: ${k.placed_all ?? "?"}; open jobs: ${k.open_jobs ?? "?"}; open pipeline £${Math.round(k.open_pipeline ?? 0).toLocaleString("en-GB")}; Won £${Math.round(k.won ?? 0).toLocaleString("en-GB")}. Sync: ${data?.health?.overall ?? "?"}.`;
+    // Text is the model-facing DATA (not a claim that a widget rendered) — so the recruiter still
+    // gets the figures even if the inline widget is slow/unsupported.
+    const summary = `Octagon firm KPIs — placed 2026: ${k.placed_2026 ?? "?"}, all-time: ${k.placed_all ?? "?"}; open jobs: ${k.open_jobs ?? "?"}; open pipeline £${Math.round(k.open_pipeline ?? 0).toLocaleString("en-GB")}; Won £${Math.round(k.won ?? 0).toLocaleString("en-GB")}; sync ${data?.health?.overall ?? "?"}.`;
     return { content: [{ type: "text", text: summary }], structuredContent: data, _meta: { ui: { resourceUri: DASH_UI } } };
   }
   if (name === "funnel_report") {
