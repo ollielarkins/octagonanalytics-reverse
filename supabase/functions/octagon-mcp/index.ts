@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.18.0" };
+const SERVER = { name: "octagon-analytics", version: "3.19.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -134,6 +134,34 @@ if(m.method==='ui/notifications/tool-result'&&m.params&&m.params.structuredConte
 window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{capabilities:{},clientInfo:{name:'octagon-dashboard',version:'1.0'},protocolVersion:'2026-01-26',appCapabilities:{availableDisplayModes:['inline','fullscreen']}}},'*');
 </script></body></html>`;
 
+// Shared scorecard widget for weekly_kpis + billing (branches on the payload shape).
+const SCORE_UI = "ui://octagon/scorecard";
+const SCORECARD_WIDGET_HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
+:root{--bg:#fff;--fg:#111;--mut:#666;--card:#f6f6f7;--line:#e6e6e8;--good:#137333;--bad:#b00020}
+@media (prefers-color-scheme:dark){:root{--bg:#191919;--fg:#f2f2f2;--mut:#9a9a9a;--card:#242424;--line:#333}}
+:root[data-theme=dark]{--bg:#191919;--fg:#f2f2f2;--mut:#9a9a9a;--card:#242424;--line:#333}
+:root[data-theme=light]{--bg:#fff;--fg:#111;--mut:#666;--card:#f6f6f7;--line:#e6e6e8}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);padding:16px;font-size:14px}
+h1{font-size:1.02rem;margin:0 0 2px}.sub{color:var(--mut);font-size:.72rem;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:.78rem}th,td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}.behind{color:var(--bad);font-weight:700}.met{color:var(--good);font-weight:600}
+</style></head><body><div id="app"><div class="sub">Loading…</div></div><script>
+var GBP=function(n){return n==null?'—':'£'+Math.round(Number(n)).toLocaleString('en-GB')};
+function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+function render(d){if(!d)return;var o='',cs=d.consultants||[];
+if(d.week_start){o+='<h1>Weekly KPIs</h1><div class="sub">week from '+esc(d.week_start)+(d.has_targets?'':' · targets not loaded')+' · BD/client calls count categorised Devyce calls only</div>';
+var m=[['CV','cv_sent'],['Int req','interview_request'],['Int','first_interview'],['BD','bd_calls'],['Client','client_calls'],['Placed','placed']];
+o+='<table><tr><th>Consultant</th>'+m.map(function(x){return '<th class="num">'+x[0]+'</th>'}).join('')+'</tr>'+cs.map(function(c){return '<tr><td>'+esc(c.name)+'</td>'+m.map(function(x){var v=c[x[1]]||{},a=v.actual||0,t=v.target,cl=(t!=null&&a<t)?'behind':(t!=null?'met':'');return '<td class="num '+cl+'">'+a+(t!=null?'/'+t:'')+'</td>'}).join('')+'</tr>'}).join('')+'</table>';}
+else if(d.quarter_start){o+='<h1>Quarterly Billing</h1><div class="sub">quarter from '+esc(d.quarter_start)+' · Won = billed (Deal → Won); pipeline is the forward indicator</div>';
+o+='<table><tr><th>Consultant</th><th class="num">Target</th><th class="num">Won QTD</th><th class="num">Pipeline</th><th class="num">% target</th></tr>'+cs.map(function(c){var tg=c.quarterly_target,wq=c.won_qtr||0,p=(tg?Math.round(100*wq/tg):null);return '<tr><td>'+esc(c.name)+'</td><td class="num">'+(tg!=null?GBP(tg):'—')+'</td><td class="num">'+GBP(wq)+'</td><td class="num">'+GBP(c.pipeline_open)+'</td><td class="num">'+(p!=null?p+'%':'—')+'</td></tr>'}).join('')+'</table>';}
+if(!cs.length)o+='<div class="sub">No data for you yet.</div>';
+document.getElementById('app').innerHTML=o||'<div class="sub">No data.</div>';}
+window.addEventListener('message',function(ev){var m=ev.data;if(!m||m.jsonrpc!=='2.0')return;
+if(m.id===1&&m.result&&m.result.hostContext&&m.result.hostContext.theme)document.documentElement.setAttribute('data-theme',m.result.hostContext.theme);
+if(m.method==='ui/notifications/tool-result'&&m.params&&m.params.structuredContent)render(m.params.structuredContent)});
+window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{capabilities:{},clientInfo:{name:'octagon-scorecard',version:'1.0'},protocolVersion:'2026-01-26',appCapabilities:{availableDisplayModes:['inline','fullscreen']}}},'*');
+</script></body></html>`;
+
 const TOOLS = [
   { name: "get_dashboard", description: "Live Octagon recruitment dashboard (KPIs, 2026 funnel, per-consultant performance, deal pipeline, sync health). Aggregates only, no PII. Call at the start of a conversation and for firm-wide overviews. Renders as an inline dashboard widget.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: DASH_UI, visibility: ["model", "app"] } } },
   { name: "funnel_report", description: "Recruitment funnel + conversion ratios for a date window, optionally filtered to one consultant (partial name match) or team. Use for 'how did Keelan do in Q2', 'the tech team last month', 'firm funnel this year'. Dates ISO (YYYY-MM-DD); 'to' is exclusive. Defaults to 2026 YTD. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -149,8 +177,8 @@ const TOOLS = [
   { name: "my_day", description: "One consultant's attention list on OPEN roles: aging offers, stalled candidates, active-in-play count, cold open roles, and placements in the last 7 days. With NO consultant argument it scopes to YOU (your token). Pass consultant to view someone else. Use for 'what's my day', 'what needs my attention', 'how's Keelan's desk'. Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "consultant name; omit to use your own identity" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "match_candidates", description: "Find candidates in the CRM whose skills match a set of skills, ranked by number of matches, with the matched skills and their recent roles for explaining fit. Use for JD->candidate matching: extract the key skills from a job description yourself, then call this with them. Optionally filter by location. Only candidates with skill text populated (~73%) are considered. Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { skills: { type: "array", items: { type: "string" }, description: "skills/keywords extracted from the job description" }, location: { type: "string", description: "optional city or country filter" }, limit: { type: "integer" }, ...AUTH_ARG }, required: ["skills"], additionalProperties: false } },
   { name: "call_activity", description: "Telephony activity (calls logged in RecruitCRM via Devyce) for a date window: total calls, connect rate, talk-time in minutes, outgoing/incoming, a per-consultant leaderboard, and a breakdown by call category (e.g. 'Contact - Prospect (BD)', 'Candidate - Job Pitch / Qualifying'). Attributed to the CALLER. Use for 'call activity this week', 'who's making the most calls', 'talk time by consultant', 'BD call volume'. Dates ISO; defaults to 2026 YTD. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
-  { name: "weekly_kpis", description: "This-week (from Monday) actuals vs each recruiter's weekly targets: CV sends, calls, first interviews, placements. CV/interview/placed are owner-attributed; calls are attributed to the caller. Targets are null until loaded into weekly_targets. Use for 'are we hitting KPIs this week', 'who's behind on activity', the Monday/daily KPI nudge. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
-  { name: "billing", description: "Quarter-to-date billing vs each recruiter's quarterly target (owner-attributed): Won-deal revenue this quarter (the billing figure), all-time Won, and in-play pipeline value as a forward indicator. Use for 'are we on track for billing', 'quarterly targets', 'pipeline coverage vs target'. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
+  { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
+  { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
   { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
@@ -299,6 +327,12 @@ function getPrompt(name: string, args: any): any | null {
 const rpc = (id: any, result: any) => ({ jsonrpc: "2.0", id, result });
 const rpcErr = (id: any, code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
 const toolText = (o: any) => ({ content: [{ type: "text", text: JSON.stringify(o) }] });
+const widgetResult = (data: any, uri: string, summary: string) => ({ content: [{ type: "text", text: summary }], structuredContent: data, _meta: { ui: { resourceUri: uri } } });
+async function consultantName(id: any): Promise<string | null> {
+  if (!id) return null;
+  const { data } = await db.from("consultants").select("name").eq("recruitcrm_id", id).maybeSingle();
+  return data?.name ?? null;
+}
 
 async function callTool(name: string, args: any, req: Request) {
   // Every tool requires a valid token.
@@ -355,8 +389,18 @@ async function callTool(name: string, args: any, req: Request) {
   if (name === "my_day") { const { data, error } = await db.rpc("my_day", { p_consultant_id: args?.consultant ? null : actor.id, p_consultant: args?.consultant ?? null }); return toolText(error ? { error: error.message } : data); }
   if (name === "match_candidates") { const { data, error } = await db.rpc("match_candidates", { p_skills: Array.isArray(args?.skills) ? args.skills : [], p_location: args?.location ?? null, p_limit: args?.limit ?? 20 }); return toolText(error ? { error: error.message } : data); }
   if (name === "call_activity") { const { data, error } = await db.rpc("call_activity_report", { p_from: args?.from ?? "2026-01-01", p_to: args?.to ?? "2100-01-01", p_consultant: args?.consultant ?? null, p_team: args?.team ?? null }); return toolText(error ? { error: error.message } : data); }
-  if (name === "weekly_kpis") { const { data, error } = await db.rpc("kpis_report"); return toolText(error ? { error: error.message } : data); }
-  if (name === "billing") { const { data, error } = await db.rpc("billing_report"); return toolText(error ? { error: error.message } : data); }
+  if (name === "weekly_kpis") {
+    const { data, error } = await db.rpc("kpis_report");
+    if (error) return toolText({ error: error.message });
+    if (!actor.is_admin) { const vn = await consultantName(actor.id); data.consultants = (data.consultants ?? []).filter((x: any) => x.name === vn); }
+    return widgetResult(data, SCORE_UI, `Weekly KPI scorecard (inline widget): ${(data.consultants ?? []).length} recruiter(s), week from ${data.week_start ?? "?"}.`);
+  }
+  if (name === "billing") {
+    const { data, error } = await db.rpc("billing_report");
+    if (error) return toolText({ error: error.message });
+    if (!actor.is_admin) { const vn = await consultantName(actor.id); data.consultants = (data.consultants ?? []).filter((x: any) => x.name === vn); }
+    return widgetResult(data, SCORE_UI, `Quarterly billing scorecard (inline widget): ${(data.consultants ?? []).length} recruiter(s), quarter from ${data.quarter_start ?? "?"}.`);
+  }
   if (name === "update_hiring_stage") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Hiring-stage changes require a write-enabled token (an admin sets can_write)." });
     const byId = await stageLookup();
@@ -396,9 +440,13 @@ async function callTool(name: string, args: any, req: Request) {
 async function handle(m: any, req: Request): Promise<any> {
   const { id, method, params } = m ?? {};
   if (method === "initialize") return rpc(id, { protocolVersion: params?.protocolVersion || "2025-06-18", capabilities: { tools: {}, prompts: {}, resources: {}, extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [MCP_APP_MIME] } } }, serverInfo: SERVER });
-  if (method === "resources/list") return rpc(id, { resources: [{ uri: DASH_UI, name: "octagon_dashboard", mimeType: MCP_APP_MIME }] });
+  if (method === "resources/list") return rpc(id, { resources: [
+    { uri: DASH_UI, name: "octagon_dashboard", mimeType: MCP_APP_MIME },
+    { uri: SCORE_UI, name: "octagon_scorecard", mimeType: MCP_APP_MIME },
+  ] });
   if (method === "resources/read") {
     if (params?.uri === DASH_UI) return rpc(id, { contents: [{ uri: DASH_UI, mimeType: MCP_APP_MIME, text: DASHBOARD_WIDGET_HTML }] });
+    if (params?.uri === SCORE_UI) return rpc(id, { contents: [{ uri: SCORE_UI, mimeType: MCP_APP_MIME, text: SCORECARD_WIDGET_HTML }] });
     return rpcErr(id, -32602, "Unknown resource: " + params?.uri);
   }
   if (typeof method === "string" && method.startsWith("notifications/")) return null;
