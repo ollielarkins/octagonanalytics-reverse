@@ -1,6 +1,7 @@
 // recruitcrm-sync — RecruitCRM → Supabase mirror. Locked (verify_jwt=true).
-// Entities: consultants, clients, jobs, candidates, calls (call_activity via /call-logs).
+// Entities: consultants, clients, jobs, candidates, calls (call_activity via /call-logs), deals.
 // Modes: backfill | incremental | reconcile | history (candidate_stage_events).
+// deals feeds the billing report (Won deal_value); owner-attributed via deals.owner_recruitcrm_id.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const BASE = "https://api.recruitcrm.io/v1";
@@ -67,6 +68,20 @@ function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
     created_date: job.created_on ?? null,
   });
 }
+const mapDeal = (d: any) => ({
+  recruitcrm_id: d.id,
+  deal_name: d.name ?? null,
+  deal_stage: d.deal_stage?.label ?? (typeof d.deal_stage === "string" ? d.deal_stage : null),
+  deal_value: typeof d.deal_value === "number" ? d.deal_value : (d.deal_value != null ? Number(d.deal_value) : null),
+  close_date: d.close_date ?? null,
+  deal_type: d.deal_type?.label ?? (typeof d.deal_type === "string" ? d.deal_type : null),
+  company_slug: d.company_slug ?? null,
+  job_slug: d.job_slug ?? null,
+  owner_recruitcrm_id: d.owner ?? null,
+  created_date: d.created_on ?? null,
+  updated_date: d.updated_on ?? null,
+  resource_url: d.resource_url ?? null,
+});
 async function jobMaps() {
   const [{ data: cons }, { data: cls }] = await Promise.all([
     db.from("consultants").select("id,recruitcrm_id"),
@@ -208,6 +223,7 @@ Deno.serve(async (req) => {
       if (entity === "all" || entity === "candidates") out.results.push(await incremental("candidates", "candidates", mapCandidate, "candidates"));
       if (entity === "all" || entity === "jobs") { const [cb, sb] = await jobMaps(); out.results.push(await incremental("jobs", "jobs", mapJobFactory(cb, sb), "jobs")); }
       if (entity === "all" || entity === "calls") { const cn = await consNameMap(); out.results.push(await incremental("calls", "call-logs", mapCallFactory(cn), "call_activity")); }
+      if (entity === "all" || entity === "deals") out.results.push(await incremental("deals", "deals", mapDeal, "deals"));
       return Response.json(out);
     }
 
@@ -228,7 +244,8 @@ Deno.serve(async (req) => {
     if (entity === "candidates") return Response.json(await backfillLoop("candidates", startPage, maxPages, "candidates", mapCandidate, "candidates"));
     if (entity === "jobs") { const [cb, sb] = await jobMaps(); return Response.json(await backfillLoop("jobs", startPage, maxPages, "jobs", mapJobFactory(cb, sb), "jobs")); }
     if (entity === "calls") { const cn = await consNameMap(); return Response.json(await backfillLoop("calls", startPage, maxPages, "call-logs", mapCallFactory(cn), "call_activity")); }
-    return Response.json({ error: "entity must be consultants|clients|candidates|jobs|calls" }, { status: 400 });
+    if (entity === "deals") return Response.json(await backfillLoop("deals", startPage, maxPages, "deals", mapDeal, "deals"));
+    return Response.json({ error: "entity must be consultants|clients|candidates|jobs|calls|deals" }, { status: 400 });
   } catch (e) {
     return Response.json({ error: String(e) }, { status: 500 });
   }
