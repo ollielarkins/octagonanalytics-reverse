@@ -7,19 +7,20 @@
 //
 // READ tools : get_dashboard, funnel_report, client_report, time_to_fill, cold_jobs,
 //              placements_report, consultant_leaderboard, bd_report, find_candidate,
-//              job_pipeline, stalled_report, my_day, match_candidates, call_activity
+//              job_pipeline, stalled_report, my_day, match_candidates, call_activity, weekly_kpis
 // WRITE tools: update_hiring_stage, assign_candidate, add_note  (require token.can_write;
 //              two-step preview->confirm, optimistic concurrency, audit, write-through)
 // PROMPTS    : dashboard, kpi, weekly_team_review, my_cold_roles, client_health, month_in_review, my_day, match_jd
 //              job_kickoff, job_advert, job_boolean, job_inmail, client_pitch, job_shortlist  (new-job admin pack)
 //              candidate_intake, candidate_summary, candidate_thankyou, interview_prep  (candidate lifecycle)
+//              weekly_kpis  (this-week actuals vs targets scorecard)
 //
 // Connector URL: https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp
 import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.9.0" };
+const SERVER = { name: "octagon-analytics", version: "3.10.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -95,6 +96,7 @@ const TOOLS = [
   { name: "my_day", description: "One consultant's attention list on OPEN roles: aging offers, stalled candidates, active-in-play count, cold open roles, and placements in the last 7 days. With NO consultant argument it scopes to YOU (your token). Pass consultant to view someone else. Use for 'what's my day', 'what needs my attention', 'how's Keelan's desk'. Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "consultant name; omit to use your own identity" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "match_candidates", description: "Find candidates in the CRM whose skills match a set of skills, ranked by number of matches, with the matched skills and their recent roles for explaining fit. Use for JD->candidate matching: extract the key skills from a job description yourself, then call this with them. Optionally filter by location. Only candidates with skill text populated (~73%) are considered. Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { skills: { type: "array", items: { type: "string" }, description: "skills/keywords extracted from the job description" }, location: { type: "string", description: "optional city or country filter" }, limit: { type: "integer" }, ...AUTH_ARG }, required: ["skills"], additionalProperties: false } },
   { name: "call_activity", description: "Telephony activity (calls logged in RecruitCRM via Devyce) for a date window: total calls, connect rate, talk-time in minutes, outgoing/incoming, a per-consultant leaderboard, and a breakdown by call category (e.g. 'Contact - Prospect (BD)', 'Candidate - Job Pitch / Qualifying'). Attributed to the CALLER. Use for 'call activity this week', 'who's making the most calls', 'talk time by consultant', 'BD call volume'. Dates ISO; defaults to 2026 YTD. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "weekly_kpis", description: "This-week (from Monday) actuals vs each recruiter's weekly targets: CV sends, calls, first interviews, placements. CV/interview/placed are owner-attributed; calls are attributed to the caller. Targets are null until loaded into weekly_targets. Use for 'are we hitting KPIs this week', 'who's behind on activity', the Monday/daily KPI nudge. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
   { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
@@ -104,6 +106,7 @@ const TOOLS = [
 const PROMPTS = [
   { name: "dashboard", description: "Full live dashboard: KPIs, 2026 funnel, per-consultant performance and the deal pipeline (with sync-health check).", arguments: [] },
   { name: "kpi", description: "Headline KPI numbers only — placements, open jobs, pipeline value and firm totals, concise.", arguments: [] },
+  { name: "weekly_kpis", description: "This-week KPI scorecard: each recruiter's actuals vs weekly targets, flagging who's behind.", arguments: [] },
   { name: "weekly_team_review", description: "Week-over-week firm funnel + leaderboard, with call-outs.", arguments: [] },
   { name: "my_cold_roles", description: "Open roles going cold for a named consultant.", arguments: [{ name: "consultant", description: "consultant name", required: true }] },
   { name: "client_health", description: "Account activity, open roles and conversion for one client this year.", arguments: [{ name: "client", description: "client / company name", required: true }] },
@@ -141,6 +144,9 @@ function getPrompt(name: string, args: any): any | null {
   }
   if (name === "kpi") {
     return { description: "Headline KPIs", ...msg("Call get_dashboard. Glance at health.overall first — if it is not 'ok', add a single-line warning naming the affected feeds (health.entities[].entity) before the numbers. Then present ONLY the headline KPIs, concisely: placements (2026 and all-time), open jobs, open pipeline value, Won revenue, and the firm totals (candidates, clients, jobs, active consultants). Do NOT include the funnel, the per-consultant breakdown, or the deal-pipeline table — just the top-line numbers.") };
+  }
+  if (name === "weekly_kpis") {
+    return { description: "Weekly KPI scorecard", ...msg("Call the weekly_kpis tool. Present each recruiter's THIS-WEEK actuals vs their weekly target for CV sends, calls, first interviews and placements as a compact table, and clearly flag who is BEHIND on any metric and by how much. If has_targets is false, say targets haven't been loaded into weekly_targets yet and show the actuals only. Be concise and action-oriented — this is the Monday/daily nudge, so end with the 2-3 people/metrics that most need attention this week.") };
   }
   if (name === "weekly_team_review") {
     return { description: "Weekly team review", ...msg("Give me this week's team review. Call funnel_report for the last 7 days and again for the 7 days before that, and compare week-over-week. Then call consultant_leaderboard ranked by 'placed' for the last 7 days. Summarise concisely: what moved in the funnel, who is ahead, and flag any consultant whose CV->1st-interview rate dropped versus the prior week.") };
@@ -243,6 +249,7 @@ async function callTool(name: string, args: any, req: Request) {
   if (name === "my_day") { const { data, error } = await db.rpc("my_day", { p_consultant_id: args?.consultant ? null : actor.id, p_consultant: args?.consultant ?? null }); return toolText(error ? { error: error.message } : data); }
   if (name === "match_candidates") { const { data, error } = await db.rpc("match_candidates", { p_skills: Array.isArray(args?.skills) ? args.skills : [], p_location: args?.location ?? null, p_limit: args?.limit ?? 20 }); return toolText(error ? { error: error.message } : data); }
   if (name === "call_activity") { const { data, error } = await db.rpc("call_activity_report", { p_from: args?.from ?? "2026-01-01", p_to: args?.to ?? "2100-01-01", p_consultant: args?.consultant ?? null, p_team: args?.team ?? null }); return toolText(error ? { error: error.message } : data); }
+  if (name === "weekly_kpis") { const { data, error } = await db.rpc("kpis_report"); return toolText(error ? { error: error.message } : data); }
   if (name === "update_hiring_stage") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Hiring-stage changes require a write-enabled token (an admin sets can_write)." });
     const byId = await stageLookup();
