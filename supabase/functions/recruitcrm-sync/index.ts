@@ -146,6 +146,19 @@ async function reconcilePaged(entity: string, ep: string, table: string) {
   const { data, error } = await db.rpc("reconcile_entity", { p_table: table, p_live_ids: ids });
   return { entity, complete: true, pages: done, live_ids: ids.length, result: error ? String(error.message) : data };
 }
+async function reconcileDeals() {
+  let page = 1, more = true, done = 0, stopped: any = null; const ids: number[] = []; const CAP = 80;
+  while (more && done < CAP) {
+    const r = await crm(`/deals?page=${page}&limit=100`);
+    if (!r.ok) { stopped = r.status; break; }
+    for (const rec of (r.json?.data ?? [])) if (rec?.id != null) ids.push(rec.id);
+    more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(40);
+  }
+  // Guard: never reconcile on a partial or empty fetch (would hard-delete live deals).
+  if (stopped || more || !ids.length) return { entity: "deals", complete: false, stopped, pages: done, live_ids: ids.length, note: "partial/empty — reconcile skipped" };
+  const { data, error } = await db.rpc("reconcile_deals", { p_live_ids: ids });
+  return { entity: "deals", complete: true, pages: done, live_ids: ids.length, result: error ? String(error.message) : data };
+}
 async function reconcileConsultants() {
   const r = await crm(`/users`);
   if (!r.ok) return { entity: "consultants", complete: false, stopped: r.status };
@@ -231,8 +244,9 @@ Deno.serve(async (req) => {
       if (entity === "consultants") return Response.json(await reconcileConsultants());
       const fn = entity === "clients" ? () => reconcilePaged("clients", "companies", "clients")
                : entity === "candidates" ? () => reconcilePaged("candidates", "candidates", "candidates")
-               : entity === "jobs" ? () => reconcilePaged("jobs", "jobs", "jobs") : null;
-      if (!fn) return Response.json({ error: "reconcile needs entity=consultants|clients|candidates|jobs" }, { status: 400 });
+               : entity === "jobs" ? () => reconcilePaged("jobs", "jobs", "jobs")
+               : entity === "deals" ? () => reconcileDeals() : null;
+      if (!fn) return Response.json({ error: "reconcile needs entity=consultants|clients|candidates|jobs|deals" }, { status: 400 });
       try { (globalThis as any).EdgeRuntime?.waitUntil(runBg(`reconcile:${entity}`, fn)); } catch {}
       return Response.json({ mode: "reconcile", entity, status: "started (background)" }, { status: 202 });
     }
