@@ -112,12 +112,16 @@ PROJBRIEF.MD, ROADMAP.MD
 | `job_pipeline` | read | A job's candidates in play + current stage + in-play count (PII). |
 | `stalled_report` | read | Firm-wide attention list: aging offers + stalled candidates on open roles (PII). |
 | `my_day` | read | One consultant's attention list; auto-scopes to the caller's token (PII). |
+| `match_candidates` | read | JD→candidate: rank candidates by skill match, with matched skills + roles (PII). |
 | `update_hiring_stage` | **write** | Moves a candidate's hiring stage in RecruitCRM (`create_placement` on Placed). |
 | `assign_candidate` | **write** | Assigns a candidate to a job in RecruitCRM. |
+| `add_note` | **write** | Adds a note to a candidate or job (POST /v1/notes), attributed to the actor. |
 
 **MCP prompts** (one-click templates via `prompts/list`): `weekly_team_review`,
 `my_cold_roles` (arg: consultant), `client_health` (arg: client), `month_in_review`
-(arg: month `YYYY-MM`). Each expands into an instruction that drives the read tools above.
+(arg: month `YYYY-MM`), `my_day` (your attention list), and `match_jd` (paste a job
+description → ranked candidates with explained fit). Each expands into an instruction
+that drives the read tools above.
 
 **Authentication (per-user bearer tokens).** *Every* tool call must present a valid token
 (`Authorization: Bearer <t>`, `x-octagon-token` header, or `auth_token` arg). Tokens map to a
@@ -180,6 +184,7 @@ Applied in order (`supabase/migrations/`):
 | 0023 | lookup_functions | `find_candidate()` + `job_pipeline()` — name/job → slug + current stage (precursors to the write tools) |
 | 0024 | attention_alerts | `stalled_report()` + `my_day()` + `post_standup()` (weekday Slack standup) |
 | 0025 | refine_attention | Bound "needs attention" to open roles + a recent window (kills 1000-day-old noise) |
+| 0026 | candidate_matching | `candidates.skill` + `match_candidates()` (JD→candidate skill matching, pg_trgm) |
 
 ### Cron schedule
 
