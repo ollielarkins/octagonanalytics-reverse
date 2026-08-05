@@ -12,13 +12,14 @@
 //              two-step preview->confirm, optimistic concurrency, audit, write-through)
 // PROMPTS    : dashboard, kpi, weekly_team_review, my_cold_roles, client_health, month_in_review, my_day, match_jd
 //              job_kickoff, job_advert, job_boolean, job_inmail, client_pitch, job_shortlist  (new-job admin pack)
+//              candidate_intake, candidate_summary, candidate_thankyou, interview_prep  (candidate lifecycle)
 //
 // Connector URL: https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp
 import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.8.0" };
+const SERVER = { name: "octagon-analytics", version: "3.9.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -115,6 +116,10 @@ const PROMPTS = [
   { name: "job_inmail", description: "Write a short, personalised LinkedIn InMail to approach a candidate about a job.", arguments: [{ name: "job", description: "job title or slug for context", required: false }] },
   { name: "client_pitch", description: "Create the phone pitch to represent the client for a role — what they do, why it's exciting, process & next steps.", arguments: [{ name: "job", description: "job title or slug for context", required: false }] },
   { name: "job_shortlist", description: "Top-5 CRM candidates for a job (via skill match), with explained fit and the chasing order — call these first.", arguments: [{ name: "job", description: "job title or slug for context", required: false }] },
+  { name: "candidate_intake", description: "Turn a candidate call (paste notes / Devyce transcript) into Octagon's intake template, and flag what's missing + what to ask next time.", arguments: [{ name: "candidate", description: "candidate name to resolve (optional)", required: false }] },
+  { name: "candidate_summary", description: "Client-facing candidate summary that sells the candidate for a role (from intake notes / CV).", arguments: [{ name: "candidate", description: "candidate name to resolve (optional)", required: false }] },
+  { name: "candidate_thankyou", description: "Warm post-call thank-you email to a candidate — recap the fit, share the spec & company, set next steps.", arguments: [{ name: "candidate", description: "candidate name to resolve (optional)", required: false }] },
+  { name: "interview_prep", description: "Interview-preparation email for a candidate — time/place, dress, how to prepare, questions to ask.", arguments: [{ name: "candidate", description: "candidate name to resolve (optional)", required: false }] },
 ];
 function monthWindow(month?: string): { from: string; to: string; label: string } {
   if (month && /^\d{4}-\d{2}$/.test(month)) {
@@ -177,6 +182,20 @@ function getPrompt(name: string, args: any): any | null {
   }
   if (name === "job_shortlist") {
     return { description: "Top-5 CRM shortlist", ...msg(jobCtx + "Shortlist the top candidates on the CRM for this role. Extract the key hard skills / must-haves from the spec (ask for it if missing). Call match_candidates with those skills (add a location filter only if the role requires one). Present the TOP 5 ranked by fit; for each, explain why — which required skills matched and their recent roles — and flag anyone strong but missing a must-have. Tell the consultant to CALL these first, and remind them of Octagon's chasing order: call → voicemail → text → email → call from a different number → LinkedIn connect + message. Candidate names are internal (PII).") };
+  }
+  const candArg = (args?.candidate ?? "").toString().trim();
+  const candCtx = candArg ? `The candidate is '${candArg}' — call find_candidate with name='${candArg}' to resolve them and get context. ` : "If a candidate hasn't been named, ask who this is about (use find_candidate to resolve them). ";
+  if (name === "candidate_intake") {
+    return { description: "Candidate intake from call", ...msg(candCtx + "Turn a candidate call into Octagon's intake template. Ask the recruiter to paste their call notes or the Devyce transcript. Fill in as many of these fields as the notes support, leaving a field BLANK when it wasn't covered (don't guess): current situation; reason for leaving / what's missing in current role; current company; key product area/specialisms + which industries they're sold to; top skills/responsibilities; previous manager & best recruitment contact; current salary & salary expectation; notice period & benefits; willing to relocate (+ radius); family situation; nationality/security clearance; sponsorship required (+ details); contractor rate & available from; employment preference; past roles (RFL? £? contacts); ideal role/responsibilities; target companies & companies/industries to avoid; where else they're interviewing (capture as LEADS); additional notes. Then: (1) list the fields left blank or weak, (2) give a short 'ask next time' checklist to close those gaps, and (3) if the recruiter's token can write, offer to save this as a note on the candidate via add_note. Candidate details are PII — keep internal.") };
+  }
+  if (name === "candidate_summary") {
+    return { description: "Candidate summary (sell to client)", ...msg(candCtx + "Write a client-facing candidate summary that SELLS the candidate for a role. Ask the recruiter to paste the intake notes / CV highlights and confirm which job/client this is for. Produce a concise, professional summary the consultant can send to the client: a headline (who they are + why they fit), key skills/experience mapped to the role's requirements, relevant achievements, availability & notice, and salary expectation ONLY if the recruiter wants it shared. End with a one-line 'why now'. Keep it honest — don't invent detail; flag anything to confirm. Omit sensitive personal fields (family, nationality, clearance) unless the role genuinely requires them.") };
+  }
+  if (name === "candidate_thankyou") {
+    return { description: "Post-call thank-you email", ...msg(candCtx + "Draft a warm post-call thank-you email to the candidate. Ask which role/client it's for and for the job spec plus a couple of company highlights if not already provided. The email should thank them for their time, recap why this opportunity suits them, summarise the job spec, share a couple of exciting things about the company, and lay out the next steps — leaving them genuinely excited to proceed. Friendly, professional, concise. Give a subject line, and don't invent facts about the company or role you weren't told.") };
+  }
+  if (name === "interview_prep") {
+    return { description: "Interview-prep email", ...msg(candCtx + "Write an interview-preparation email for a candidate who's been requested for interview. Ask for the job/client and the interview time, date and location/format if not provided. Include: confirmation of the scheduled time/date and location or video link; who they'll be meeting; how to dress; how to prepare (company & role research pointers, likely themes); a few strong questions for them to ask; and any logistics / what to bring. Encouraging and confidence-building. Give a subject line, and leave clear [placeholders] for any interview details you weren't given rather than inventing them.") };
   }
   return null;
 }
