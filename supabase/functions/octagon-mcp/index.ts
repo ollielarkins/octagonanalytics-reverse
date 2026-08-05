@@ -15,13 +15,14 @@
 //              candidate_intake, candidate_summary, candidate_thankyou, interview_prep  (candidate lifecycle)
 //              weekly_kpis  (this-week actuals vs targets scorecard), billing (quarterly billing vs target),
 //              day_plan  (personalised daily plan on Octagon's standard structure)
+//              client_update, pipeline_chase  (client comms) ; bd_pitch, bd_targets, spec_pitch  (BD pack)
 //
 // Connector URL: https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp
 import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.11.0" };
+const SERVER = { name: "octagon-analytics", version: "3.12.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -127,6 +128,11 @@ const PROMPTS = [
   { name: "candidate_summary", description: "Client-facing candidate summary that sells the candidate for a role (from intake notes / CV).", arguments: [{ name: "candidate", description: "candidate name to resolve (optional)", required: false }] },
   { name: "candidate_thankyou", description: "Warm post-call thank-you email to a candidate — recap the fit, share the spec & company, set next steps.", arguments: [{ name: "candidate", description: "candidate name to resolve (optional)", required: false }] },
   { name: "interview_prep", description: "Interview-preparation email for a candidate — time/place, dress, how to prepare, questions to ask.", arguments: [{ name: "candidate", description: "candidate name to resolve (optional)", required: false }] },
+  { name: "client_update", description: "Draft a weekly client update email: what we've done, push/pull, and what we could do to find more.", arguments: [{ name: "client", description: "client / company name", required: false }] },
+  { name: "pipeline_chase", description: "Find candidate sends stalled with a client and draft chase-ups for feedback/next steps.", arguments: [{ name: "job", description: "job title or slug to focus on (optional)", required: false }] },
+  { name: "bd_pitch", description: "BD cold-call pitch for a target contact — opener, value prop, the ask, and objection handling.", arguments: [{ name: "company", description: "target company / contact", required: false }] },
+  { name: "bd_targets", description: "Identify and prioritise key BD targets from the client/BD funnel.", arguments: [] },
+  { name: "spec_pitch", description: "Speculative pitch of a strong candidate to prospective clients (anonymised teaser + email).", arguments: [{ name: "candidate", description: "candidate name (optional)", required: false }] },
 ];
 function monthWindow(month?: string): { from: string; to: string; label: string } {
   if (month && /^\d{4}-\d{2}$/.test(month)) {
@@ -214,6 +220,27 @@ function getPrompt(name: string, args: any): any | null {
   }
   if (name === "interview_prep") {
     return { description: "Interview-prep email", ...msg(candCtx + "Write an interview-preparation email for a candidate who's been requested for interview. Ask for the job/client and the interview time, date and location/format if not provided. Include: confirmation of the scheduled time/date and location or video link; who they'll be meeting; how to dress; how to prepare (company & role research pointers, likely themes); a few strong questions for them to ask; and any logistics / what to bring. Encouraging and confidence-building. Give a subject line, and leave clear [placeholders] for any interview details you weren't given rather than inventing them.") };
+  }
+  const clientArg = (args?.client ?? "").toString().trim();
+  const companyArg = (args?.company ?? "").toString().trim();
+  if (name === "client_update") {
+    const cl = clientArg || "the client";
+    return { description: "Weekly client update", ...msg(`Draft a weekly client update email for ${cl}. First gather the live picture: call client_report with client='${clientArg}' for 2026 year-to-date, and job_pipeline for their open role(s) to see who's in play and at what stage. Then write the email: (1) what we've done this week (CVs sent, interviews arranged, candidates in play per role), (2) the push & pull — what's going well and where we're blocked (e.g. awaiting feedback, spec/salary mismatch, market scarcity), (3) what we could do to find more (concrete next steps from the vacancy checklist — wider search, competitor mapping, referrals). Warm, professional, concise; give a subject line. Keep internal pipeline detail at a level appropriate to share with a client.`) };
+  }
+  if (name === "pipeline_chase") {
+    const j = (args?.job ?? "").toString().trim();
+    const src = j ? `Call job_pipeline with job='${j}' to see who's been submitted and their current stage.` : "Call stalled_report to find aging offers and stalled candidates on open roles firm-wide.";
+    return { description: "Pipeline chase", ...msg(`Find candidate submissions that have stalled with the client and draft chase-ups. ${src} For each candidate who has been sent / waiting more than a few days with no movement, draft a short, friendly chase message to the client asking for feedback or the next step, referencing the specific candidate and role. Lead with the most overdue. Keep each message brief and easy to say yes to. Candidate names appear here only where already shared with that client.`) };
+  }
+  if (name === "bd_pitch") {
+    const co = companyArg || "the target company";
+    return { description: "BD call pitch", ...msg(`Create a BD cold-call pitch for a target contact at ${co}. Ask the consultant for the contact's name/role and anything known about the company if not provided. Build natural spoken talking points: a strong opener (why we're calling), Octagon's relevant track record and the calibre of candidates we have in their space, the value proposition, and a clear ask (a quick intro call, or permission to send a strong candidate). Then give 2-3 likely objections (already using an agency / on a PSL / no roles right now / send terms) with confident, non-pushy responses. Keep it conversational, not a script to read robotically.`) };
+  }
+  if (name === "bd_targets") {
+    return { description: "BD targets", ...msg("Identify and prioritise key BD targets. Call bd_report for the company/BD funnel (Prospect / Engaged / Client / Passive / etc.). Highlight the best opportunities to pursue — e.g. warm prospects with no recent engagement, or sectors where we are candidate-rich (cross-reference match_candidates if useful). Produce a prioritised BD call list with a one-line reason for each, and suggest the single best target to start with today.") };
+  }
+  if (name === "spec_pitch") {
+    return { description: "Speculative candidate pitch", ...msg(candCtx + "Create a speculative pitch to place a strong candidate. If a candidate is named, use find_candidate for context; otherwise help the consultant pick a strong, placeable candidate (e.g. someone recently interviewed well or a hot skill set). Produce: (1) an ANONYMISED candidate teaser to send to target clients — sellable highlights (skills, achievements, availability, salary ballpark) with NO name or current employer, and (2) a short email pitch to a prospective client offering a confidential introduction. Then name the types of companies / specific accounts to target. The goal is to get clients interested enough to engage before any identity is revealed.") };
   }
   return null;
 }
