@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.15.0" };
+const SERVER = { name: "octagon-analytics", version: "3.16.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -367,23 +367,25 @@ async function validateOctagonToken(token: string) {
   const { data } = await db.from("mcp_tokens").select("consultant_recruitcrm_id,can_write").eq("token_hash", await sha256hex(t)).eq("active", true).maybeSingle();
   return data ?? null;
 }
-function authorizePage(p: Record<string, string>, error = ""): string {
-  const esc = (s: string) => (s ?? "").replace(/"/g, "&quot;");
-  const hidden = ["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "response_type", "scope", "resource"].map((k) => `<input type="hidden" name="${k}" value="${esc(p[k] ?? "")}">`).join("");
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Octagon Analytics</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:420px;margin:8vh auto;padding:0 20px;color:#111}h1{font-size:1.2rem}p{color:#555;font-size:.9rem}input[type=password]{width:100%;padding:10px;font-size:1rem;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}button{margin-top:12px;width:100%;padding:10px;font-size:1rem;border:0;border-radius:8px;background:#111;color:#fff;cursor:pointer}.err{color:#b00;font-size:.85rem}</style></head><body><h1>Connect Octagon Analytics</h1><p>Paste your Octagon access token to connect. Ask an admin if you don't have one.</p>${error ? `<p class="err">${error}</p>` : ""}<form method="POST"><input type="password" name="token" placeholder="oct_…" autocomplete="off" autofocus>${hidden}<button type="submit">Authorize</button></form></body></html>`;
-}
+// Supabase can't serve rendered HTML (text/plain + nosniff on the *.supabase.co domain), so the
+// login form is hosted off-Supabase and just POSTs back here. GET hands off to it; POST does the work.
+const LOGIN_URL = "https://www.octagongroup.co.uk/octagon-connect.html";
+const OAUTH_PASSTHRU = ["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "response_type", "scope", "resource"];
 async function handleAuthorize(req: Request): Promise<Response> {
   const u = new URL(req.url);
-  const html = (body: string, status = 200) => new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
   if (req.method === "GET") {
     const p: Record<string, string> = {}; for (const k of u.searchParams.keys()) p[k] = u.searchParams.get(k) ?? "";
     if (p.response_type !== "code" || !p.redirect_uri || !p.code_challenge || p.code_challenge_method !== "S256") return new Response("invalid_request: need response_type=code, redirect_uri, and S256 PKCE", { status: 400, headers: { "Content-Type": "text/plain" } });
     if (!/^https:\/\//.test(p.redirect_uri) && !/^http:\/\/localhost[:/]/.test(p.redirect_uri)) return new Response("invalid redirect_uri", { status: 400, headers: { "Content-Type": "text/plain" } });
-    return html(authorizePage(p));
+    const dest = new URL(LOGIN_URL); for (const k of OAUTH_PASSTHRU) if (p[k]) dest.searchParams.set(k, p[k]);
+    return new Response(null, { status: 302, headers: { Location: dest.toString() } });
   }
   const form = new URLSearchParams(await req.text()); const p: Record<string, string> = {}; for (const [k, v] of form) p[k] = v;
   const who = await validateOctagonToken(p.token ?? "");
-  if (!who) return html(authorizePage(p, "Invalid or inactive token — check it and try again."));
+  if (!who) {
+    const back = new URL(LOGIN_URL); back.searchParams.set("error", "1"); for (const k of OAUTH_PASSTHRU) if (p[k]) back.searchParams.set(k, p[k]);
+    return new Response(null, { status: 302, headers: { Location: back.toString() } });
+  }
   const code = randToken(24);
   await db.from("oauth_codes").insert({ code, consultant_recruitcrm_id: who.consultant_recruitcrm_id, can_write: !!who.can_write, code_challenge: p.code_challenge, redirect_uri: p.redirect_uri, expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString() });
   const redir = new URL(p.redirect_uri); redir.searchParams.set("code", code); if (p.state) redir.searchParams.set("state", p.state);
