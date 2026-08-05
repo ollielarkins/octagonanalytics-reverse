@@ -10,14 +10,15 @@
 //              job_pipeline, stalled_report, my_day, match_candidates, call_activity
 // WRITE tools: update_hiring_stage, assign_candidate, add_note  (require token.can_write;
 //              two-step preview->confirm, optimistic concurrency, audit, write-through)
-// PROMPTS    : weekly_team_review, my_cold_roles, client_health, month_in_review, my_day, match_jd
+// PROMPTS    : dashboard, kpi, weekly_team_review, my_cold_roles, client_health, month_in_review, my_day, match_jd
+//              job_kickoff, job_advert, job_boolean, job_inmail, client_pitch, job_shortlist  (new-job admin pack)
 //
 // Connector URL: https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp
 import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.6.0" };
+const SERVER = { name: "octagon-analytics", version: "3.8.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -100,12 +101,20 @@ const TOOLS = [
 
 // ---- Prompts ---------------------------------------------------------------
 const PROMPTS = [
+  { name: "dashboard", description: "Full live dashboard: KPIs, 2026 funnel, per-consultant performance and the deal pipeline (with sync-health check).", arguments: [] },
+  { name: "kpi", description: "Headline KPI numbers only — placements, open jobs, pipeline value and firm totals, concise.", arguments: [] },
   { name: "weekly_team_review", description: "Week-over-week firm funnel + leaderboard, with call-outs.", arguments: [] },
   { name: "my_cold_roles", description: "Open roles going cold for a named consultant.", arguments: [{ name: "consultant", description: "consultant name", required: true }] },
   { name: "client_health", description: "Account activity, open roles and conversion for one client this year.", arguments: [{ name: "client", description: "client / company name", required: true }] },
   { name: "month_in_review", description: "One-month summary: funnel, placements and revenue.", arguments: [{ name: "month", description: "YYYY-MM (defaults to current month)", required: false }] },
   { name: "my_day", description: "Your personal attention list for today (offers, stalled, cold roles).", arguments: [] },
   { name: "match_jd", description: "Paste a job description -> ranked matching candidates with explained fit.", arguments: [] },
+  { name: "job_kickoff", description: "New-job admin pack: run Octagon's vacancy checklist for a role — research/pitch, top-5 CRM shortlist, then adverts/Boolean/InMail on request.", arguments: [{ name: "job", description: "job title (partial) or slug; you can also just paste the spec", required: false }] },
+  { name: "job_advert", description: "Write the LinkedIn advert and the website advert for a job (from the pasted job spec).", arguments: [{ name: "job", description: "job title or slug for context", required: false }] },
+  { name: "job_boolean", description: "Build Boolean search strings for a job — one for job boards, one for LinkedIn.", arguments: [{ name: "job", description: "job title or slug for context", required: false }] },
+  { name: "job_inmail", description: "Write a short, personalised LinkedIn InMail to approach a candidate about a job.", arguments: [{ name: "job", description: "job title or slug for context", required: false }] },
+  { name: "client_pitch", description: "Create the phone pitch to represent the client for a role — what they do, why it's exciting, process & next steps.", arguments: [{ name: "job", description: "job title or slug for context", required: false }] },
+  { name: "job_shortlist", description: "Top-5 CRM candidates for a job (via skill match), with explained fit and the chasing order — call these first.", arguments: [{ name: "job", description: "job title or slug for context", required: false }] },
 ];
 function monthWindow(month?: string): { from: string; to: string; label: string } {
   if (month && /^\d{4}-\d{2}$/.test(month)) {
@@ -122,6 +131,12 @@ function monthWindow(month?: string): { from: string; to: string; label: string 
 }
 function getPrompt(name: string, args: any): any | null {
   const msg = (text: string) => ({ messages: [{ role: "user", content: { type: "text", text } }] });
+  if (name === "dashboard") {
+    return { description: "Live dashboard", ...msg("Call get_dashboard. FIRST inspect the payload's health object: if health.overall is not 'ok', lead with a clear banner naming the stale or failing feeds (each health.entities[].entity with its .reason) and warn that the figures below may be stale; if it is 'ok', a one-line 'sync healthy' note is enough. Then present the full dashboard: the KPI cards, the 2026 funnel, per-consultant performance (attributed by job owner), and the deal pipeline. Keep it plain — compact tables, no heavy styling.") };
+  }
+  if (name === "kpi") {
+    return { description: "Headline KPIs", ...msg("Call get_dashboard. Glance at health.overall first — if it is not 'ok', add a single-line warning naming the affected feeds (health.entities[].entity) before the numbers. Then present ONLY the headline KPIs, concisely: placements (2026 and all-time), open jobs, open pipeline value, Won revenue, and the firm totals (candidates, clients, jobs, active consultants). Do NOT include the funnel, the per-consultant breakdown, or the deal-pipeline table — just the top-line numbers.") };
+  }
   if (name === "weekly_team_review") {
     return { description: "Weekly team review", ...msg("Give me this week's team review. Call funnel_report for the last 7 days and again for the 7 days before that, and compare week-over-week. Then call consultant_leaderboard ranked by 'placed' for the last 7 days. Summarise concisely: what moved in the funnel, who is ahead, and flag any consultant whose CV->1st-interview rate dropped versus the prior week.") };
   }
@@ -142,6 +157,26 @@ function getPrompt(name: string, args: any): any | null {
   }
   if (name === "match_jd") {
     return { description: "Match a job description to candidates", ...msg("The user has pasted (or will paste) a job description. Extract the key hard skills, tools, and must-have requirements from it as a concise list. Call match_candidates with that skills list (add a location filter only if the JD requires one). Then present the top candidates RANKED by fit, and for each explain WHY — cite which required skills they matched and their recent roles. Flag anyone strong on skills but missing a must-have. If few candidates have skills on file, say so.") };
+  }
+  const jobArg = (args?.job ?? "").toString().trim();
+  const jobCtx = jobArg ? `The job is '${jobArg}' — call job_pipeline with job='${jobArg}' to pull up its title and client for context. ` : "If a job hasn't been named, ask which role this is for. ";
+  if (name === "job_kickoff") {
+    return { description: "New-job admin pack", ...msg(jobCtx + "A new job has come in — run Octagon's vacancy checklist and build the admin pack, conversationally (don't dump everything at once). Steps: (1) Confirm the job and ask the recruiter to paste the full job spec plus any client background if not already provided — you need this to write good content. (2) Research & pitch: summarise what the client does, why the role is exciting, and the application process/next steps the consultant can use on a call. (3) Shortlist: extract the key skills from the spec, call match_candidates, present the top 5 CRM candidates with why each fits, and tell the consultant to CALL these first. (4) Then offer to generate any of: LinkedIn advert, website advert, LinkedIn InMail, Boolean (job boards), Boolean (LinkedIn) — each is also its own command. Candidate names are internal (PII); never invent a salary.") };
+  }
+  if (name === "job_advert") {
+    return { description: "Job adverts", ...msg(jobCtx + "Write recruitment adverts for the role. Ask the recruiter to paste the job spec if they haven't. Produce TWO versions: (1) a LinkedIn advert — punchy, employer voice, hook + role + must-haves + what's on offer + a clear call to action + a few relevant hashtags; (2) a website advert — a little longer, with headings (The Company / The Role / What You'll Need / What's on Offer / How to Apply). Use inclusive, neutral language and never invent a salary — only state pay if the recruiter gave it.") };
+  }
+  if (name === "job_boolean") {
+    return { description: "Boolean searches", ...msg(jobCtx + "Build Boolean search strings for the role. Use the pasted spec (ask for it, or the key skills, if missing). Extract must-have skills, likely job titles and their synonyms. Produce TWO strings: (1) a job-board Boolean (portable across CV databases) and (2) a LinkedIn Boolean (LinkedIn-friendly title/skill phrasing). Group synonyms with OR in parentheses, combine requirements with AND, exclude noise with NOT. Briefly explain your choices so the consultant can tweak.") };
+  }
+  if (name === "job_inmail") {
+    return { description: "LinkedIn InMail", ...msg(jobCtx + "Write a LinkedIn InMail to approach a candidate about the role. Ask for the spec / ideal-candidate profile if needed. Keep it under ~120 words, personalised, leading with why THEM specifically, one sentence on the opportunity, and a low-friction call to action (open to a quick chat?). Warm and human, not salesy. Also give a shorter follow-up variant for a second touch.") };
+  }
+  if (name === "client_pitch") {
+    return { description: "Client phone pitch", ...msg(jobCtx + "Create a phone pitch the consultant can use to represent the client for this role. Ask for the spec / client background if needed. Cover: what the company does (positioning, size, why it's a good place to work), why THIS role is exciting (impact, growth, scope), and the application process & next steps. Lay it out as natural talking points for a call, then add 2-3 likely candidate objections with suggested responses.") };
+  }
+  if (name === "job_shortlist") {
+    return { description: "Top-5 CRM shortlist", ...msg(jobCtx + "Shortlist the top candidates on the CRM for this role. Extract the key hard skills / must-haves from the spec (ask for it if missing). Call match_candidates with those skills (add a location filter only if the role requires one). Present the TOP 5 ranked by fit; for each, explain why — which required skills matched and their recent roles — and flag anyone strong but missing a must-have. Tell the consultant to CALL these first, and remind them of Octagon's chasing order: call → voicemail → text → email → call from a different number → LinkedIn connect + message. Candidate names are internal (PII).") };
   }
   return null;
 }

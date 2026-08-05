@@ -1,0 +1,15 @@
+{
+  "name": "octagon",
+  "description": "Octagon Group internal Claude plugins — live RecruitCRM analytics for recruiters.",
+  "owner": {
+    "name": "Octagon Group",
+    "email": "Olarkins@octagongroup.co.uk"
+  },
+  "plugins": [
+    {
+      "name": "octagon-analytics",
+      "source": "./plugins/octagon-analytics",
+      "description": "Live recruitment analytics through the vetted metrics layer: dashboards, funnel/client reports, /kpi and /dashboard, and the gated write actions. Bundles the Octagon connector."
+    }
+  ]
+}
