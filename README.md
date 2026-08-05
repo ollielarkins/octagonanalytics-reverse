@@ -87,6 +87,7 @@ PROJBRIEF.MD, ROADMAP.MD
 | `dashboard-data` | false | Public JSON API — `dashboard_json()` aggregates only, no PII. Feeds `web/dashboard.html`. |
 | `octagon-mcp` | false | Remote MCP server (Streamable HTTP / JSON-RPC 2.0). Tools below. |
 | `slack-command` | false | Slack slash-command endpoint (`/dashboard`). Verifies the Slack signing secret; returns the live dashboard. |
+| `recruitcrm-webhook` | false | Near-real-time freshness. RecruitCRM POSTs on change; verifies `?key=` secret, logs to `webhook_events`, and fires the incremental sync for the changed entity (~1-3s). Backstopped by the 2-min cron. |
 | `recruitcrm-probe` | true | **Throwaway** diagnostic, locked + gutted. Safe to delete. |
 | `recruitcrm-discover` | true | **Throwaway** discovery probe (pipelines / BD fields), locked + gutted. Safe to delete. |
 | `dashboard` | false | **Defunct** early attempt (Supabase can't serve HTML — see below). Safe to delete. |
@@ -196,6 +197,9 @@ Applied in order (`supabase/migrations/`):
 | 0027 | call_activity | `call_activity` table + `call_activity_report()` (Devyce calls via RecruitCRM `/call-logs`) |
 | 0028 | weekly_kpis | `weekly_targets` table + `kpis_report()` (this-week actuals vs targets, for the inline `weekly_kpis` prompt) |
 | 0029 | kpis_expand | Expand `kpis_report()` to the full weekly KPI set (interview_request, BD/client call split) + load firm-wide targets |
+| 0030 | billing_targets | `billing_targets` table + `billing_report()` (quarter-to-date Won vs target, owner-attributed) |
+| 0031 | billing_report_definition | Corrected `billing_report()` wording after the deals sync landed (Won is the real billing figure) |
+| 0032 | webhook_events | Audit log for the `recruitcrm-webhook` receiver (raw payload + routed entity) |
 
 ### Cron schedule
 
