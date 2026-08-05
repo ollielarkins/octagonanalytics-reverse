@@ -1,5 +1,5 @@
 // recruitcrm-sync — RecruitCRM → Supabase mirror. Locked (verify_jwt=true).
-// Entities: consultants, clients, jobs, candidates.
+// Entities: consultants, clients, jobs, candidates, calls (call_activity via /call-logs).
 // Modes: backfill | incremental | reconcile | history (candidate_stage_events).
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -38,6 +38,25 @@ const mapCandidate = (c: any) => ({
   skill: Array.isArray(c.skill) ? c.skill.join(", ") : (c.skill ?? null),
   created_date: c.created_on ?? null, updated_date: c.updated_on ?? null,
 });
+function mapCallFactory(consName: Map<any, any>) {
+  return (x: any) => ({
+    recruitcrm_id: x.id,
+    call_type: x.call_type ?? null,
+    custom_call_type: x.custom_call_type?.label ?? (typeof x.custom_call_type === "string" ? x.custom_call_type : null),
+    call_started_on: x.call_started_on ?? null,
+    call_date: x.call_started_on ? String(x.call_started_on).slice(0, 10) : null,
+    duration_seconds: typeof x.duration === "number" ? x.duration : null,
+    connected: typeof x.duration === "number" ? x.duration > 0 : null,
+    consultant_recruitcrm_id: x.created_by ?? null,
+    consultant: consName.get(x.created_by) ?? null,
+    related_to: x.related_to ?? null,
+    related_to_type: x.related_to_type ?? null,
+  });
+}
+async function consNameMap() {
+  const { data } = await db.from("consultants").select("recruitcrm_id,name");
+  return new Map((data ?? []).map((c: any) => [c.recruitcrm_id, c.name]));
+}
 function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
   return (job: any) => ({
     recruitcrm_id: job.id, slug: job.slug ?? null, title: job.name ?? null,
@@ -188,6 +207,7 @@ Deno.serve(async (req) => {
       if (entity === "all" || entity === "clients") out.results.push(await incremental("clients", "companies", mapClient, "clients"));
       if (entity === "all" || entity === "candidates") out.results.push(await incremental("candidates", "candidates", mapCandidate, "candidates"));
       if (entity === "all" || entity === "jobs") { const [cb, sb] = await jobMaps(); out.results.push(await incremental("jobs", "jobs", mapJobFactory(cb, sb), "jobs")); }
+      if (entity === "all" || entity === "calls") { const cn = await consNameMap(); out.results.push(await incremental("calls", "call-logs", mapCallFactory(cn), "call_activity")); }
       return Response.json(out);
     }
 
@@ -207,7 +227,8 @@ Deno.serve(async (req) => {
     if (entity === "clients") return Response.json(await backfillLoop("clients", startPage, maxPages, "companies", mapClient, "clients"));
     if (entity === "candidates") return Response.json(await backfillLoop("candidates", startPage, maxPages, "candidates", mapCandidate, "candidates"));
     if (entity === "jobs") { const [cb, sb] = await jobMaps(); return Response.json(await backfillLoop("jobs", startPage, maxPages, "jobs", mapJobFactory(cb, sb), "jobs")); }
-    return Response.json({ error: "entity must be consultants|clients|candidates|jobs" }, { status: 400 });
+    if (entity === "calls") { const cn = await consNameMap(); return Response.json(await backfillLoop("calls", startPage, maxPages, "call-logs", mapCallFactory(cn), "call_activity")); }
+    return Response.json({ error: "entity must be consultants|clients|candidates|jobs|calls" }, { status: 400 });
   } catch (e) {
     return Response.json({ error: String(e) }, { status: 500 });
   }

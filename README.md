@@ -83,7 +83,7 @@ PROJBRIEF.MD, ROADMAP.MD
 
 | Function | `verify_jwt` | Purpose |
 |---|---|---|
-| `recruitcrm-sync` | true | Sync engine. Modes: `backfill`, `incremental`, `reconcile`, `history`. Invoked by cron / server-side. |
+| `recruitcrm-sync` | true | Sync engine. Entities: consultants, clients, jobs, candidates, **calls** (Devyce call-logs). Modes: `backfill`, `incremental`, `reconcile`, `history`. Cron / server-side. |
 | `dashboard-data` | false | Public JSON API — `dashboard_json()` aggregates only, no PII. Feeds `web/dashboard.html`. |
 | `octagon-mcp` | false | Remote MCP server (Streamable HTTP / JSON-RPC 2.0). Tools below. |
 | `slack-command` | false | Slack slash-command endpoint (`/dashboard`). Verifies the Slack signing secret; returns the live dashboard. |
@@ -113,6 +113,7 @@ PROJBRIEF.MD, ROADMAP.MD
 | `stalled_report` | read | Firm-wide attention list: aging offers + stalled candidates on open roles (PII). |
 | `my_day` | read | One consultant's attention list; auto-scopes to the caller's token (PII). |
 | `match_candidates` | read | JD→candidate: rank candidates by skill match, with matched skills + roles (PII). |
+| `call_activity` | read | Telephony activity (Devyce→RecruitCRM): calls, connect rate, talk-time, by consultant/category. |
 | `update_hiring_stage` | **write** | Moves a candidate's hiring stage in RecruitCRM (`create_placement` on Placed). |
 | `assign_candidate` | **write** | Assigns a candidate to a job in RecruitCRM. |
 | `add_note` | **write** | Adds a note to a candidate or job (POST /v1/notes), attributed to the actor. |
@@ -185,6 +186,7 @@ Applied in order (`supabase/migrations/`):
 | 0024 | attention_alerts | `stalled_report()` + `my_day()` + `post_standup()` (weekday Slack standup) |
 | 0025 | refine_attention | Bound "needs attention" to open roles + a recent window (kills 1000-day-old noise) |
 | 0026 | candidate_matching | `candidates.skill` + `match_candidates()` (JD→candidate skill matching, pg_trgm) |
+| 0027 | call_activity | `call_activity` table + `call_activity_report()` (Devyce calls via RecruitCRM `/call-logs`) |
 
 ### Cron schedule
 
