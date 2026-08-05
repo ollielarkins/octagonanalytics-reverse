@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.16.1" };
+const SERVER = { name: "octagon-analytics", version: "3.17.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -76,10 +76,10 @@ async function authenticate(req: Request, args: any): Promise<{ ok: boolean; act
   const token = (bearer || req.headers.get("x-octagon-token") || args?.auth_token || "").trim();
   if (!token) return { ok: false, reason: "Authentication required. Configure this connector with your Octagon access token (an admin mints one via mint_mcp_token)." };
   const hash = await sha256hex(token);
-  const { data } = await db.from("mcp_tokens").select("consultant_recruitcrm_id,label,can_write").eq("token_hash", hash).eq("active", true).maybeSingle();
+  const { data } = await db.from("mcp_tokens").select("consultant_recruitcrm_id,label,can_write,is_admin").eq("token_hash", hash).eq("active", true).maybeSingle();
   if (!data) return { ok: false, reason: "Invalid or revoked token." };
   db.from("mcp_tokens").update({ last_used_at: new Date().toISOString() }).eq("token_hash", hash).then(() => {}, () => {});
-  return { ok: true, actor: { id: data.consultant_recruitcrm_id, label: data.label, can_write: data.can_write } };
+  return { ok: true, actor: { id: data.consultant_recruitcrm_id, label: data.label, can_write: data.can_write, is_admin: !!data.is_admin } };
 }
 
 const AUTH_ARG = { auth_token: { type: "string", description: "Octagon access token (only needed if the connector isn't sending it as a bearer header)." } };
@@ -256,7 +256,20 @@ async function callTool(name: string, args: any, req: Request) {
   const actor = auth.actor;
   logCall(actor.id, name);
 
-  if (name === "get_dashboard") { const { data, error } = await db.rpc("dashboard_json"); return toolText(error ? { error: error.message } : data); }
+  if (name === "get_dashboard") {
+    const { data, error } = await db.rpc("dashboard_json");
+    if (error) return toolText({ error: error.message });
+    // Identity-aware scoping: firm totals (KPIs/funnel/pipeline/health) for everyone; the per-recruiter
+    // breakdown only for admins/managers. Regular recruiters instead get their OWN scorecard.
+    let viewerName: string | null = null;
+    if (actor.id) { const { data: c } = await db.from("consultants").select("name").eq("recruitcrm_id", actor.id).maybeSingle(); viewerName = c?.name ?? null; }
+    const [{ data: wk }, { data: bill }] = await Promise.all([db.rpc("kpis_report"), db.rpc("billing_report")]);
+    const myWeekly = viewerName ? ((wk?.consultants ?? []).find((x: any) => x.name === viewerName) ?? null) : null;
+    const myBilling = viewerName ? ((bill?.consultants ?? []).find((x: any) => x.name === viewerName) ?? null) : null;
+    data.viewer = { name: viewerName ?? (actor.is_admin ? "Admin" : null), is_admin: !!actor.is_admin, my_weekly: myWeekly, my_billing: myBilling };
+    if (!actor.is_admin) delete data.consultants;   // hide the whole-team per-recruiter breakdown from regular recruiters
+    return toolText(data);
+  }
   if (name === "funnel_report") {
     const { data, error } = await db.rpc("funnel_report", { p_from: args?.from ?? "2026-01-01", p_to: args?.to ?? "2100-01-01", p_consultant: args?.consultant ?? null, p_team: args?.team ?? null });
     return toolText(error ? { error: error.message } : data);
