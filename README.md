@@ -108,6 +108,8 @@ PROJBRIEF.MD, ROADMAP.MD
 | `placements_report` | read | Placed count (event-stream) + Won revenue, by consultant/client. |
 | `consultant_leaderboard` | read | Consultants ranked by placed / cv_sent / first_interview. |
 | `bd_report` | read | Client/BD funnel — companies by "Company Status" (Prospect / Client / …). |
+| `find_candidate` | read | Name → candidate_slug + current stage per job (PII; resolves who to act on). |
+| `job_pipeline` | read | A job's candidates in play + current stage + in-play count (PII). |
 | `update_hiring_stage` | **write** | Moves a candidate's hiring stage in RecruitCRM (`create_placement` on Placed). |
 | `assign_candidate` | **write** | Assigns a candidate to a job in RecruitCRM. |
 
@@ -173,6 +175,7 @@ Applied in order (`supabase/migrations/`):
 | 0020 | fix_cold_jobs_count | Bugfix: `cold_jobs.cold_count` counted the limited set, not the true total |
 | 0021 | third_interview_in_funnel | Surface `3rd Interview` (= "Internal Interview") in `funnel_report` + `dashboard_json` |
 | 0022 | bd_funnel | `clients.company_status` + `bd_report()` (client/BD funnel from the company "Company Status" field) |
+| 0023 | lookup_functions | `find_candidate()` + `job_pipeline()` — name/job → slug + current stage (precursors to the write tools) |
 
 ### Cron schedule
 
