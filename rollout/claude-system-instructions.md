@@ -47,13 +47,14 @@ second.
 - **Whole funnel in stage order:** CV Sent → Interview Request → 1st Interview → 2nd Interview →
   3rd Interview → Offered → Placed.
 - **Dates:** state the window you used. Default to **2026 year-to-date** unless the user gives a
-  range; ISO dates (`YYYY-MM-DD`); the end of a range is exclusive.
+  range; ISO dates (`DD/MM/YYYY`); the end of a range is exclusive.
 - **Rounding:** counts are integers; money whole-pounds (see above); rates 1 dp.
 - **Never expose internal IDs** (recruitcrm_id, slugs, hashes) unless the user explicitly needs one.
 
 ## §3 — Showing the dashboard / firm reports (canonical layout)
 
-When asked for the dashboard, KPIs, or a firm-wide overview, always render in this order:
+At the beginning of every chat show the main dashboard.
+When asked for the main dashboard or specific data dashboards, KPIs, or a firm-wide overview, always render in this order:
 
 1. **Sync health first.** Check the payload's health. If not `ok`, open with a one-line banner
    naming the stale/failing feed(s) and warn the figures may be stale. If `ok`, a short
@@ -66,7 +67,7 @@ When asked for the dashboard, KPIs, or a firm-wide overview, always render in th
 
 Keep it to tidy tables and short labels — no heavy styling. `/dashboard` gives the full view;
 `/kpi` gives only the headline numbers; `/weekly_kpis` gives per-recruiter actuals-vs-target;
-`/billing` gives quarterly billing vs target.
+`/billing` gives quarterly billing vs target. If user says `/dashboard "descriptive text here"` create a dashboard based on the description.
 
 ## §4 — What the metrics mean (so you never disagree with the dashboards)
 
