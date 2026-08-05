@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.13.0" };
+const SERVER = { name: "octagon-analytics", version: "3.14.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -350,6 +350,10 @@ async function handle(m: any, req: Request): Promise<any> {
 Deno.serve(async (req) => {
   const headers: Record<string, string> = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "POST, GET, OPTIONS" };
   if (req.method === "OPTIONS") return new Response(null, { headers });
+  // Do NOT answer OAuth/discovery probes with a 200 — otherwise connector clients (claude.ai) think
+  // this server has an OAuth sign-in service and try to register a client against it, which fails.
+  // 404 anything that isn't the MCP endpoint itself (well-known paths, /register, etc.).
+  if (new URL(req.url).pathname.includes("/.well-known/")) return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers });
   if (req.method === "GET") return new Response(JSON.stringify({ name: SERVER.name, version: SERVER.version, transport: "streamable-http" }), { headers });
   let msg: any; try { msg = await req.json(); } catch { return new Response(JSON.stringify(rpcErr(null, -32700, "Parse error")), { headers }); }
   if (Array.isArray(msg)) { const out = (await Promise.all(msg.map((x) => handle(x, req)))).filter((x) => x !== null); return new Response(out.length ? JSON.stringify(out) : "", { status: out.length ? 200 : 202, headers }); }
