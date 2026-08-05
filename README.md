@@ -86,7 +86,7 @@ PROJBRIEF.MD, ROADMAP.MD
 | `recruitcrm-sync` | true | Sync engine. Entities: consultants, clients, jobs, candidates, **calls** (Devyce call-logs). Modes: `backfill`, `incremental`, `reconcile`, `history`. Cron / server-side. |
 | `dashboard-data` | false | Public JSON API — `dashboard_json()` aggregates only, no PII. Feeds `web/dashboard.html`. |
 | `octagon-mcp` | false | Remote MCP server (Streamable HTTP / JSON-RPC 2.0). Tools below. |
-| `slack-command` | false | Slack slash-command endpoint (`/dashboard`). Verifies the Slack signing secret; returns the live dashboard. |
+| `slack-command` | false | Team-wide Slack slash commands `/dashboard` (+ optional text view) and `/kpis`. Verifies the Slack signing secret. |
 | `recruitcrm-probe` | true | **Throwaway** diagnostic, locked + gutted. Safe to delete. |
 | `recruitcrm-discover` | true | **Throwaway** discovery probe (pipelines / BD fields), locked + gutted. Safe to delete. |
 | `dashboard` | false | **Defunct** early attempt (Supabase can't serve HTML — see below). Safe to delete. |
@@ -187,6 +187,7 @@ Applied in order (`supabase/migrations/`):
 | 0025 | refine_attention | Bound "needs attention" to open roles + a recent window (kills 1000-day-old noise) |
 | 0026 | candidate_matching | `candidates.skill` + `match_candidates()` (JD→candidate skill matching, pg_trgm) |
 | 0027 | call_activity | `call_activity` table + `call_activity_report()` (Devyce calls via RecruitCRM `/call-logs`) |
+| 0028 | weekly_kpis | `weekly_targets` table + `kpis_report()` (this-week actuals vs targets, for `/kpis`) |
 
 ### Cron schedule
 
@@ -281,12 +282,28 @@ update app_settings set value='https://hooks.slack.com/…' where key='standup_w
 ```
 Recruiters can also pull their own list any time via the `my_day` prompt/tool in Claude.
 
-**Slack `/dashboard` command** (admin, optional): a slash command that returns the live
-dashboard in Slack. (1) Set the Supabase secret `SLACK_SIGNING_SECRET` to your Slack app's
-Signing Secret. (2) In the Slack app → **Slash Commands** → add `/dashboard` with Request URL
+**Slack slash commands** (team-wide): `/dashboard` and `/kpis`. (1) Set the Supabase secret
+`SLACK_SIGNING_SECRET` to your Slack app's Signing Secret. (2) In the Slack app → **Slash
+Commands**, add both `/dashboard` and `/kpis`, each with Request URL
 `https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/slack-command`. The endpoint verifies
-the Slack signature, so it stays fail-safe (refuses) until the secret is set. Replies are
-ephemeral (only the person who runs it sees the result).
+the Slack signature (fail-safe until the secret is set) and posts the result to the channel.
+- `/dashboard` — the standard live dashboard.
+- `/dashboard <text>` — a specific view; the text is routed by keyword / month / consultant
+  name, e.g. `/dashboard july funnel`, `/dashboard Keelan`, `/dashboard bd`, `/dashboard calls`,
+  `/dashboard leaderboard q2`, `/dashboard cold`, `/dashboard time to fill`. Unrecognised text
+  falls back to the overview with a hint.
+- `/kpis` — this-week actuals vs weekly targets, per recruiter.
+
+**Load weekly KPI targets** (admin) for `/kpis`. One row per consultant per metric
+(`cv_sent`, `calls`, `first_interview`, `placed`); find ids in the `consultants` table:
+```sql
+insert into weekly_targets (consultant_recruitcrm_id, metric, weekly_target) values
+  (<recruitcrm_id>, 'cv_sent', 10),
+  (<recruitcrm_id>, 'calls', 100),
+  (<recruitcrm_id>, 'first_interview', 3),
+  (<recruitcrm_id>, 'placed', 1)
+on conflict (consultant_recruitcrm_id, metric) do update set weekly_target = excluded.weekly_target;
+```
 
 **Roll the connector out to the team** (admin, in claude.ai):
 1. Add the `octagon-mcp` URL as an **org connector** (Settings → Connectors); each member

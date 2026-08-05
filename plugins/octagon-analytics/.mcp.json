@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "octagon-analytics": {
+      "url": "https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp",
+      "headers": {
+        "Authorization": "Bearer ${OCTAGON_MCP_TOKEN}"
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "octagon-analytics",
+  "displayName": "Octagon Analytics",
+  "version": "1.0.0",
+  "description": "Live RecruitCRM recruitment analytics for Octagon recruiters, through a vetted metrics layer that matches the dashboards exactly. Bundles the Octagon connector plus /kpi and /dashboard commands.",
+  "author": {
+    "name": "Octagon Group",
+    "email": "Olarkins@octagongroup.co.uk"
+  },
+  "keywords": ["recruitment", "recruitcrm", "analytics", "octagon"],
+  "mcpServers": "./.mcp.json",
+  "hooks": "./hooks/hooks.json"
+}
