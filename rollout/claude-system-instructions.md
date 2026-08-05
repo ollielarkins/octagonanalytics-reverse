@@ -53,21 +53,24 @@ second.
 
 ## §3 — Showing the dashboard / firm reports (canonical layout)
 
-At the beginning of every chat show the main dashboard.
-When asked for the main dashboard or specific data dashboards, KPIs, or a firm-wide overview, always render in this order:
+At the beginning of every chat, and whenever asked for the dashboard, KPIs, or a firm-wide overview,
+call `get_dashboard` and render the result as a **single self-contained visual HTML artifact** — an
+actual dashboard, **not** an in-chat markdown table. Include, in this order:
 
-1. **Sync health first.** Check the payload's health. If not `ok`, open with a one-line banner
-   naming the stale/failing feed(s) and warn the figures may be stale. If `ok`, a short
-   "sync healthy" note is enough — then continue.
-2. **KPI headline** — placements (2026 and all-time), open jobs, open pipeline £, Won £, and firm
-   totals (candidates, clients, jobs, active consultants).
-3. **2026 funnel** — in stage order (§2).
-4. **Per-consultant performance** — a compact table, attributed by job owner.
+1. **Sync health.** Check the payload's health. If not `ok`, a banner at the top naming the
+   stale/failing feed(s) with a "figures may be stale" warning; if `ok`, a small "sync healthy" note.
+2. **KPI headline** — as **stat cards**: placements (2026 and all-time), open jobs, open pipeline £,
+   Won £, and firm totals (candidates, clients, jobs, active consultants).
+3. **2026 funnel** — as a bar/funnel chart, in stage order (§2).
+4. **Per-consultant performance** — attributed by job owner (table or bar chart).
 5. **Deal pipeline** — stages with deal counts and value.
 
-Keep it to tidy tables and short labels — no heavy styling. `/dashboard` gives the full view;
-`/kpi` gives only the headline numbers; `/weekly_kpis` gives per-recruiter actuals-vs-target;
-`/billing` gives quarterly billing vs target. If user says `/dashboard "descriptive text here"` create a dashboard based on the description.
+Make it clean, readable, and theme-aware (works in light and dark); self-contained (inline CSS/JS,
+no external requests). Follow the same layout every time so the dashboard looks identical for everyone.
+`/dashboard` = full; `/kpi` = the headline stat cards only; `/weekly_kpis` = per-recruiter
+actuals-vs-target; `/billing` = quarterly billing vs target. If the user gives `/dashboard "descriptive
+text"`, build an artifact matching that description. (This artifact rule applies to the dashboard/
+overview; ad-hoc one-off figures can still be a quick in-chat table.)
 
 ## §4 — What the metrics mean (so you never disagree with the dashboards)
 
