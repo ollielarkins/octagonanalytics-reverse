@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.17.0" };
+const SERVER = { name: "octagon-analytics", version: "3.18.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -83,8 +83,59 @@ async function authenticate(req: Request, args: any): Promise<{ ok: boolean; act
 }
 
 const AUTH_ARG = { auth_token: { type: "string", description: "Octagon access token (only needed if the connector isn't sending it as a bearer header)." } };
+
+// ---- MCP Apps (SEP-1865) inline dashboard widget ------------------------------------------------
+const MCP_APP_MIME = "text/html;profile=mcp-app";
+const DASH_UI = "ui://octagon/dashboard";
+// Self-contained widget: talks to the host over postMessage JSON-RPC, renders get_dashboard's
+// structuredContent inline. No external requests (sandboxed iframe).
+const DASHBOARD_WIDGET_HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
+:root{--bg:#fff;--fg:#111;--mut:#666;--card:#f6f6f7;--line:#e6e6e8;--accent:#111;--good:#137333;--bad:#b00020}
+@media (prefers-color-scheme:dark){:root{--bg:#191919;--fg:#f2f2f2;--mut:#9a9a9a;--card:#242424;--line:#333;--accent:#e8e8e8}}
+:root[data-theme=dark]{--bg:#191919;--fg:#f2f2f2;--mut:#9a9a9a;--card:#242424;--line:#333;--accent:#e8e8e8}
+:root[data-theme=light]{--bg:#fff;--fg:#111;--mut:#666;--card:#f6f6f7;--line:#e6e6e8;--accent:#111}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);padding:16px;font-size:14px}
+h1{font-size:1.05rem;margin:0 0 4px}.sub{margin-bottom:12px}
+.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:.7rem;font-weight:600}
+.ok{background:rgba(19,115,51,.16);color:var(--good)}.stale{background:rgba(176,0,32,.16);color:var(--bad)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(116px,1fr));gap:8px;margin-bottom:8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.card .v{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums}.card .l{color:var(--mut);font-size:.68rem;margin-top:2px}
+h2{font-size:.74rem;margin:18px 0 6px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
+.bar{display:flex;align-items:center;gap:8px;margin:3px 0}.bar .lab{width:118px;color:var(--mut);font-size:.75rem}
+.bar .track{flex:1;background:var(--card);border-radius:6px;overflow:hidden;height:16px}.bar .fill{height:100%;background:var(--accent);opacity:.85}
+.bar .n{width:48px;text-align:right;font-variant-numeric:tabular-nums;font-size:.78rem}
+table{width:100%;border-collapse:collapse;font-size:.78rem}th,td{text-align:left;padding:4px 6px;border-bottom:1px solid var(--line)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.kpi{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line);font-size:.82rem}
+.behind{color:var(--bad);font-weight:700}.met{color:var(--good);font-weight:600}
+.banner{background:rgba(176,0,32,.12);color:var(--bad);border:1px solid rgba(176,0,32,.3);border-radius:8px;padding:8px 10px;font-size:.78rem;margin-bottom:12px}
+</style></head><body><div id="app"><div class="sub">Loading dashboard…</div></div><script>
+var GBP=function(n){return n==null?'—':'£'+Math.round(Number(n)).toLocaleString('en-GB')};
+var N=function(n){return n==null?'—':Number(n).toLocaleString('en-GB')};
+function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+function render(d){if(!d)return;var h=d.health||{},k=d.kpis||{},f=d.funnel||{},pl=d.pipeline||[],v=d.viewer||{},o='';
+o+='<h1>Octagon Recruitment Dashboard</h1>';var ok=(h.overall==='ok');
+o+='<div class="sub"><span class="pill '+(ok?'ok':'stale')+'">'+(ok?'sync healthy':'sync issue')+'</span></div>';
+if(!ok){var fe=(h.entities||[]).filter(function(e){return e.status!=='ok'}).map(function(e){return esc(e.entity)+' ('+esc(e.reason)+')'}).join(', ');o+='<div class="banner">Sync not OK — figures may be stale: '+(fe||'unknown')+'</div>'}
+var cd=[['Placed 2026',N(k.placed_2026)],['Placed all-time',N(k.placed_all)],['Open jobs',N(k.open_jobs)],['Open pipeline',GBP(k.open_pipeline)],['Won',GBP(k.won)],['Candidates',N(k.candidates)],['Clients',N(k.clients)],['Consultants',N(k.consultants)]];
+o+='<div class="cards">'+cd.map(function(c){return '<div class="card"><div class="v">'+c[1]+'</div><div class="l">'+c[0]+'</div></div>'}).join('')+'</div>';
+var st=[['CV Sent',f.cv_sent],['Interview Request',f.interview_request],['1st Interview',f.first_interview],['2nd Interview',f.second_interview],['3rd Interview',f.third_interview],['Offered',f.offered],['Placed',f.placed]];
+var mx=Math.max.apply(null,st.map(function(s){return s[1]||0}).concat([1]));
+o+='<h2>2026 Funnel</h2>'+st.map(function(s){var w=Math.round(100*(s[1]||0)/mx);return '<div class="bar"><span class="lab">'+s[0]+'</span><span class="track"><span class="fill" style="width:'+w+'%"></span></span><span class="n">'+N(s[1]||0)+'</span></div>'}).join('');
+if(pl.length){o+='<h2>Deal Pipeline</h2><table><tr><th>Stage</th><th class="num">Deals</th><th class="num">Value</th></tr>'+pl.map(function(p){return '<tr><td>'+esc(p.stage)+'</td><td class="num">'+N(p.deals)+'</td><td class="num">'+GBP(p.value)+'</td></tr>'}).join('')+'</table>'}
+if(v.my_weekly){var w=v.my_weekly,rw=[['CV sends','cv_sent'],['Interview requests','interview_request'],['Interviews','first_interview'],['BD calls','bd_calls'],['Client calls','client_calls']];o+='<h2>Your week'+(v.name?' — '+esc(v.name):'')+'</h2>'+rw.map(function(r){var m=w[r[1]]||{},a=m.actual||0,t=m.target,cl=(t!=null&&a<t)?'behind':'met';return '<div class="kpi"><span>'+r[0]+'</span><span class="'+cl+'">'+a+(t!=null?' / '+t:'')+'</span></div>'}).join('')}
+if(v.my_billing){var b=v.my_billing;o+='<h2>Your billing (quarter)</h2><div class="kpi"><span>Won this quarter</span><span>'+GBP(b.won_qtr)+(b.quarterly_target!=null?' / '+GBP(b.quarterly_target):'')+'</span></div><div class="kpi"><span>Open pipeline</span><span>'+GBP(b.pipeline_open)+'</span></div>'}
+if(d.consultants&&d.consultants.length){o+='<h2>Team — by job owner</h2><table><tr><th>Consultant</th><th class="num">CV</th><th class="num">1st Int</th><th class="num">Placed</th></tr>'+d.consultants.map(function(c){return '<tr><td>'+esc(c.name)+'</td><td class="num">'+N(c.cv_sent)+'</td><td class="num">'+N(c.first_interview)+'</td><td class="num">'+N(c.placed)+'</td></tr>'}).join('')+'</table>'}
+document.getElementById('app').innerHTML=o}
+window.addEventListener('message',function(ev){var m=ev.data;if(!m||m.jsonrpc!=='2.0')return;
+if(m.id===1&&m.result&&m.result.hostContext&&m.result.hostContext.theme)document.documentElement.setAttribute('data-theme',m.result.hostContext.theme);
+if(m.method==='ui/notifications/tool-result'&&m.params&&m.params.structuredContent)render(m.params.structuredContent)});
+window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{capabilities:{},clientInfo:{name:'octagon-dashboard',version:'1.0'},protocolVersion:'2026-01-26',appCapabilities:{availableDisplayModes:['inline','fullscreen']}}},'*');
+</script></body></html>`;
+
 const TOOLS = [
-  { name: "get_dashboard", description: "Live Octagon recruitment dashboard (KPIs, 2026 funnel, per-consultant performance, deal pipeline, sync health). Aggregates only, no PII. Call at the start of a conversation and for firm-wide overviews.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
+  { name: "get_dashboard", description: "Live Octagon recruitment dashboard (KPIs, 2026 funnel, per-consultant performance, deal pipeline, sync health). Aggregates only, no PII. Call at the start of a conversation and for firm-wide overviews. Renders as an inline dashboard widget.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: DASH_UI, visibility: ["model", "app"] } } },
   { name: "funnel_report", description: "Recruitment funnel + conversion ratios for a date window, optionally filtered to one consultant (partial name match) or team. Use for 'how did Keelan do in Q2', 'the tech team last month', 'firm funnel this year'. Dates ISO (YYYY-MM-DD); 'to' is exclusive. Defaults to 2026 YTD. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "client_report", description: "Per-client (account) activity for a window: CVs sent, first interviews, placements, open/total jobs, and CV->placed rate, ranked by volume. Use for 'how is <client> doing', 'our busiest accounts this year'. ~40% of jobs have no resolved client (archived companies) and are omitted. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, client: { type: "string", description: "client name, partial match" }, limit: { type: "integer" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "time_to_fill", description: "Time-to-fill in days (job created -> first placement) for jobs placed in the window: firm avg/median/min/max plus a per-consultant breakdown. Owner-attributed. Use for 'how long are we taking to fill roles', 'time to fill by consultant'. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -268,7 +319,10 @@ async function callTool(name: string, args: any, req: Request) {
     const myBilling = viewerName ? ((bill?.consultants ?? []).find((x: any) => x.name === viewerName) ?? null) : null;
     data.viewer = { name: viewerName ?? (actor.is_admin ? "Admin" : null), is_admin: !!actor.is_admin, my_weekly: myWeekly, my_billing: myBilling };
     if (!actor.is_admin) delete data.consultants;   // hide the whole-team per-recruiter breakdown from regular recruiters
-    return toolText(data);
+    // MCP Apps: structuredContent drives the inline widget; content is the model-facing fallback.
+    const k = data?.kpis ?? {};
+    const summary = `Octagon dashboard (shown as an inline widget). Placed 2026: ${k.placed_2026 ?? "?"}, all-time: ${k.placed_all ?? "?"}; open jobs: ${k.open_jobs ?? "?"}; open pipeline £${Math.round(k.open_pipeline ?? 0).toLocaleString("en-GB")}; Won £${Math.round(k.won ?? 0).toLocaleString("en-GB")}. Sync: ${data?.health?.overall ?? "?"}.`;
+    return { content: [{ type: "text", text: summary }], structuredContent: data, _meta: { ui: { resourceUri: DASH_UI } } };
   }
   if (name === "funnel_report") {
     const { data, error } = await db.rpc("funnel_report", { p_from: args?.from ?? "2026-01-01", p_to: args?.to ?? "2100-01-01", p_consultant: args?.consultant ?? null, p_team: args?.team ?? null });
@@ -341,7 +395,12 @@ async function callTool(name: string, args: any, req: Request) {
 
 async function handle(m: any, req: Request): Promise<any> {
   const { id, method, params } = m ?? {};
-  if (method === "initialize") return rpc(id, { protocolVersion: params?.protocolVersion || "2025-06-18", capabilities: { tools: {}, prompts: {} }, serverInfo: SERVER });
+  if (method === "initialize") return rpc(id, { protocolVersion: params?.protocolVersion || "2025-06-18", capabilities: { tools: {}, prompts: {}, resources: {}, extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [MCP_APP_MIME] } } }, serverInfo: SERVER });
+  if (method === "resources/list") return rpc(id, { resources: [{ uri: DASH_UI, name: "octagon_dashboard", mimeType: MCP_APP_MIME }] });
+  if (method === "resources/read") {
+    if (params?.uri === DASH_UI) return rpc(id, { contents: [{ uri: DASH_UI, mimeType: MCP_APP_MIME, text: DASHBOARD_WIDGET_HTML }] });
+    return rpcErr(id, -32602, "Unknown resource: " + params?.uri);
+  }
   if (typeof method === "string" && method.startsWith("notifications/")) return null;
   if (method === "ping") return rpc(id, {});
   if (method === "tools/list") return rpc(id, { tools: TOOLS });
