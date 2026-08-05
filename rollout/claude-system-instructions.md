@@ -59,6 +59,11 @@ Apps)**: the result renders **automatically as the standard inline dashboard wid
 conversation. **Do NOT build your own HTML artifact or in-chat markdown table for the standard
 dashboard** — the widget *is* the dashboard, and building your own duplicates it.
 
+Call `get_dashboard` **fresh every time** the user asks — never assume a previous dashboard is still
+"above" and never tell the user it "loaded above". Alongside the widget, give a **one-line text
+summary** of the headline figures (the tool returns them as text) so the numbers are visible even if
+the widget is slow or the host doesn't render it.
+
 The widget already renders, in order: sync-health banner (only if not `ok`); firm KPI stat cards
 (placements 2026 & all-time, open jobs, open pipeline £, Won £, firm totals); the 2026 funnel; the
 deal pipeline; and the **viewer's own** weekly KPIs-vs-target + billing-vs-target. The whole-team
