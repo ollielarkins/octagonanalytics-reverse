@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.14.0" };
+const SERVER = { name: "octagon-analytics", version: "3.15.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -347,14 +347,89 @@ async function handle(m: any, req: Request): Promise<any> {
   return rpcErr(id, -32601, "Method not found: " + method);
 }
 
+// ---- OAuth 2.1 bridge --------------------------------------------------------------------------
+// claude.ai's connector requires OAuth. We speak it, but the "login" is simply: paste your Octagon
+// token -> we validate it against mcp_tokens -> issue an OAuth access token (also stored in
+// mcp_tokens) mapped to that consultant. So claude.ai gets OAuth; we keep per-user identity.
+const OAUTH_BASE = "https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp";
+const CORS: Record<string, string> = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "POST, GET, OPTIONS" };
+const AS_METADATA = { issuer: OAUTH_BASE, authorization_endpoint: `${OAUTH_BASE}/authorize`, token_endpoint: `${OAUTH_BASE}/token`, registration_endpoint: `${OAUTH_BASE}/register`, response_types_supported: ["code"], grant_types_supported: ["authorization_code"], code_challenge_methods_supported: ["S256"], token_endpoint_auth_methods_supported: ["none"], scopes_supported: ["mcp"] };
+const PR_METADATA = { resource: OAUTH_BASE, authorization_servers: [OAUTH_BASE], scopes_supported: ["mcp"], bearer_methods_supported: ["header"] };
+
+async function sha256b64url(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  let bin = ""; for (const b of new Uint8Array(buf)) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function randToken(n = 32) { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join(""); }
+async function validateOctagonToken(token: string) {
+  const t = (token || "").trim(); if (!t) return null;
+  const { data } = await db.from("mcp_tokens").select("consultant_recruitcrm_id,can_write").eq("token_hash", await sha256hex(t)).eq("active", true).maybeSingle();
+  return data ?? null;
+}
+function authorizePage(p: Record<string, string>, error = ""): string {
+  const esc = (s: string) => (s ?? "").replace(/"/g, "&quot;");
+  const hidden = ["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "response_type", "scope", "resource"].map((k) => `<input type="hidden" name="${k}" value="${esc(p[k] ?? "")}">`).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Octagon Analytics</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:420px;margin:8vh auto;padding:0 20px;color:#111}h1{font-size:1.2rem}p{color:#555;font-size:.9rem}input[type=password]{width:100%;padding:10px;font-size:1rem;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}button{margin-top:12px;width:100%;padding:10px;font-size:1rem;border:0;border-radius:8px;background:#111;color:#fff;cursor:pointer}.err{color:#b00;font-size:.85rem}</style></head><body><h1>Connect Octagon Analytics</h1><p>Paste your Octagon access token to connect. Ask an admin if you don't have one.</p>${error ? `<p class="err">${error}</p>` : ""}<form method="POST"><input type="password" name="token" placeholder="oct_…" autocomplete="off" autofocus>${hidden}<button type="submit">Authorize</button></form></body></html>`;
+}
+async function handleAuthorize(req: Request): Promise<Response> {
+  const u = new URL(req.url);
+  const html = (body: string, status = 200) => new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
+  if (req.method === "GET") {
+    const p: Record<string, string> = {}; for (const k of u.searchParams.keys()) p[k] = u.searchParams.get(k) ?? "";
+    if (p.response_type !== "code" || !p.redirect_uri || !p.code_challenge || p.code_challenge_method !== "S256") return new Response("invalid_request: need response_type=code, redirect_uri, and S256 PKCE", { status: 400, headers: { "Content-Type": "text/plain" } });
+    if (!/^https:\/\//.test(p.redirect_uri) && !/^http:\/\/localhost[:/]/.test(p.redirect_uri)) return new Response("invalid redirect_uri", { status: 400, headers: { "Content-Type": "text/plain" } });
+    return html(authorizePage(p));
+  }
+  const form = new URLSearchParams(await req.text()); const p: Record<string, string> = {}; for (const [k, v] of form) p[k] = v;
+  const who = await validateOctagonToken(p.token ?? "");
+  if (!who) return html(authorizePage(p, "Invalid or inactive token — check it and try again."));
+  const code = randToken(24);
+  await db.from("oauth_codes").insert({ code, consultant_recruitcrm_id: who.consultant_recruitcrm_id, can_write: !!who.can_write, code_challenge: p.code_challenge, redirect_uri: p.redirect_uri, expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString() });
+  const redir = new URL(p.redirect_uri); redir.searchParams.set("code", code); if (p.state) redir.searchParams.set("state", p.state);
+  return new Response(null, { status: 302, headers: { Location: redir.toString() } });
+}
+async function handleToken(req: Request): Promise<Response> {
+  const raw = await req.text(); let body: Record<string, string> = {};
+  if ((req.headers.get("content-type") || "").includes("application/json")) { try { body = JSON.parse(raw); } catch { /* */ } }
+  else { for (const [k, v] of new URLSearchParams(raw)) body[k] = v; }
+  const err = (e: string, d = "") => new Response(JSON.stringify({ error: e, error_description: d }), { status: 400, headers: CORS });
+  if (body.grant_type !== "authorization_code") return err("unsupported_grant_type", "only authorization_code");
+  if (!body.code || !body.code_verifier || !body.redirect_uri) return err("invalid_request", "code, code_verifier, redirect_uri required");
+  const { data: rec } = await db.from("oauth_codes").select("*").eq("code", body.code).maybeSingle();
+  if (!rec) return err("invalid_grant", "unknown or used code");
+  await db.from("oauth_codes").delete().eq("code", body.code);
+  if (new Date(rec.expires_at).getTime() < Date.now()) return err("invalid_grant", "code expired");
+  if (rec.redirect_uri !== body.redirect_uri) return err("invalid_grant", "redirect_uri mismatch");
+  if ((await sha256b64url(body.code_verifier)) !== rec.code_challenge) return err("invalid_grant", "PKCE verification failed");
+  const accessToken = "oct_oauth_" + randToken(24);
+  await db.from("mcp_tokens").insert({ token_hash: await sha256hex(accessToken), consultant_recruitcrm_id: rec.consultant_recruitcrm_id, can_write: rec.can_write, label: "oauth-session", active: true });
+  return new Response(JSON.stringify({ access_token: accessToken, token_type: "Bearer", expires_in: 7776000, scope: "mcp" }), { headers: CORS });
+}
+async function handleRegister(req: Request): Promise<Response> {
+  let body: any = {}; try { body = JSON.parse(await req.text()); } catch { /* */ }
+  return new Response(JSON.stringify({ client_id: "octagon-" + randToken(8), token_endpoint_auth_method: "none", grant_types: ["authorization_code"], response_types: ["code"], redirect_uris: Array.isArray(body?.redirect_uris) ? body.redirect_uris : [], client_name: body?.client_name ?? "octagon-connector" }), { status: 201, headers: CORS });
+}
+
 Deno.serve(async (req) => {
-  const headers: Record<string, string> = { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "*", "Access-Control-Allow-Methods": "POST, GET, OPTIONS" };
+  const headers = CORS;
+  const path = new URL(req.url).pathname;
   if (req.method === "OPTIONS") return new Response(null, { headers });
-  // Do NOT answer OAuth/discovery probes with a 200 — otherwise connector clients (claude.ai) think
-  // this server has an OAuth sign-in service and try to register a client against it, which fails.
-  // 404 anything that isn't the MCP endpoint itself (well-known paths, /register, etc.).
-  if (new URL(req.url).pathname.includes("/.well-known/")) return new Response(JSON.stringify({ error: "not_found" }), { status: 404, headers });
+
+  // OAuth 2.1 bridge endpoints
+  if (path.endsWith("/.well-known/oauth-authorization-server") || path.endsWith("/.well-known/openid-configuration")) return new Response(JSON.stringify(AS_METADATA), { headers });
+  if (path.endsWith("/.well-known/oauth-protected-resource")) return new Response(JSON.stringify(PR_METADATA), { headers });
+  if (path.endsWith("/register") && req.method === "POST") return handleRegister(req);
+  if (path.endsWith("/authorize")) return handleAuthorize(req);
+  if (path.endsWith("/token") && req.method === "POST") return handleToken(req);
+
   if (req.method === "GET") return new Response(JSON.stringify({ name: SERVER.name, version: SERVER.version, transport: "streamable-http" }), { headers });
+
+  // MCP JSON-RPC (POST): require a valid bearer token, else a 401 challenge that points claude.ai
+  // at the OAuth flow above.
+  const auth = await authenticate(req, {});
+  if (!auth.ok) return new Response(JSON.stringify(rpcErr(null, -32001, "Unauthorized")), { status: 401, headers: { ...headers, "WWW-Authenticate": `Bearer resource_metadata="${OAUTH_BASE}/.well-known/oauth-protected-resource"` } });
+
   let msg: any; try { msg = await req.json(); } catch { return new Response(JSON.stringify(rpcErr(null, -32700, "Parse error")), { headers }); }
   if (Array.isArray(msg)) { const out = (await Promise.all(msg.map((x) => handle(x, req)))).filter((x) => x !== null); return new Response(out.length ? JSON.stringify(out) : "", { status: out.length ? 200 : 202, headers }); }
   const res = await handle(msg, req);
