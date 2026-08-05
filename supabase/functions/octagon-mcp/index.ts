@@ -6,7 +6,8 @@
 // and can never be spoofed by a tool argument. can_write is per token.
 //
 // READ tools : get_dashboard, funnel_report, client_report, time_to_fill, cold_jobs,
-//              placements_report, consultant_leaderboard, bd_report, find_candidate, job_pipeline
+//              placements_report, consultant_leaderboard, bd_report, find_candidate,
+//              job_pipeline, stalled_report, my_day
 // WRITE tools: update_hiring_stage, assign_candidate  (require token.can_write;
 //              two-step preview->confirm, optimistic concurrency, audit, write-through)
 // PROMPTS    : weekly_team_review, my_cold_roles, client_health, month_in_review
@@ -16,7 +17,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.3.0" };
+const SERVER = { name: "octagon-analytics", version: "3.4.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -88,6 +89,8 @@ const TOOLS = [
   { name: "bd_report", description: "Business-development / client funnel: how many companies sit at each 'Company Status' (Prospect, Engaged, Client, Passive, Blocklisted, Do-not-contact), from RecruitCRM company custom fields. Use for 'how many prospects vs clients', 'BD pipeline', 'account status breakdown'. NOTE: RecruitCRM has no 'Lead' status, and 'pitched candidates'/'job order form complete' are not tracked. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "find_candidate", description: "Look up a candidate by name -> their candidate_slug and current hiring stage on each job. Use this FIRST to resolve who someone is before acting on them (e.g. before update_hiring_stage). Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { name: { type: "string", description: "candidate name, partial match" }, limit: { type: "integer" }, ...AUTH_ARG }, required: ["name"], additionalProperties: false } },
   { name: "job_pipeline", description: "For a job (by title or slug), the candidates in play and their current stage, plus the in-play count. Use for 'what's happening on the Bosch role', 'who's shortlisted for X', or to find a job_slug before acting. Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job title (partial) or exact job_slug" }, limit: { type: "integer" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
+  { name: "stalled_report", description: "What needs attention firm-wide: aging offers (offer out 5-60d with no response) and stalled candidates (active stage, no movement 10-60d) on OPEN roles, owner-attributed, most-overdue first. Use for 'what's slipping', 'what should we chase'. Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { stall_days: { type: "integer" }, offer_days: { type: "integer" }, max_days: { type: "integer" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "my_day", description: "One consultant's attention list on OPEN roles: aging offers, stalled candidates, active-in-play count, cold open roles, and placements in the last 7 days. With NO consultant argument it scopes to YOU (your token). Pass consultant to view someone else. Use for 'what's my day', 'what needs my attention', 'how's Keelan's desk'. Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "consultant name; omit to use your own identity" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
 ];
@@ -171,6 +174,8 @@ async function callTool(name: string, args: any, req: Request) {
   if (name === "bd_report") { const { data, error } = await db.rpc("bd_report"); return toolText(error ? { error: error.message } : data); }
   if (name === "find_candidate") { const { data, error } = await db.rpc("find_candidate", { p_name: args?.name ?? null, p_limit: args?.limit ?? 10 }); return toolText(error ? { error: error.message } : data); }
   if (name === "job_pipeline") { const { data, error } = await db.rpc("job_pipeline", { p_job: args?.job ?? null, p_limit: args?.limit ?? 50 }); return toolText(error ? { error: error.message } : data); }
+  if (name === "stalled_report") { const { data, error } = await db.rpc("stalled_report", { p_stall_days: args?.stall_days ?? 10, p_offer_days: args?.offer_days ?? 5, p_max_days: args?.max_days ?? 60 }); return toolText(error ? { error: error.message } : data); }
+  if (name === "my_day") { const { data, error } = await db.rpc("my_day", { p_consultant_id: args?.consultant ? null : actor.id, p_consultant: args?.consultant ?? null }); return toolText(error ? { error: error.message } : data); }
   if (name === "update_hiring_stage") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Hiring-stage changes require a write-enabled token (an admin sets can_write)." });
     const byId = await stageLookup();

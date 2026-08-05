@@ -110,6 +110,8 @@ PROJBRIEF.MD, ROADMAP.MD
 | `bd_report` | read | Client/BD funnel — companies by "Company Status" (Prospect / Client / …). |
 | `find_candidate` | read | Name → candidate_slug + current stage per job (PII; resolves who to act on). |
 | `job_pipeline` | read | A job's candidates in play + current stage + in-play count (PII). |
+| `stalled_report` | read | Firm-wide attention list: aging offers + stalled candidates on open roles (PII). |
+| `my_day` | read | One consultant's attention list; auto-scopes to the caller's token (PII). |
 | `update_hiring_stage` | **write** | Moves a candidate's hiring stage in RecruitCRM (`create_placement` on Placed). |
 | `assign_candidate` | **write** | Assigns a candidate to a job in RecruitCRM. |
 
@@ -176,6 +178,8 @@ Applied in order (`supabase/migrations/`):
 | 0021 | third_interview_in_funnel | Surface `3rd Interview` (= "Internal Interview") in `funnel_report` + `dashboard_json` |
 | 0022 | bd_funnel | `clients.company_status` + `bd_report()` (client/BD funnel from the company "Company Status" field) |
 | 0023 | lookup_functions | `find_candidate()` + `job_pipeline()` — name/job → slug + current stage (precursors to the write tools) |
+| 0024 | attention_alerts | `stalled_report()` + `my_day()` + `post_standup()` (weekday Slack standup) |
+| 0025 | refine_attention | Bound "needs attention" to open roles + a recent window (kills 1000-day-old noise) |
 
 ### Cron schedule
 
@@ -185,6 +189,7 @@ Applied in order (`supabase/migrations/`):
 | every 5 min | sync-health watchdog (`check_sync_health`) |
 | every 1 min | **temporary** history resync (`history-resync`) — backfills 3rd Interview + Shortlist; self-completes then can be unscheduled |
 | 08:00 daily | admin digest to Slack (`post_admin_digest`) |
+| 08:00 Mon–Fri | daily standup to Slack (`post_standup`) — aging offers + stalled candidates |
 | 03:00 / 03:10 / 03:20 nightly | soft-delete reconcile (consultants / clients / jobs) |
 
 Freshness: edits show in the mirror within ~2 min (or seconds after a Claude write-through).
@@ -261,6 +266,13 @@ update app_settings set value='https://hooks.slack.com/…' where key='admin_web
 ```
 Usage comes from `mcp_call_log` (every tool call is logged — no PII). Claude *plan* usage
 (seats/spend) is Anthropic-side and not wired in yet — see the note in `0019_admin_telemetry.sql`.
+
+**Daily standup** (admin, optional): a weekday 08:00 Slack post of aging offers + stalled
+candidates on open roles (what to chase). Set the webhook:
+```sql
+update app_settings set value='https://hooks.slack.com/…' where key='standup_webhook_url';
+```
+Recruiters can also pull their own list any time via the `my_day` prompt/tool in Claude.
 
 **Slack `/dashboard` command** (admin, optional): a slash command that returns the live
 dashboard in Slack. (1) Set the Supabase secret `SLACK_SIGNING_SECRET` to your Slack app's
