@@ -3,36 +3,205 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Connect Octagon Analytics</title>
+  <title>Octagon Analytics</title>
   <style>
-    body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;max-width:420px;margin:8vh auto;padding:0 20px;color:#111}
-    h1{font-size:1.2rem}p{color:#555;font-size:.9rem}
-    input[type=password]{width:100%;padding:10px;font-size:1rem;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}
-    button{margin-top:12px;width:100%;padding:10px;font-size:1rem;border:0;border-radius:8px;background:#111;color:#fff;cursor:pointer}
-    .err{color:#b00;font-size:.85rem}
+    :root{
+      --bg:#f6f6f7; --card:#fff; --fg:#111; --mut:#6b6b70; --line:#e4e4e7;
+      --accent:#111; --accent-fg:#fff; --bad:#b00020; --good:#137333; --focus:#111;
+    }
+    @media (prefers-color-scheme:dark){
+      :root{--bg:#161617;--card:#1e1e20;--fg:#f2f2f2;--mut:#9a9aa0;--line:#313135;
+            --accent:#f2f2f2;--accent-fg:#111;--bad:#ff6b7f;--good:#4ade80;--focus:#f2f2f2}
+    }
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;background:var(--bg);color:var(--fg);
+      font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:15px;line-height:1.5;
+      display:flex;align-items:center;justify-content:center;padding:28px 18px}
+    .wrap{width:100%;max-width:440px}
+    .brand{display:flex;align-items:center;gap:9px;margin-bottom:14px}
+    .mark{width:26px;height:26px;flex:none}
+    .brand b{font-size:.95rem;letter-spacing:-.01em}
+    .brand span{color:var(--mut);font-size:.8rem}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px}
+    h1{font-size:1.12rem;margin:0 0 6px;letter-spacing:-.01em}
+    p.lede{color:var(--mut);font-size:.87rem;margin:0 0 18px}
+    label{display:block;font-size:.78rem;font-weight:600;margin:0 0 6px}
+    .hint{font-weight:400;color:var(--mut)}
+    input,textarea,select{width:100%;padding:11px 12px;font:inherit;font-size:.92rem;color:var(--fg);
+      background:var(--bg);border:1px solid var(--line);border-radius:9px}
+    textarea{resize:vertical;min-height:104px}
+    input:focus,textarea:focus,select:focus{outline:2px solid var(--focus);outline-offset:1px;border-color:transparent}
+    button{margin-top:14px;width:100%;padding:11px;font:inherit;font-size:.92rem;font-weight:600;
+      border:0;border-radius:9px;background:var(--accent);color:var(--accent-fg);cursor:pointer}
+    button:disabled{opacity:.55;cursor:default}
+    .row{display:flex;gap:8px;margin-bottom:14px}
+    .row>div{flex:1}
+    .seg{display:flex;gap:6px;margin-bottom:14px}
+    .seg button{margin:0;flex:1;padding:8px 6px;font-size:.82rem;font-weight:500;
+      background:var(--bg);color:var(--mut);border:1px solid var(--line)}
+    .seg button[aria-pressed=true]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+    .msg{font-size:.84rem;padding:10px 12px;border-radius:9px;margin-bottom:14px;display:none}
+    .msg.bad{display:block;background:rgba(176,0,32,.1);color:var(--bad)}
+    .msg.good{display:block;background:rgba(19,115,51,.12);color:var(--good)}
+    .split{margin:20px 0 0;border-top:1px solid var(--line);padding-top:16px}
+    .toggle{background:none;border:0;padding:0;margin:0;width:auto;color:var(--mut);
+      font:inherit;font-size:.83rem;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+    .foot{color:var(--mut);font-size:.75rem;text-align:center;margin-top:14px}
+    .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
   </style>
 </head>
 <body>
-  <h1>Connect Octagon Analytics</h1>
-  <p>Paste your Octagon access token to connect. Ask an admin if you don't have one.</p>
-  <p id="err" class="err" style="display:none"></p>
-  <!-- Posts to the Supabase function, which validates the token, issues a PKCE auth code,
-       and 302-redirects back to Claude. This page is just the form. -->
-  <form id="f" method="POST" action="https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp/authorize">
-    <input type="password" name="token" placeholder="oct_..." autocomplete="off" autofocus>
-    <button type="submit">Authorize</button>
-  </form>
-  <script>
-    // Carry the OAuth params Claude put on our URL through to the POST as hidden fields.
-    var q = new URLSearchParams(location.search);
-    var keep = ["client_id","redirect_uri","state","code_challenge","code_challenge_method","response_type","scope","resource"];
-    var f = document.getElementById("f");
-    keep.forEach(function(k){
-      var i = document.createElement("input");
-      i.type = "hidden"; i.name = k; i.value = q.get(k) || "";
-      f.appendChild(i);
-    });
-    if (q.get("error")) { var e = document.getElementById("err"); e.style.display = "block"; e.textContent = "Invalid or inactive token - check it and try again."; }
-  </script>
+<div class="wrap">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+      <polygon points="7.5,1.6 16.5,1.6 22.4,7.5 22.4,16.5 16.5,22.4 7.5,22.4 1.6,16.5 1.6,7.5"
+               fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+    </svg>
+    <b>Octagon</b><span>Analytics</span>
+  </div>
+
+  <div class="card">
+    <!-- ── Connect ─────────────────────────────────────────────────────────── -->
+    <section id="connect">
+      <h1>Connect your account</h1>
+      <p class="lede">Paste your Octagon access token to link this connector to your desk. Your figures
+        and any changes you make are attributed to you.</p>
+
+      <p id="err" class="msg bad"></p>
+
+      <!-- Posts to the Supabase function, which validates the token, issues a PKCE auth code,
+           and 302-redirects back to Claude. This page is just the form. -->
+      <form id="f" method="POST" action="https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp/authorize">
+        <label for="token">Access token <span class="hint">— ask Ollie if you don't have one</span></label>
+        <input id="token" type="password" name="token" autocomplete="off" autofocus
+               placeholder="paste your token" spellcheck="false">
+        <button type="submit">Authorize</button>
+      </form>
+
+      <div class="split">
+        <button type="button" class="toggle" id="showFb">Report an issue or suggest something →</button>
+      </div>
+    </section>
+
+    <!-- ── Feedback ────────────────────────────────────────────────────────── -->
+    <section id="feedback" hidden>
+      <h1>Tell us what's up</h1>
+      <p class="lede">Goes straight to Ollie. Include what you asked for and what you got — that's
+        usually enough to find it.</p>
+
+      <p id="fbMsg" class="msg"></p>
+
+      <form id="fb">
+        <div class="seg" role="group" aria-label="Type">
+          <button type="button" data-kind="issue" aria-pressed="true">Issue</button>
+          <button type="button" data-kind="feedback" aria-pressed="false">Feedback</button>
+          <button type="button" data-kind="feature" aria-pressed="false">Feature</button>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="name">Name</label>
+            <input id="name" name="name" autocomplete="name" placeholder="optional">
+          </div>
+          <div>
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" placeholder="optional">
+          </div>
+        </div>
+
+        <label for="message">What happened?</label>
+        <textarea id="message" name="message" required
+                  placeholder="e.g. I asked for my dashboard and got a spinner that never finished."></textarea>
+
+        <!-- honeypot: hidden from people, tempting to bots -->
+        <div class="hp" aria-hidden="true"><label for="website">Website</label><input id="website" name="website" tabindex="-1" autocomplete="off"></div>
+
+        <button type="submit" id="fbSend">Send</button>
+      </form>
+
+      <div class="split">
+        <button type="button" class="toggle" id="showConnect">← Back to connecting</button>
+      </div>
+    </section>
+  </div>
+
+  <p class="foot">Octagon Group · internal tool</p>
+</div>
+
+<script>
+  var FEEDBACK_URL = "https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/feedback";
+
+  // Carry the OAuth params Claude put on our URL through to the POST as hidden fields.
+  var q = new URLSearchParams(location.search);
+  var keep = ["client_id","redirect_uri","state","code_challenge","code_challenge_method","response_type","scope","resource"];
+  var f = document.getElementById("f");
+  keep.forEach(function (k) {
+    var i = document.createElement("input");
+    i.type = "hidden"; i.name = k; i.value = q.get(k) || "";
+    f.appendChild(i);
+  });
+  if (q.get("error")) {
+    var e = document.getElementById("err");
+    e.classList.add("bad");
+    e.textContent = "That token wasn't recognised — check it and try again, or ask Ollie for a new one.";
+  }
+
+  // ── panel switching ──────────────────────────────────────────────────────
+  var connect = document.getElementById("connect"), feedback = document.getElementById("feedback");
+  function show(which) {
+    connect.hidden = which !== "connect";
+    feedback.hidden = which !== "feedback";
+    (which === "connect" ? document.getElementById("token") : document.getElementById("message")).focus();
+  }
+  document.getElementById("showFb").onclick = function () { show("feedback"); };
+  document.getElementById("showConnect").onclick = function () { show("connect"); };
+  // Deep-link straight to the form: ...octagon-connect.html?feedback=1
+  if (q.get("feedback")) show("feedback");
+
+  // ── type selector ────────────────────────────────────────────────────────
+  var kind = "issue";
+  var segButtons = document.querySelectorAll(".seg button");
+  segButtons.forEach(function (b) {
+    b.onclick = function () {
+      kind = b.dataset.kind;
+      segButtons.forEach(function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+    };
+  });
+
+  // ── submit ───────────────────────────────────────────────────────────────
+  var fbMsg = document.getElementById("fbMsg"), fbSend = document.getElementById("fbSend");
+  function say(text, good) {
+    fbMsg.className = "msg " + (good ? "good" : "bad");
+    fbMsg.textContent = text;
+  }
+  document.getElementById("fb").onsubmit = function (ev) {
+    ev.preventDefault();
+    var message = document.getElementById("message").value.trim();
+    if (message.length < 5) { say("Add a bit more detail so it can be looked into.", false); return; }
+
+    fbSend.disabled = true; fbSend.textContent = "Sending…";
+    fetch(FEEDBACK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: kind, message: message,
+        name: document.getElementById("name").value,
+        email: document.getElementById("email").value,
+        website: document.getElementById("website").value
+      })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) { say(res.j.error || "Couldn't send that — try again in a moment.", false); fbSend.disabled = false; fbSend.textContent = "Send"; return; }
+        document.getElementById("fb").reset();
+        say("Sent — thanks. Ollie will pick it up.", true);
+        fbSend.textContent = "Sent";
+      })
+      .catch(function () {
+        say("Couldn't reach the server. Check your connection and try again.", false);
+        fbSend.disabled = false; fbSend.textContent = "Send";
+      });
+  };
+</script>
 </body>
 </html>
