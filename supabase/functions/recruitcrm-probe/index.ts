@@ -8,7 +8,9 @@
 // the values themselves. Delete this function once the shapes are captured.
 
 const BASE = "https://api.recruitcrm.io/v1";
-const ENDPOINTS = ["jobs", "candidates", "companies", "contacts", "users"];
+// placements: probing whether the API exposes them at all — the placements table is empty, so
+// fee-per-placement reporting is impossible until we know if this endpoint exists.
+const ENDPOINTS = ["placements", "placement", "jobs"];
 
 // Map a record to { field: "type" } — redacts every actual value.
 function shapeOf(rec: unknown): Record<string, string> {
@@ -27,7 +29,8 @@ function shapeOf(rec: unknown): Record<string, string> {
 }
 
 Deno.serve(async () => {
-  const token = Deno.env.get("RECRUITCRM_API_TOKEN");
+  // The project secret is RECRUIT_CRM_API_TOKEN; keep the old name as a fallback.
+  const token = Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN");
   if (!token) {
     return Response.json({ error: "RECRUITCRM_API_TOKEN not set" }, { status: 500 });
   }

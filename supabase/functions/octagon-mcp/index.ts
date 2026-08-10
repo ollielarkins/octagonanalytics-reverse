@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.22.0" };
+const SERVER = { name: "octagon-analytics", version: "3.23.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -144,7 +144,8 @@ return o}
 // Admin view: firm first, then the whole-team breakdown.
 function firmView(d){var h=d.health||{},k=d.kpis||{},f=d.funnel||{},pl=d.pipeline||[],o='';
 o+='<h1>Octagon Recruitment Dashboard</h1>'+syncline(h);
-o+=cards([['Placed 2026',N(k.placed_2026)],['Placed all-time',N(k.placed_all)],['Open jobs',N(k.open_jobs)],['Open pipeline',GBP(k.open_pipeline)],['Won',GBP(k.won)],['Candidates',N(k.candidates)],['Clients',N(k.clients)],['Consultants',N(k.consultants)]]);
+o+=cards([['Placed 2026',N(k.placed_2026)],['Placed all-time',N(k.placed_all)],['Open jobs',N(k.open_jobs)],['Open pipeline',GBP(k.open_pipeline)],['Won',GBP(k.won)],['Candidates in pipeline',N(k.candidates_in_pipeline!=null?k.candidates_in_pipeline:k.candidates)],['Candidates on CRM',N(k.candidates_total)],['Clients',N(k.clients)],['Consultants',N(k.consultants)]]);
+if(k.jobs_no_client)o+='<div class="foot">'+N(k.jobs_no_client)+' of '+N(k.jobs)+' jobs have no resolved client (company archived in RecruitCRM) — client/account reporting excludes them.</div>';
 o+='<h2>2026 Funnel</h2>'+bars([['CV Sent',f.cv_sent],['Interview Request',f.interview_request],['1st Interview',f.first_interview],['2nd Interview',f.second_interview],['3rd Interview',f.third_interview],['Offered',f.offered],['Placed',f.placed]]);
 if(pl.length){o+='<h2>Deal Pipeline</h2><table><tr><th>Stage</th><th class="num">Deals</th><th class="num">Value</th></tr>'+pl.map(function(p){return '<tr><td>'+esc(p.stage)+'</td><td class="num">'+N(p.deals)+'</td><td class="num">'+GBP(p.value)+'</td></tr>'}).join('')+'</table>'}
 if(d.consultants&&d.consultants.length){o+='<h2>Team — by job owner</h2><table><tr><th>Consultant</th><th class="num">CV</th><th class="num">1st Int</th><th class="num">Placed</th></tr>'+d.consultants.map(function(c){return '<tr><td>'+esc(c.name)+'</td><td class="num">'+N(c.cv_sent)+'</td><td class="num">'+N(c.first_interview)+'</td><td class="num">'+N(c.placed)+'</td></tr>'}).join('')+'</table>'}
