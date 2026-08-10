@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.20.0" };
+const SERVER = { name: "octagon-analytics", version: "3.21.1" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -109,25 +109,47 @@ table{width:100%;border-collapse:collapse;font-size:.78rem}th,td{text-align:left
 td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .kpi{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--line);font-size:.82rem}
 .behind{color:var(--bad);font-weight:700}.met{color:var(--good);font-weight:600}
+.foot{color:var(--mut);font-size:.7rem;margin-top:5px;line-height:1.4}
 .banner{background:rgba(176,0,32,.12);color:var(--bad);border:1px solid rgba(176,0,32,.3);border-radius:8px;padding:8px 10px;font-size:.78rem;margin-bottom:12px}
 </style></head><body><div id="app"><div class="sub">Loading dashboard…</div></div><script>
 var GBP=function(n){return n==null?'—':'£'+Math.round(Number(n)).toLocaleString('en-GB')};
 var N=function(n){return n==null?'—':Number(n).toLocaleString('en-GB')};
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
-function render(d){if(!d)return;var h=d.health||{},k=d.kpis||{},f=d.funnel||{},pl=d.pipeline||[],v=d.viewer||{},o='';
-o+='<h1>Octagon Recruitment Dashboard</h1>';var ok=(h.overall==='ok');
-o+='<div class="sub"><span class="pill '+(ok?'ok':'stale')+'">'+(ok?'sync healthy':'sync issue')+'</span></div>';
-if(!ok){var fe=(h.entities||[]).filter(function(e){return e.status!=='ok'}).map(function(e){return esc(e.entity)+' ('+esc(e.reason)+')'}).join(', ');o+='<div class="banner">Sync not OK — figures may be stale: '+(fe||'unknown')+'</div>'}
-var cd=[['Placed 2026',N(k.placed_2026)],['Placed all-time',N(k.placed_all)],['Open jobs',N(k.open_jobs)],['Open pipeline',GBP(k.open_pipeline)],['Won',GBP(k.won)],['Candidates',N(k.candidates)],['Clients',N(k.clients)],['Consultants',N(k.consultants)]];
-o+='<div class="cards">'+cd.map(function(c){return '<div class="card"><div class="v">'+c[1]+'</div><div class="l">'+c[0]+'</div></div>'}).join('')+'</div>';
-var st=[['CV Sent',f.cv_sent],['Interview Request',f.interview_request],['1st Interview',f.first_interview],['2nd Interview',f.second_interview],['3rd Interview',f.third_interview],['Offered',f.offered],['Placed',f.placed]];
-var mx=Math.max.apply(null,st.map(function(s){return s[1]||0}).concat([1]));
-o+='<h2>2026 Funnel</h2>'+st.map(function(s){var w=Math.round(100*(s[1]||0)/mx);return '<div class="bar"><span class="lab">'+s[0]+'</span><span class="track"><span class="fill" style="width:'+w+'%"></span></span><span class="n">'+N(s[1]||0)+'</span></div>'}).join('');
+function cards(cd){return '<div class="cards">'+cd.map(function(c){return '<div class="card"><div class="v">'+c[1]+'</div><div class="l">'+c[0]+'</div></div>'}).join('')+'</div>'}
+function syncline(h){var ok=(h.overall==='ok'),o='<div class="sub"><span class="pill '+(ok?'ok':'stale')+'">'+(ok?'sync healthy':'sync issue')+'</span></div>';
+if(!ok){var fe=(h.entities||[]).filter(function(e){return e.status!=='ok'}).map(function(e){return esc(e.entity)+' ('+esc(e.reason)+')'}).join(', ');o+='<div class="banner">Sync not OK — figures may be stale: '+(fe||'unknown')+'</div>'}return o}
+function bars(st){var mx=Math.max.apply(null,st.map(function(s){return s[1]||0}).concat([1]));
+return st.map(function(s){var w=Math.round(100*(s[1]||0)/mx);return '<div class="bar"><span class="lab">'+s[0]+'</span><span class="track"><span class="fill" style="width:'+w+'%"></span></span><span class="n">'+N(s[1]||0)+'</span></div>'}).join('')}
+// Recruiter view: their own desk first (week vs target, billing, what needs chasing today), firm
+// totals demoted to one line. Deliberately NO team breakdown and no firm deal-pipeline table.
+function meView(d,v){var o='',h=d.health||{},k=d.kpis||{},w=v.my_weekly||{},b=v.my_billing||{},md=v.my_day||{},y=v.my_2026||{};
+o+='<h1>Your desk'+(v.name?' — '+esc(v.name):'')+'</h1>'+syncline(h);
+o+=cards([['Placed 2026',N(y.placed)],['Won this quarter',GBP(b.won_qtr)],['Open pipeline',GBP(b.pipeline_open)],['Active in play',N(md.active_in_play)],['Aging offers',N(md.aging_offers?md.aging_offers.length:null)],['Cold open roles',N(md.cold_open_roles)]]);
+var rw=[['CV sends','cv_sent'],['Interview requests','interview_request'],['Interviews','first_interview'],['BD calls','bd_calls'],['Client calls','client_calls']];
+if(v.my_weekly){o+='<h2>Your week vs target'+(v.week_start?' — from '+esc(v.week_start):'')+'</h2>'+rw.map(function(r){var m=w[r[1]]||{},a=m.actual||0,t=m.target,cl=(t!=null&&a<t)?'behind':'met';return '<div class="kpi"><span>'+r[0]+'</span><span class="'+cl+'">'+a+(t!=null?' / '+t:'')+'</span></div>'}).join('')+'<div class="foot">BD/client calls count categorised Devyce calls only, so can undercount.</div>'}
+if(v.my_billing){var tg=b.quarterly_target,wq=b.won_qtr||0,pc=(tg?Math.round(100*wq/tg):null),sh=(tg!=null?tg-wq:null);
+o+='<h2>Your billing'+(v.quarter_start?' — quarter from '+esc(v.quarter_start):'')+'</h2>'
++'<div class="kpi"><span>Won (billed)</span><span class="'+(tg!=null&&wq<tg?'behind':'met')+'">'+GBP(wq)+(tg!=null?' / '+GBP(tg):'')+(pc!=null?' ('+pc+'%)':'')+'</span></div>'
++(sh!=null&&sh>0?'<div class="kpi"><span>Still to bill</span><span class="behind">'+GBP(sh)+'</span></div>':'')
++'<div class="kpi"><span>Open pipeline</span><span>'+GBP(b.pipeline_open)+'</span></div>'}
+var ao=md.aging_offers||[],sl=md.stalled||[];
+if(ao.length){o+='<h2>Aging offers — chase today</h2><table><tr><th>Candidate</th><th>Role</th><th class="num">Days</th></tr>'+ao.map(function(x){return '<tr><td>'+esc(x.candidate)+'</td><td>'+esc(x.job_title)+'</td><td class="num behind">'+N(x.days)+'</td></tr>'}).join('')+'</table>'}
+if(sl.length){var top=sl.slice(0,10);o+='<h2>Stalled candidates'+(sl.length>10?' — top 10 of '+sl.length:'')+'</h2><table><tr><th>Candidate</th><th>Role</th><th>Stage</th><th class="num">Days</th></tr>'+top.map(function(x){return '<tr><td>'+esc(x.candidate)+'</td><td>'+esc(x.job_title)+'</td><td>'+esc(x.stage)+'</td><td class="num">'+N(x.days)+'</td></tr>'}).join('')+'</table>'}
+if(v.my_day&&!ao.length&&!sl.length)o+='<h2>Needs attention</h2><div class="foot">Nothing aging or stalled on your open roles. '+N(md.cold_open_roles)+' cold role(s), '+N(md.placed_last_7d)+' placed in the last 7 days.</div>';
+if(v.my_2026){o+='<h2>Your 2026 funnel</h2>'+bars([['CV Sent',y.cv_sent],['Interview Request',y.interview_request],['1st Interview',y.first_interview],['Offered',y.offered],['Placed',y.placed]])+'<div class="foot">2nd/3rd interview are not broken out per consultant here — ask for your funnel_report.</div>'}
+o+='<h2>Firm — 2026</h2><div class="foot">'+N(k.cv_2026)+' CV sent · '+N(k.placed_2026)+' placed · '+N(k.open_jobs)+' open jobs · '+GBP(k.open_pipeline)+' open pipeline</div>';
+return o}
+// Admin view: firm first, then the whole-team breakdown.
+function firmView(d){var h=d.health||{},k=d.kpis||{},f=d.funnel||{},pl=d.pipeline||[],o='';
+o+='<h1>Octagon Recruitment Dashboard</h1>'+syncline(h);
+o+=cards([['Placed 2026',N(k.placed_2026)],['Placed all-time',N(k.placed_all)],['Open jobs',N(k.open_jobs)],['Open pipeline',GBP(k.open_pipeline)],['Won',GBP(k.won)],['Candidates',N(k.candidates)],['Clients',N(k.clients)],['Consultants',N(k.consultants)]]);
+o+='<h2>2026 Funnel</h2>'+bars([['CV Sent',f.cv_sent],['Interview Request',f.interview_request],['1st Interview',f.first_interview],['2nd Interview',f.second_interview],['3rd Interview',f.third_interview],['Offered',f.offered],['Placed',f.placed]]);
 if(pl.length){o+='<h2>Deal Pipeline</h2><table><tr><th>Stage</th><th class="num">Deals</th><th class="num">Value</th></tr>'+pl.map(function(p){return '<tr><td>'+esc(p.stage)+'</td><td class="num">'+N(p.deals)+'</td><td class="num">'+GBP(p.value)+'</td></tr>'}).join('')+'</table>'}
-if(v.my_weekly){var w=v.my_weekly,rw=[['CV sends','cv_sent'],['Interview requests','interview_request'],['Interviews','first_interview'],['BD calls','bd_calls'],['Client calls','client_calls']];o+='<h2>Your week'+(v.name?' — '+esc(v.name):'')+'</h2>'+rw.map(function(r){var m=w[r[1]]||{},a=m.actual||0,t=m.target,cl=(t!=null&&a<t)?'behind':'met';return '<div class="kpi"><span>'+r[0]+'</span><span class="'+cl+'">'+a+(t!=null?' / '+t:'')+'</span></div>'}).join('')}
-if(v.my_billing){var b=v.my_billing;o+='<h2>Your billing (quarter)</h2><div class="kpi"><span>Won this quarter</span><span>'+GBP(b.won_qtr)+(b.quarterly_target!=null?' / '+GBP(b.quarterly_target):'')+'</span></div><div class="kpi"><span>Open pipeline</span><span>'+GBP(b.pipeline_open)+'</span></div>'}
 if(d.consultants&&d.consultants.length){o+='<h2>Team — by job owner</h2><table><tr><th>Consultant</th><th class="num">CV</th><th class="num">1st Int</th><th class="num">Placed</th></tr>'+d.consultants.map(function(c){return '<tr><td>'+esc(c.name)+'</td><td class="num">'+N(c.cv_sent)+'</td><td class="num">'+N(c.first_interview)+'</td><td class="num">'+N(c.placed)+'</td></tr>'}).join('')+'</table>'}
-document.getElementById('app').innerHTML=o}
+return o}
+function render(d){if(!d)return;var v=d.viewer||{};
+// A resolved consultant gets the desk view; admins and unresolved tokens get the firm view.
+document.getElementById('app').innerHTML=(v.name&&!v.is_admin)?meView(d,v):firmView(d)}
 window.addEventListener('message',function(ev){var m=ev.data;if(!m||m.jsonrpc!=='2.0')return;
 if(m.id===1&&m.result&&m.result.hostContext&&m.result.hostContext.theme)document.documentElement.setAttribute('data-theme',m.result.hostContext.theme);
 if(m.method==='ui/notifications/tool-result'&&m.params&&m.params.structuredContent)render(m.params.structuredContent)});
@@ -163,7 +185,7 @@ window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{cap
 </script></body></html>`;
 
 const TOOLS = [
-  { name: "get_dashboard", description: "Live Octagon recruitment dashboard (KPIs, 2026 funnel, per-consultant performance, deal pipeline, sync health). Aggregates only, no PII. Call at the start of a conversation and for firm-wide overviews. Renders as an inline dashboard widget.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: DASH_UI, visibility: ["model", "app"] } } },
+  { name: "get_dashboard", description: "Live Octagon dashboard, scoped to who is asking. A recruiter gets their OWN desk: week vs weekly targets, quarterly billing vs target, their 2026 funnel, and their attention list (aging offers, stalled candidates, cold open roles) — this part names candidates, so it is internal-only, not client-facing. Admins get firm KPIs, the 2026 funnel, deal pipeline and the whole-team breakdown. Always includes sync health. Call at the start of a conversation and for overviews. Renders as an inline dashboard widget.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: DASH_UI, visibility: ["model", "app"] } } },
   { name: "funnel_report", description: "Recruitment funnel + conversion ratios for a date window, optionally filtered to one consultant (partial name match) or team. Use for 'how did Keelan do in Q2', 'the tech team last month', 'firm funnel this year'. Dates ISO (YYYY-MM-DD); 'to' is exclusive. Defaults to 2026 YTD. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "client_report", description: "Per-client (account) activity for a window: CVs sent, first interviews, placements, open/total jobs, and CV->placed rate, ranked by volume. Use for 'how is <client> doing', 'our busiest accounts this year'. ~40% of jobs have no resolved client (archived companies) and are omitted. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, client: { type: "string", description: "client name, partial match" }, limit: { type: "integer" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "time_to_fill", description: "Time-to-fill in days (job created -> first placement) for jobs placed in the window: firm avg/median/min/max plus a per-consultant breakdown. Owner-attributed. Use for 'how long are we taking to fill roles', 'time to fill by consultant'. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -345,19 +367,49 @@ async function callTool(name: string, args: any, req: Request) {
     const { data, error } = await db.rpc("dashboard_json");
     if (error) return toolText({ error: error.message });
     // Identity-aware scoping: firm totals (KPIs/funnel/pipeline/health) for everyone; the per-recruiter
-    // breakdown only for admins/managers. Regular recruiters instead get their OWN scorecard.
+    // breakdown only for admins/managers. A recruiter instead gets their OWN desk — week vs target,
+    // quarterly billing, their 2026 funnel, and the attention list (aging offers / stalled) that
+    // my_day computes. Note: the attention list carries candidate names, so this tool is no longer
+    // PII-free for a recruiter viewing their own desk.
+    // actor.id 0 is the admin sentinel (no consultant record) — compare against null, not truthiness.
     let viewerName: string | null = null;
-    if (actor.id) { const { data: c } = await db.from("consultants").select("name").eq("recruitcrm_id", actor.id).maybeSingle(); viewerName = c?.name ?? null; }
+    if (actor.id != null) { const { data: c } = await db.from("consultants").select("name").eq("recruitcrm_id", actor.id).maybeSingle(); viewerName = c?.name ?? null; }
     const [{ data: wk }, { data: bill }] = await Promise.all([db.rpc("kpis_report"), db.rpc("billing_report")]);
-    const myWeekly = viewerName ? ((wk?.consultants ?? []).find((x: any) => x.name === viewerName) ?? null) : null;
-    const myBilling = viewerName ? ((bill?.consultants ?? []).find((x: any) => x.name === viewerName) ?? null) : null;
-    data.viewer = { name: viewerName ?? (actor.is_admin ? "Admin" : null), is_admin: !!actor.is_admin, my_weekly: myWeekly, my_billing: myBilling };
+    const byName = (rows: any) => (rows ?? []).find((x: any) => x.name === viewerName) ?? null;
+    const myWeekly = viewerName ? byName(wk?.consultants) : null;
+    const myBilling = viewerName ? byName(bill?.consultants) : null;
+    const my2026 = viewerName ? byName(data?.consultants) : null;
+    // The desk view is for recruiters only; admins keep the firm/team layout and don't need my_day here.
+    let myDay: any = null;
+    if (viewerName && !actor.is_admin) {
+      const { data: md } = await db.rpc("my_day", { p_consultant_id: actor.id, p_consultant: null });
+      myDay = md && !md.error ? md : null;
+    }
+    data.viewer = {
+      name: viewerName ?? (actor.is_admin ? "Admin" : null), is_admin: !!actor.is_admin,
+      week_start: wk?.week_start ?? null, quarter_start: bill?.quarter_start ?? null,
+      my_weekly: myWeekly, my_billing: myBilling, my_2026: my2026, my_day: myDay,
+    };
     if (!actor.is_admin) delete data.consultants;   // hide the whole-team per-recruiter breakdown from regular recruiters
     // MCP Apps: structuredContent drives the inline widget; content is the model-facing fallback.
     const k = data?.kpis ?? {};
     // Text is the model-facing DATA (not a claim that a widget rendered) — so the recruiter still
-    // gets the figures even if the inline widget is slow/unsupported.
-    const summary = `Octagon firm KPIs — placed 2026: ${k.placed_2026 ?? "?"}, all-time: ${k.placed_all ?? "?"}; open jobs: ${k.open_jobs ?? "?"}; open pipeline £${Math.round(k.open_pipeline ?? 0).toLocaleString("en-GB")}; Won £${Math.round(k.won ?? 0).toLocaleString("en-GB")}; sync ${data?.health?.overall ?? "?"}.`;
+    // gets the figures even if the inline widget is slow/unsupported. A recruiter's summary leads
+    // with their own desk; the firm line follows.
+    const gbp = (n: any) => `£${Math.round(Number(n ?? 0)).toLocaleString("en-GB")}`;
+    const firmLine = `Firm — placed 2026: ${k.placed_2026 ?? "?"}, all-time: ${k.placed_all ?? "?"}; open jobs: ${k.open_jobs ?? "?"}; open pipeline ${gbp(k.open_pipeline)}; Won ${gbp(k.won)}; sync ${data?.health?.overall ?? "?"}.`;
+    let summary = firmLine;
+    if (viewerName && !actor.is_admin) {
+      const behind = (["cv_sent", "interview_request", "first_interview", "bd_calls", "client_calls"] as const)
+        .map((m) => ({ m, a: myWeekly?.[m]?.actual ?? 0, t: myWeekly?.[m]?.target }))
+        .filter((x) => x.t != null && x.a < x.t).map((x) => `${x.m} ${x.a}/${x.t}`).join(", ");
+      const parts = [
+        `${viewerName} — this week (from ${wk?.week_start ?? "?"}): ${behind ? `behind on ${behind}` : "all weekly targets met"}.`,
+        `Billing this quarter ${gbp(myBilling?.won_qtr)}${myBilling?.quarterly_target != null ? ` of ${gbp(myBilling.quarterly_target)}` : ""}, open pipeline ${gbp(myBilling?.pipeline_open)}.`,
+        myDay ? `Attention: ${(myDay.aging_offers ?? []).length} aging offer(s), ${(myDay.stalled ?? []).length} stalled, ${myDay.cold_open_roles ?? 0} cold open role(s), ${myDay.active_in_play ?? 0} active in play, ${myDay.placed_last_7d ?? 0} placed in the last 7 days.` : "",
+      ];
+      summary = parts.filter(Boolean).join(" ") + " " + firmLine;
+    }
     return { content: [{ type: "text", text: summary }], structuredContent: data, _meta: { ui: { resourceUri: DASH_UI } } };
   }
   if (name === "funnel_report") {
@@ -486,7 +538,7 @@ async function sha256b64url(s: string): Promise<string> {
 function randToken(n = 32) { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join(""); }
 async function validateOctagonToken(token: string) {
   const t = (token || "").trim(); if (!t) return null;
-  const { data } = await db.from("mcp_tokens").select("consultant_recruitcrm_id,can_write").eq("token_hash", await sha256hex(t)).eq("active", true).maybeSingle();
+  const { data } = await db.from("mcp_tokens").select("consultant_recruitcrm_id,can_write,is_admin").eq("token_hash", await sha256hex(t)).eq("active", true).maybeSingle();
   return data ?? null;
 }
 // Supabase can't serve rendered HTML (text/plain + nosniff on the *.supabase.co domain), so the
@@ -509,7 +561,9 @@ async function handleAuthorize(req: Request): Promise<Response> {
     return new Response(null, { status: 302, headers: { Location: back.toString() } });
   }
   const code = randToken(24);
-  await db.from("oauth_codes").insert({ code, consultant_recruitcrm_id: who.consultant_recruitcrm_id, can_write: !!who.can_write, code_challenge: p.code_challenge, redirect_uri: p.redirect_uri, expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString() });
+  // Carry is_admin through the exchange alongside can_write, or re-authenticating silently demotes
+  // an admin to the recruiter view.
+  await db.from("oauth_codes").insert({ code, consultant_recruitcrm_id: who.consultant_recruitcrm_id, can_write: !!who.can_write, is_admin: !!who.is_admin, code_challenge: p.code_challenge, redirect_uri: p.redirect_uri, expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString() });
   const redir = new URL(p.redirect_uri); redir.searchParams.set("code", code); if (p.state) redir.searchParams.set("state", p.state);
   return new Response(null, { status: 302, headers: { Location: redir.toString() } });
 }
@@ -527,7 +581,7 @@ async function handleToken(req: Request): Promise<Response> {
   if (rec.redirect_uri !== body.redirect_uri) return err("invalid_grant", "redirect_uri mismatch");
   if ((await sha256b64url(body.code_verifier)) !== rec.code_challenge) return err("invalid_grant", "PKCE verification failed");
   const accessToken = "oct_oauth_" + randToken(24);
-  await db.from("mcp_tokens").insert({ token_hash: await sha256hex(accessToken), consultant_recruitcrm_id: rec.consultant_recruitcrm_id, can_write: rec.can_write, label: "oauth-session", active: true });
+  await db.from("mcp_tokens").insert({ token_hash: await sha256hex(accessToken), consultant_recruitcrm_id: rec.consultant_recruitcrm_id, can_write: rec.can_write, is_admin: !!rec.is_admin, label: "oauth-session", active: true });
   return new Response(JSON.stringify({ access_token: accessToken, token_type: "Bearer", expires_in: 7776000, scope: "mcp" }), { headers: CORS });
 }
 async function handleRegister(req: Request): Promise<Response> {
