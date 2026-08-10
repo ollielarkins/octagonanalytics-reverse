@@ -1,0 +1,49 @@
+# Supabase project config.
+#
+# The functions block exists to codify verify_jwt per function. It was previously implicit — set by
+# whoever last passed (or forgot) --no-verify-jwt on the CLI — and on 10/08/2026 a deploy that
+# batched two functions into one command with --no-verify-jwt silently turned JWT verification OFF
+# on recruitcrm-sync, exposing the sync trigger. With this file the setting travels with the repo
+# and a deploy can no longer flip it by accident.
+#
+# Rule of thumb: verify_jwt = false ONLY where the function implements its own authentication and
+# must be reachable by an external caller that cannot present a Supabase JWT.
+project_id = "kzcmssldvtjnbwwunuwm"
+
+# --- Open by design: each authenticates its own callers -------------------------------------
+[functions.octagon-mcp]
+# Per-user Octagon bearer tokens (mcp_tokens) + the OAuth 2.1 bridge for claude.ai's connector,
+# which cannot send a Supabase JWT. Every tool call authenticates via authenticate().
+verify_jwt = false
+
+[functions.recruitcrm-webhook]
+# Called by RecruitCRM, which cannot present a Supabase JWT.
+verify_jwt = false
+
+[functions.slack-command]
+# Called by Slack, which cannot present a Supabase JWT.
+verify_jwt = false
+
+[functions.dashboard]
+# Public read-only dashboard page.
+verify_jwt = false
+
+[functions.dashboard-data]
+# Public read-only aggregates behind the dashboard page. No PII.
+verify_jwt = false
+
+# --- Locked: internal only, must present a Supabase JWT -------------------------------------
+[functions.recruitcrm-sync]
+# Holds the RecruitCRM API token and writes the mirror. Driven by pg_cron. Never open this.
+verify_jwt = true
+
+[functions.recruitcrm-probe]
+# Read-only shape probe against the RecruitCRM API. Temporary — see ROADMAP M7 cleanup.
+verify_jwt = true
+
+[functions.recruitcrm-discover]
+# Endpoint discovery against the RecruitCRM API. Temporary — see ROADMAP M7 cleanup.
+verify_jwt = true
+
+[functions.storage-upload]
+verify_jwt = true
