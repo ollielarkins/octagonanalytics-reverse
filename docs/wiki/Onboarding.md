@@ -158,18 +158,6 @@ tracked" rather than a made-up figure. That's the system working.
 
 ---
 
-## Troubleshooting
+## Something not working?
 
-| Symptom | Cause | Fix |
-|---|---|---|
-| Authentication error | Token wrong or revoked | Ask Ollie for a new one |
-| Whole-team view instead of your desk | Token flagged admin | Ask Ollie to unset it |
-| "Consultant not found" | Token isn't linked to your RecruitCRM user | Ask Ollie |
-| Numbers look stale | Sync issue | The dashboard shows a red sync banner when this happens. If there's no banner, the numbers are current to within a couple of minutes |
-| Write refused as read-only | Write access not enabled | Ask Ollie |
-| Write refused with "conflict" | Someone changed the candidate's stage since your preview | Ask again for a fresh preview |
-
-## Who to ask
-
-Ollie for anything technical — tokens, access, wrong numbers, bugs. Dale for how the numbers should
-be used and what to do about them.
+Ping Ollie on Slack with what you asked, what you expected and what you got. Screenshots help.
