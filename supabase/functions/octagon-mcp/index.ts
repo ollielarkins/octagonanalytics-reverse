@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.35.0" };
+const SERVER = { name: "octagon-analytics", version: "3.36.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -364,6 +364,9 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
+  { name: "manage_client", description: "Create or edit a company (client) or a contact in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. kind: company | contact. Omit `id` to create, pass it (company/contact slug, or company name) to edit. A contact should carry a client so it attaches to the right company. Checks for an existing record before creating. Attributed to you.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "company or contact" }, id: { type: "string", description: "slug or name of an existing record — omit to create" }, name: { type: "string", description: "company name (companies only)" }, first_name: { type: "string" }, last_name: { type: "string" }, client: { type: "string", description: "company to attach a contact to" }, email: { type: "string" }, phone: { type: "string" }, designation: { type: "string", description: "job title (contacts)" }, website: { type: "string" }, city: { type: "string" }, country: { type: "string" }, linkedin: { type: "string" }, about: { type: "string", description: "about the company" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
+  { name: "notes_read", description: "Read notes already recorded in RecruitCRM against a candidate, job, company or contact — call notes, intake notes, client conversations. The platform could write notes but never read them, so prior context was invisible. Give a candidate name, or a job, or a client. Returns note text, which is internal-only PII. Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, job: { type: "string", description: "job ID/slug/title" }, client: { type: "string", description: "company name" }, from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "hotlist", description: "Shared talent pools in RecruitCRM. action: list (show hotlists), create (new one), add (put a candidate on one), remove. Use it to turn a shortlist into something the team can see rather than a message in a chat. Creating or changing one is a WRITE: preview first, then confirm=true.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | create | add | remove" }, name: { type: "string", description: "hotlist name (create)" }, hotlist_id: { type: "integer" }, candidate: { type: "string", description: "candidate name or slug (add/remove)" }, shared: { type: "boolean", description: "visible to the team (create)" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["action"], additionalProperties: false } },
   { name: "create_candidate", description: "Add a new candidate to RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Only a first name is strictly required, but supply as much as you have — email, phone, current role and employer, skills, salary and notice all make the record useful and searchable. Checks for an existing candidate with the same email or name first and refuses rather than creating a duplicate. Owned by and attributed to you. Candidate details are PII: internal only.", inputSchema: { type: "object", properties: { first_name: { type: "string" }, last_name: { type: "string" }, email: { type: "string" }, phone: { type: "string" }, position: { type: "string", description: "current job title" }, employer: { type: "string", description: "current organisation" }, skills: { type: "string", description: "comma separated" }, city: { type: "string" }, country: { type: "string" }, linkedin: { type: "string" }, current_salary: { type: "string" }, salary_expectation: { type: "string" }, notice_period: { type: "integer", description: "days" }, source: { type: "string" }, summary: { type: "string", description: "candidate summary / notes" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["first_name"], additionalProperties: false } },
   { name: "update_candidate", description: "Edit an existing candidate in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: before/after preview, then confirm=true. Identify them by name or slug. Only the fields you pass change — but note RecruitCRM demands first_name on every edit, so the tool reads the record first and carries it forward rather than risking a blank. Candidate details are PII: internal only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, first_name: { type: "string" }, last_name: { type: "string" }, email: { type: "string" }, phone: { type: "string" }, position: { type: "string" }, employer: { type: "string" }, skills: { type: "string" }, city: { type: "string" }, country: { type: "string" }, linkedin: { type: "string" }, current_salary: { type: "string" }, salary_expectation: { type: "string" }, notice_period: { type: "integer" }, summary: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "activity_report", description: "Meetings or tasks logged in RecruitCRM for a date window, optionally for one consultant. Meetings are where CLIENT VISITS live — the activity the business asks about that no other tool here reports. Tasks are the to-do layer. Defaults to the last 30 days and to YOU; pass consultant to see someone else, or all=true for the firm. kind: meetings | tasks. Read-only.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meetings or tasks" }, from: { type: "string", description: "YYYY-MM-DD, default 30 days ago" }, to: { type: "string", description: "YYYY-MM-DD, default today" }, consultant: { type: "string", description: "consultant name; omit for yourself" }, all: { type: "boolean", description: "true = whole firm" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
@@ -663,6 +666,144 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  if (name === "manage_client") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. This requires a write-enabled token (an admin sets can_write)." });
+    const kind = String(args.kind ?? "").toLowerCase();
+    if (kind !== "company" && kind !== "contact") return toolText({ error: "kind must be company or contact" });
+    const editing = !!args.id;
+
+    // Attach a contact to its company.
+    let companySlug: string | undefined, companyName: string | undefined;
+    if (args.client) {
+      const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
+        .or(`company_slug.eq.${args.client},company_name.ilike.%${args.client}%`).limit(2);
+      if (!cl?.length) return toolText({ error: `No client matches '${args.client}'.` });
+      if (cl.length > 1) return toolText({ error: "ambiguous_client", matches: cl.map((c: any) => c.company_name) });
+      companySlug = cl[0].company_slug; companyName = cl[0].company_name;
+    }
+
+    const body: Record<string, any> = kind === "company"
+      ? { company_name: args.name, website: args.website, city: args.city, country: args.country,
+          linkedin: args.linkedin, about_company: args.about }
+      : { first_name: args.first_name, last_name: args.last_name, email: args.email,
+          contact_number: args.phone, designation: args.designation, company_slug: companySlug,
+          city: args.city, country: args.country, linkedin: args.linkedin };
+    for (const k of Object.keys(body)) if (body[k] == null || body[k] === "") delete body[k];
+    body.updated_by = actor.id;
+
+    let target = String(args.id ?? "").trim();
+    if (editing) {
+      // Resolve a company given by name; contacts must be given by slug since they are not mirrored.
+      if (kind === "company" && !/^[0-9a-zA-Z]{15,}$/.test(target)) {
+        const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
+          .or(`company_slug.eq.${target},company_name.ilike.%${target}%`).limit(2);
+        if (!cl?.length) return toolText({ error: `No company matches '${target}'.` });
+        if (cl.length > 1) return toolText({ error: "ambiguous_company", matches: cl.map((c: any) => c.company_name) });
+        target = cl[0].company_slug;
+      }
+      // company_name is required on every company edit — carry it forward like the other full-replace endpoints.
+      if (kind === "company" && !body.company_name) {
+        const cur = await crm("GET", `/companies/${target}`);
+        const c = cur.json?.data ?? cur.json ?? {};
+        if (!c.company_name) return toolText({ error: "Could not read the company's current name, which the API requires on every edit." });
+        body.company_name = c.company_name;
+      }
+    } else {
+      if (kind === "company" && !args.name) return toolText({ error: "A new company needs a name." });
+      if (kind === "contact" && !(args.first_name && args.last_name)) return toolText({ error: "A new contact needs a first and last name." });
+      body.created_by = actor.id; body.owner_id = actor.id;
+      if (kind === "company") {
+        const { data: dup } = await db.from("clients").select("company_name").is("deleted_at", null).ilike("company_name", String(args.name)).limit(3);
+        if (dup?.length) return toolText({ error: "possible_duplicate", existing: dup.map((d: any) => d.company_name), message: "A company with that name already exists — edit it rather than creating a second." });
+      }
+    }
+
+    if (!args.confirm) {
+      return toolText({ mode: "preview", action: `${editing ? "edit" : "create"}_${kind}`,
+        target: editing ? target : "(new)", fields: body,
+        attached_to: companyName, carried_forward: (editing && kind === "company" && !args.name) ? `company_name "${body.company_name}" re-sent (required)` : undefined,
+        instruction: `This ${editing ? "changes" : "creates"} a real ${kind} in RecruitCRM. To apply, call again with confirm=true.` });
+    }
+    const path = kind === "company" ? (editing ? `/companies/${target}` : "/companies") : (editing ? `/contacts/${target}` : "/contacts");
+    const r = await crm("POST", path, body);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    const rec = r.json?.data ?? r.json ?? {};
+    await audit({ actor: String(actor.id), action: `${editing ? "edit" : "create"}_${kind}`, entity: kind, entity_id: rec.slug ?? target ?? null, before: null, after: body, via: "claude" });
+    if (kind === "company") await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=clients`,
+      { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    return toolText({ mode: "applied", kind, slug: rec.slug ?? target, note: `${kind} ${editing ? "updated" : "created"} in RecruitCRM.` });
+  }
+
+  if (name === "notes_read") {
+    let relTo = "", relType = "", who = "";
+    if (args?.candidate) {
+      const m = await resolveCandidate(String(args.candidate));
+      if (!m.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
+      if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name) });
+      const hit = m.find((c: any) => c.slug === args.candidate) ?? m[0];
+      relTo = hit.slug; relType = "candidate"; who = hit.name;
+    } else if (args?.job) {
+      const jm = await resolveJob(String(args.job));
+      if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
+      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
+      relTo = jm[0].slug; relType = "job"; who = jm[0].title;
+    } else if (args?.client) {
+      const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
+        .or(`company_slug.eq.${args.client},company_name.ilike.%${args.client}%`).limit(2);
+      if (!cl?.length) return toolText({ error: `No client matches '${args.client}'.` });
+      if (cl.length > 1) return toolText({ error: "ambiguous_client", matches: cl.map((c: any) => c.company_name) });
+      relTo = cl[0].company_slug; relType = "company"; who = cl[0].company_name;
+    } else {
+      return toolText({ error: "Give a candidate, job or client to read notes for." });
+    }
+    const qs = new URLSearchParams({ related_to: relTo, related_to_type: relType });
+    if (args?.from) qs.set("added_from", String(args.from));
+    if (args?.to) qs.set("added_to", String(args.to));
+    const r = await crm("GET", `/notes/search?${qs}`);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
+    const inner = r.json?.data ?? r.json;
+    const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
+    const notes = list.map((n: any) => ({ when: (n.created_on ?? "").toString().slice(0, 10), by: n.created_by ?? null, type: n.note_type?.label ?? null, text: String(n.description ?? "").replace(/<[^>]+>/g, " ").trim().slice(0, 800) }));
+    return toolText({ about: `${relType}: ${who}`, count: notes.length, notes,
+      note: notes.length >= 100 ? "Capped at 100 by the API; narrow the date window for more." : undefined });
+  }
+
+  if (name === "hotlist") {
+    const action = String(args.action ?? "").toLowerCase();
+    if (action === "list") {
+      const r = await crm("GET", "/hotlists");
+      if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
+      const inner = r.json?.data ?? r.json;
+      const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
+      return toolText({ count: list.length, hotlists: list.map((h: any) => ({ id: h.id, name: h.name, type: h.related_to_type, shared: h.shared })) });
+    }
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Changing hotlists requires a write-enabled token." });
+
+    if (action === "create") {
+      if (!args.name) return toolText({ error: "A hotlist needs a name." });
+      const body = { name: args.name, related_to_type: "candidate", shared: args.shared === false ? 0 : 1, created_by: actor.id };
+      if (!args.confirm) return toolText({ mode: "preview", action: "create_hotlist", will_create: body, instruction: "To apply, call again with confirm=true." });
+      const r = await crm("POST", "/hotlists", body);
+      if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+      const rec = r.json?.data ?? r.json ?? {};
+      await audit({ actor: String(actor.id), action: "create_hotlist", entity: "hotlist", entity_id: String(rec.id ?? ""), before: null, after: body, via: "claude" });
+      return toolText({ mode: "applied", hotlist_id: rec.id ?? null, name: args.name });
+    }
+    if (action === "add" || action === "remove") {
+      if (args.hotlist_id == null) return toolText({ error: "Give hotlist_id — call action=list to find it." });
+      const m = await resolveCandidate(String(args.candidate ?? ""));
+      if (!m.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
+      if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name) });
+      const cand = m.find((c: any) => c.slug === args.candidate) ?? m[0];
+      if (!args.confirm) return toolText({ mode: "preview", action: `hotlist_${action}`, hotlist_id: args.hotlist_id, candidate: cand.name, instruction: "To apply, call again with confirm=true." });
+      const r = await crm("POST", `/hotlists/${args.hotlist_id}/${action === "add" ? "add-record" : "remove-record"}`, { related: cand.slug });
+      if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+      await audit({ actor: String(actor.id), action: `hotlist_${action}`, entity: "hotlist", entity_id: String(args.hotlist_id), before: null, after: { candidate: cand.slug }, via: "claude" });
+      return toolText({ mode: "applied", action, hotlist_id: args.hotlist_id, candidate: cand.name });
+    }
+    return toolText({ error: "action must be list, create, add or remove" });
+  }
+
   // Shared field mapping for candidate create/edit — friendly arg names to RecruitCRM's field names.
   const candidateFields = (a: any) => ({
     first_name: a.first_name, last_name: a.last_name, email: a.email, contact_number: a.phone,
