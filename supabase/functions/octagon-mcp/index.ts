@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.32.2" };
+const SERVER = { name: "octagon-analytics", version: "3.33.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -68,6 +68,29 @@ const REFERENCE_LISTS: Record<string, string> = {
   hiring_pipelines: "/hiring-pipelines",
   enrollment_statuses: "/enrollment-statuses",
 };
+
+// Deal stages are org-configured (Won=1 and Lost=2 are fixed, the rest are per-account ids like
+// 92658), so they are resolved from the live pipeline rather than hardcoded.
+async function dealStages() {
+  const r = await crm("GET", "/deals-pipeline");
+  const list = r.json?.data ?? (Array.isArray(r.json) ? r.json : []);
+  return list as Array<{ id: number; label: string }>;
+}
+async function resolveDealStage(want: string) {
+  const list = await dealStages();
+  const w = String(want).trim().toLowerCase();
+  return list.find((s) => String(s.label).toLowerCase() === w)
+      ?? list.find((s) => String(s.label).toLowerCase().includes(w))
+      ?? null;
+}
+// A deal's slug lives in resource_url; migration 0050 extracted it into deals.slug.
+async function resolveDeal(q: string) {
+  const s = q.trim();
+  let sel = db.from("deals").select("recruitcrm_id,slug,deal_name,deal_stage,deal_value,close_date,company_slug,job_slug");
+  sel = /^[0-9]+$/.test(s) ? sel.eq("recruitcrm_id", Number(s)) : sel.or(`slug.eq.${s},deal_name.ilike.%${s}%`);
+  const { data } = await sel.limit(5);
+  return data ?? [];
+}
 
 // Resolve a candidate from the mirror by name or slug, so a recruiter can say "Tim Stratton"
 // rather than dig out a slug.
@@ -341,6 +364,8 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
+  { name: "update_deal", description: "Change a deal in RecruitCRM — most importantly moving it to Won and entering the value, which IS how billing is recorded at Octagon. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the deal by its numeric ID, slug, or part of its name. stage accepts a stage name (Won, Lost, Open, CV Sent, Interview Request, 1st/2nd/3rd Interview, Offered, Declined, Job Lead) resolved against the live pipeline. Note RecruitCRM requires name, value, stage and close_date on every edit, so the tool reads the deal first and preserves anything you don't change.", inputSchema: { type: "object", properties: { deal: { type: "string", description: "deal ID, slug, or part of the name" }, stage: { type: "string", description: "target stage name" }, value: { type: "number", description: "deal value (the fee)" }, name: { type: "string", description: "rename the deal" }, close_date: { type: "string", description: "YYYY-MM-DD" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["deal"], additionalProperties: false } },
+  { name: "create_deal", description: "Create a deal in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Requires a name, a value, a stage and a close date. Optionally link it to a job, client or candidate. Billing is Won deal value, so a deal is how revenue enters the system — created owned by and attributed to you.", inputSchema: { type: "object", properties: { name: { type: "string", description: "deal name" }, value: { type: "number", description: "deal value (the fee)" }, stage: { type: "string", description: "stage name, e.g. Open or Job Lead" }, close_date: { type: "string", description: "YYYY-MM-DD" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["name", "value", "stage", "close_date"], additionalProperties: false } },
   { name: "pitch_history", description: "Speculative pitches recorded in RecruitCRM — who has been pitched to whom, and when. This is the 'pitched candidates' activity the business asks about; it lives in RecruitCRM's pitch feature, which nothing else in this platform reads. Give a candidate (name or slug) to see everywhere they've been pitched, or a contact slug to see everyone pitched to them, or both for that pair's history. Returns candidate and contact names (PII). Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string", description: "contact slug" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "pitch_candidate", description: "Record a speculative pitch in RecruitCRM: candidate X pitched to contact Y. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview naming both people, get approval, then confirm=true. Identify the contact by contact_slug, or by client (company name) plus optionally contact_name. Optionally pass stage_id to move an existing pitch to a different pitch stage instead (see reference_list kind=pitch_stages). Attributed to you.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string" }, client: { type: "string", description: "company name, to find the contact" }, contact_name: { type: "string", description: "narrows the contacts at that client" }, stage_id: { type: "integer", description: "move an existing pitch to this stage instead of creating one" }, remark: { type: "string", description: "note against a stage change" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "delete_record", description: "PERMANENTLY DELETE a record in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY and IRREVERSIBLE — there is no undo and no restore. Call without confirm to get a preview naming the exact record; show that to the recruiter verbatim and get explicit approval; only then call again with confirm=true. entity: job, candidate, company, contact, deal, note, task, meeting, invoice, placement, hotlist, call_log. Jobs/candidates/companies/contacts/deals are identified by slug (a job also accepts its numeric ID); the rest by numeric ID. Never call this speculatively, never to 'clean up', and never on a record the recruiter has not explicitly named.", inputSchema: { type: "object", properties: { entity: { type: "string", description: "what kind of record" }, id: { type: "string", description: "slug, or numeric ID depending on entity" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = permanently delete" }, ...AUTH_ARG }, required: ["entity", "id"], additionalProperties: false } },
@@ -634,6 +659,98 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  if (name === "update_deal") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Editing deals requires a write-enabled token (an admin sets can_write)." });
+    const m = await resolveDeal(String(args.deal ?? ""));
+    if (!m.length) return toolText({ error: `No deal matches '${args.deal}'.` });
+    if (m.length > 1) return toolText({ error: "ambiguous_deal", matches: m.map((d: any) => ({ deal_id: d.recruitcrm_id, name: d.deal_name, stage: d.deal_stage, value: d.deal_value })), instruction: "Ask which one, then call again with that deal ID." });
+    const deal = m[0];
+    if (!deal.slug) return toolText({ error: "no_slug", message: `Deal ${deal.recruitcrm_id} has no slug recorded, so it cannot be addressed via the API.` });
+
+    let stage: any = null;
+    if (args.stage != null) {
+      stage = await resolveDealStage(String(args.stage));
+      if (!stage) return toolText({ error: `No deal stage matches '${args.stage}'. Call reference_list with kind=deal_stages to see them.` });
+    }
+    // RecruitCRM requires name, deal_value, deal_stage AND close_date on every edit — this is a
+    // full replace, not a patch. Read the current deal and carry forward anything not being changed,
+    // or an edit that only moves the stage would blank the value.
+    const cur = await crm("GET", `/deals/${deal.slug}`);
+    const c = cur.json?.data ?? cur.json ?? {};
+    const curStageId = c.deal_stage?.id ?? null;
+    const curStageLabel = c.deal_stage?.label ?? deal.deal_stage;
+    const curClose = (c.close_date ?? deal.close_date ?? "").toString().slice(0, 10);
+    const body: Record<string, any> = {
+      name: args.name ?? c.name ?? deal.deal_name,
+      deal_value: args.value ?? c.deal_value ?? deal.deal_value,
+      deal_stage: stage ? stage.id : curStageId,
+      close_date: args.close_date ?? curClose,
+      updated_by: actor.id,
+    };
+    if (body.deal_stage == null) return toolText({ error: "Could not determine the deal's current stage, so an edit would clear it. Pass stage explicitly." });
+
+    if (!args.confirm) {
+      const before = { name: c.name ?? deal.deal_name, value: c.deal_value ?? deal.deal_value, stage: curStageLabel, close_date: curClose };
+      const after = { name: body.name, value: body.deal_value, stage: stage ? stage.label : curStageLabel, close_date: body.close_date };
+      const changed = Object.keys(after).filter((k) => String((after as any)[k]) !== String((before as any)[k]));
+      return toolText({ mode: "preview", action: "update_deal", deal_id: deal.recruitcrm_id, before, after, changing: changed,
+        billing_note: (stage && String(stage.label).toLowerCase() === "won") ? "Moving a deal to Won records it as BILLED revenue." : undefined,
+        carried_forward: "RecruitCRM requires all four fields on an edit; unchanged ones are re-sent as-is.",
+        instruction: "Show before/after to the recruiter. To apply, call again with confirm=true." });
+    }
+
+    const r = await crm("POST", `/deals/${deal.slug}`, body);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    await audit({ actor: String(actor.id), action: "update_deal", entity: "deal", entity_id: deal.slug,
+      before: { name: deal.deal_name, stage: deal.deal_stage, value: deal.deal_value }, after: body, via: "claude" });
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=deals`,
+      { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    return toolText({ mode: "applied", deal_id: deal.recruitcrm_id, name: body.name, stage: stage ? stage.label : curStageLabel, value: body.deal_value, note: "Deal updated in RecruitCRM and the mirror refreshed." });
+  }
+
+  if (name === "create_deal") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Creating deals requires a write-enabled token (an admin sets can_write)." });
+    const stage = await resolveDealStage(String(args.stage));
+    if (!stage) return toolText({ error: `No deal stage matches '${args.stage}'. Call reference_list with kind=deal_stages to see them.` });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(args.close_date))) return toolText({ error: "close_date must be YYYY-MM-DD." });
+
+    let companySlug: string | undefined, companyName: string | undefined;
+    if (args.client) {
+      const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
+        .or(`company_slug.eq.${args.client},company_name.ilike.%${args.client}%`).limit(2);
+      if (!cl?.length) return toolText({ error: `No client matches '${args.client}'.` });
+      if (cl.length > 1) return toolText({ error: "ambiguous_client", matches: cl.map((c: any) => c.company_name) });
+      companySlug = cl[0].company_slug; companyName = cl[0].company_name;
+    }
+    let jobSlug: string | undefined, jobTitle: string | undefined;
+    if (args.job) {
+      const jm = await resolveJob(String(args.job));
+      if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
+      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
+      jobSlug = jm[0].slug; jobTitle = jm[0].title;
+    }
+
+    const body: Record<string, any> = {
+      name: args.name, deal_value: args.value, deal_stage: stage.id, close_date: args.close_date,
+      company_slug: companySlug, job_slug: jobSlug,
+      owner_id: actor.id, created_by: actor.id, updated_by: actor.id,
+    };
+    if (!args.confirm) {
+      return toolText({ mode: "preview", action: "create_deal", will_create: {
+        name: body.name, value: body.deal_value, stage: stage.label, close_date: body.close_date,
+        client: companyName ?? "not linked", job: jobTitle ?? "not linked", owner: "you" },
+        billing_note: String(stage.label).toLowerCase() === "won" ? "Creating this at Won records it as BILLED revenue immediately." : undefined,
+        instruction: "Show this to the recruiter. This CREATES A REAL DEAL. To apply, call again with confirm=true." });
+    }
+    const r = await crm("POST", "/deals", body);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    const created = r.json?.data ?? r.json ?? {};
+    await audit({ actor: String(actor.id), action: "create_deal", entity: "deal", entity_id: created.slug ?? null, before: null, after: { ...body, id: created.id }, via: "claude" });
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=deals`,
+      { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    return toolText({ mode: "applied", deal_id: created.id ?? null, name: body.name, stage: stage.label, value: body.deal_value, note: "Deal created in RecruitCRM and the mirror refreshed." });
+  }
+
   if (name === "pitch_history") {
     const cq = String(args?.candidate ?? "").trim();
     const contact = String(args?.contact_slug ?? "").trim();
