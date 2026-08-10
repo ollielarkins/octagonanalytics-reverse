@@ -20,22 +20,24 @@ disagree.
 
 ## Current state — 10/08/2026
 
-Live and in use for reads. The write path exists but has never been exercised: `audit_log` is empty,
-so no change has yet been made to RecruitCRM through Claude.
+Live and in use for reads. The write path exists and is broad — jobs, deals, candidates, companies,
+contacts, pitches, meetings, tasks, hotlists, email and deletions — but **no write has ever been
+executed**: `audit_log` is empty. Every preview works; no confirm has been run.
 
 | | |
 |---|---|
-| Connector version | octagon-mcp 3.26.0 |
-| Sync | 9 entities, every 2 minutes, health-monitored |
-| Candidates mirrored | 16,629 (6,133 with pipeline activity) |
-| Jobs | 5,975 (132 open) |
+| Connector version | octagon-mcp 3.40.0 |
+| Sync | 12 feeds, health-monitored |
+| Candidates mirrored | 16,600+ (6,100+ with pipeline activity) |
+| Jobs | 5,975 (132 open, 99.8% linked to a client) |
 | Clients | 4,597 |
 | Deals | 1,600 |
+| Notes | 60,000+ mirrored, 2018 onward |
 | Devyce calls | ~5,000 since 13/03/2026 |
-| Adoption | 17 tool calls in the last 30 days, from 2 people |
+| Off limit | 88 in RecruitCRM, 61 flagged here — excluded from shortlists |
+| Adoption | 2 people have ever used it |
 
-That last row is the honest headline. The platform is built and largely unused. Everything in these
-pages is written on the assumption that the next milestone is people using it, not more features.
+That last row is still the honest headline. The platform is built, broad, and barely used.
 
 ## Ground rules
 

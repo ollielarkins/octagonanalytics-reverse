@@ -55,7 +55,15 @@ curl -X POST -H "Authorization: Bearer <anon key>" \
   "https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/recruitcrm-sync?mode=backfill&entity=deals&start_page=1&max_pages=20"
 ```
 
-Entities: `clients`, `candidates`, `jobs`, `calls`, `deals`. Read-only against RecruitCRM.
+Entities: `clients`, `candidates`, `jobs`, `calls`, `deals`, `notes`. Read-only against RecruitCRM.
+
+Other modes: `mode=history_recent` (candidate stage events for recently-changed candidates — this is
+the funnel's live feed), `mode=notes_recent` (re-walks the newest note pages and records health),
+`mode=offlimit` (refreshes do-not-approach flags).
+
+**Only `notes_recent` and `history_recent` update the health clock.** A plain backfill deliberately
+does not — otherwise manually backfilling an entity would mark a dead incremental feed as healthy,
+which is exactly how the funnel sat frozen for six days on 10/08/2026.
 
 Measured timings: deals 16 pages in 13s, jobs 60 pages in ~2 minutes. If it stops early it returns
 `resume_next_page` — call again with that as `start_page`.
@@ -70,8 +78,9 @@ running a large one.
 select sync_health();
 ```
 
-Nine entities. Live ones warn at 10 minutes stale, critical at 30; reconciles at 26h and 50h. The
-watchdog runs every 5 minutes and the dashboard shows a red banner naming the failing feed.
+Twelve entities. Live ones warn at 10 minutes stale, critical at 30; `notes` at 45/180 (it runs
+every 15 min); reconciles and the off-limit refresh at 26h and 50h. The watchdog runs every 5
+minutes and the dashboard shows a red banner naming the failing feed.
 
 ## Tokens and access
 
@@ -88,7 +97,7 @@ set `is_admin = true`.
 
 ## Incidents — 10/08/2026
 
-Three in one day, all self-inflicted, none caught by tooling. They're recorded because the lesson in
+Five in one day, all self-inflicted, none caught by tooling. They're recorded because the lesson in
 each is a missing guard rail.
 
 **1. Connector down, nine minutes.** A deploy via the MCP tool sent `"PLACEHOLDER"` as the file
@@ -106,6 +115,15 @@ orphans to 9, revealing the "40% archived companies" story had been wrong for mo
 *Guard:* the `allRows` helper. And note the bug only became visible *because* a backfill applied it
 everywhere at once.
 
+**4. The dashboard widget was a syntax error for several hours.** An apostrophe escaped as `'`
+inside a TypeScript template literal becomes a bare quote in the emitted JS, killing the whole
+widget script. It rendered as a permanent "Loading dashboard…".
+*Guard:* `scripts/check-widgets.js` evaluates the template literal and parses the result.
+
+**5. The connect page's script was destroyed by WordPress.** `wpautop` injects `</p> <p>` at blank
+lines, including inside `<script>`, which broke both the feedback button and OAuth sign-in.
+*Guard:* `scripts/check-connect-page.js`, and no blank lines in that file.
+
 The common thread: nothing automated would have caught any of them. A smoke test asserting the
 version endpoint and one real tool call would have caught the first two within seconds.
 
@@ -114,6 +132,8 @@ version endpoint and one real tool call would have caught the first two within s
 | Item | Status |
 |---|---|
 | 64 ghost deals with null `recruitcrm_id` | Pending deletion. £0, none Won, inflate pipeline counts |
+| 27 off-limit candidates not in the mirror | Flagged 61 of 88; the rest were never synced |
+| No write has ever executed | `audit_log` empty across 14 write tools |
 | Two deals with a mistyped fee percentage | Correct at source in RecruitCRM |
 | `recruitcrm-probe` / `recruitcrm-discover` | Temporary, still deployed. Roadmap M7 cleanup |
 | No test suite or CI | Open. Highest-value engineering work outstanding |

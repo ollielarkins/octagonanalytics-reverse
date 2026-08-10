@@ -16,8 +16,9 @@ immediately so the mirror doesn't lag behind a change you just made.
 | Component | What it is | Auth |
 |---|---|---|
 | `octagon-mcp` | Remote MCP server. Tools, prompts, and two inline widgets | Open — per-user Octagon tokens + OAuth 2.1 bridge |
-| `recruitcrm-sync` | The mirror. Modes: backfill, incremental, reconcile, history | Locked — Supabase JWT |
+| `recruitcrm-sync` | The mirror. Modes: backfill, incremental, reconcile, history_recent, notes_recent, offlimit | Locked — Supabase JWT |
 | `recruitcrm-webhook` | Near-real-time change trigger from RecruitCRM | Open — external caller |
+| `feedback` | Issue/feedback box on the connect page | Open — validated, rate-limited |
 | `dashboard` / `dashboard-data` | Static dashboard page and its JSON | Open — public, no PII |
 | `slack-command` | Slack entry point | Open — external caller |
 | `recruitcrm-probe` / `recruitcrm-discover` | Read-only API shape probes. Temporary | Locked |
@@ -38,8 +39,11 @@ Page size 100, 100ms between pages.
 | Reconcile — clients | 03:10 |
 | Reconcile — jobs | 03:20 |
 | Reconcile — deals | 03:30 |
+| Notes (re-walk newest pages) | Every 15 minutes |
+| Candidate stage history (recent) | Every 10 minutes |
+| Off-limit refresh | 03:25 daily |
 
-**Nine entities are health-monitored**: candidates, clients, consultants, jobs, calls, deals, plus
+**Twelve entities are health-monitored**: candidates, clients, consultants, jobs, calls, deals, plus
 the three nightly reconciles. Live entities warn at 10 minutes stale and go critical at 30;
 reconciles warn at 26 hours, critical at 50. The dashboard shows a red banner and names the failing
 feed rather than quietly serving stale figures.
@@ -50,7 +54,8 @@ feed rather than quietly serving stale figures.
 `recruitcrm_id` as the external key, `slug` where other payloads reference by slug.
 
 **Events:** `candidate_stage_events` is the single source for the whole funnel. `call_activity`
-holds Devyce telephony (metadata only — no phone numbers, no call notes). `audit_log` records every
+holds Devyce telephony (metadata only — no phone numbers, no call notes). `notes` mirrors RecruitCRM
+notes, which is what makes leads and internal interviews countable. `audit_log` records every
 write.
 
 **Identity:** `consultants.recruitcrm_id` is canonical. Name columns are display-only.
@@ -91,7 +96,7 @@ Two inline MCP Apps widgets, self-contained HTML over postMessage with no extern
 supabase/
   config.toml          verify_jwt per function
   functions/           edge functions
-  migrations/          0000–0046, sequential, replayable
+  migrations/          0000–0053, sequential, replayable
 docs/
   DECISIONS.md         design decisions with status and rationale
   wiki/                these pages

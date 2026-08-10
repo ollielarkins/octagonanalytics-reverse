@@ -150,9 +150,13 @@ are attributed to you.
 **Slash commands exist for the common things** — type `/` to see them. `/my_day`, `/day_plan`,
 `/weekly_kpis`, `/billing`, `/job_kickoff`, `/client_update`.
 
-**It will tell you when it can't answer.** Leads, pitched candidates, internal interviews and client
-visits aren't recorded anywhere in RecruitCRM, so nothing can report them. You'll get "that isn't
-tracked" rather than a made-up figure. That's the system working.
+**It will tell you when it can't answer.** If a number genuinely isn't in the data you'll get "that
+isn't tracked" rather than a made-up figure. That's the system working.
+
+**Leads, internal interviews, pitched candidates and client visits ARE reportable.** They were long
+believed untrackable; they are not. Leads and internal interviews are note types, pitches are
+RecruitCRM's pitch feature, client visits are meetings — all now readable. Just ask. Bear in mind
+they count what was *logged*, so a lead nobody wrote a note about won't appear.
 
 **Ask it to show its working.** "Where does that number come from?" gets you the definition.
 

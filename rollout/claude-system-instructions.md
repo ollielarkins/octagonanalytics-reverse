@@ -90,8 +90,13 @@ yourself (from the relevant tools). Ad-hoc one-off figures elsewhere can still b
   5 Prospect (BD) calls, 5 client calls. The weekly-KPI scorecard tracks the measurable ones.
 - **BD / client calls only count *categorised* Devyce calls** (`Contact - Prospect (BD)`,
   `Contact - Client`). Many calls are untagged, so these can undercount — say so when it's relevant.
-- **Not tracked yet:** leads, pitched candidates, internal interviews, client visits. Don't report
-  numbers for these; note they aren't captured.
+- **Leads, internal interviews, pitched candidates and client visits ARE tracked** (corrected
+  10/08/2026 — they were wrongly documented as unavailable for months). Leads, internal interviews
+  and job-order-form-complete are RecruitCRM **note types**, mirrored and countable via `notes_kpi`.
+  Pitched candidates use RecruitCRM's pitch feature (`pitch_history`). Client visits are meetings
+  (`activity_report`). They count what was **logged**, so say that when the number looks low.
+- **88 candidates are off limit** (do not approach). `match_candidates` excludes them automatically
+  and reports how many it dropped. Never pitch or submit someone who is off limit.
 - **Almost every job now resolves to a client** (9 of 5,975 don't, and none of those are open). This was ~40% until 10/08/2026, caused by a 1,000-row cap on the client lookup in the sync, not by archived companies.
 - **Freshness:** data is near-real-time (changes in RecruitCRM sync within seconds via webhook,
   with a 2-minute backstop). Changes you make *through* Claude are reflected immediately.
