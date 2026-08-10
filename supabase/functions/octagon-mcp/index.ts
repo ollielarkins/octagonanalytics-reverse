@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.26.0" };
+const SERVER = { name: "octagon-analytics", version: "3.27.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -148,17 +148,34 @@ o+='<h1>Octagon Recruitment Dashboard</h1>'+syncline(h);
 o+=cards([['Placed 2026',N(k.placed_2026)],['Placed all-time',N(k.placed_all)],['Open jobs',N(k.open_jobs)],['Open pipeline',GBP(k.open_pipeline)],['Won',GBP(k.won)],['Candidates in pipeline',N(k.candidates_in_pipeline!=null?k.candidates_in_pipeline:k.candidates)],['Candidates on CRM',N(k.candidates_total)],['Clients',N(k.clients)],['Consultants',N(k.consultants)]]);
 if(k.jobs_no_client)o+='<div class="foot">'+N(k.jobs_no_client)+' of '+N(k.jobs)+' jobs have no resolved client and are excluded from client/account reporting.</div>';
 o+='<h2>2026 Funnel</h2>'+bars([['Shortlist',f.shortlist],['CV Sent',f.cv_sent],['Interview Request',f.interview_request],['1st Interview',f.first_interview],['2nd Interview',f.second_interview],['3rd Interview',f.third_interview],['Offered',f.offered],['Placed',f.placed]])
-+'<div class="foot">Shortlist is partially adopted — fewer shortlist events than CV sends, so don\'t read it as a top-of-funnel denominator.</div>';
++'<div class="foot">Shortlist is partially adopted — fewer shortlist events than CV sends, so it is not a valid top-of-funnel denominator.</div>';
 if(pl.length){o+='<h2>Deal Pipeline</h2><table><tr><th>Stage</th><th class="num">Deals</th><th class="num">Value</th></tr>'+pl.map(function(p){return '<tr><td>'+esc(p.stage)+'</td><td class="num">'+N(p.deals)+'</td><td class="num">'+GBP(p.value)+'</td></tr>'}).join('')+'</table>'}
 if(d.consultants&&d.consultants.length){o+='<h2>Team — by job owner</h2><table><tr><th>Consultant</th><th class="num">CV</th><th class="num">1st Int</th><th class="num">Placed</th></tr>'+d.consultants.map(function(c){return '<tr><td>'+esc(c.name)+'</td><td class="num">'+N(c.cv_sent)+'</td><td class="num">'+N(c.first_interview)+'</td><td class="num">'+N(c.placed)+'</td></tr>'}).join('')+'</table>'}
 return o}
 function render(d){if(!d)return;var v=d.viewer||{};
 // A resolved consultant gets the desk view; admins and unresolved tokens get the firm view.
 document.getElementById('app').innerHTML=(v.name&&!v.is_admin)?meView(d,v):firmView(d)}
+// The widget used to render ONLY from a pushed ui/notifications/tool-result. If that push was
+// missed — sent before this iframe attached its listener — it sat on "Loading dashboard…" forever,
+// which is exactly what a pilot user hit. Now: accept the payload from any message shape the host
+// uses, re-announce a few times in case we attached late, and fail loudly instead of hanging.
+var DONE=false;
+function tryRender(p){if(DONE||!p||!p.kpis)return false;DONE=true;render(p);return true}
+// Find structuredContent wherever the host puts it, without guessing one exact envelope.
+function dig(o,d){if(!o||typeof o!=='object'||d>4)return null;
+if(o.kpis&&o.funnel)return o;
+if(o.structuredContent)return dig(o.structuredContent,d+1)||o.structuredContent;
+var ks=['result','params','toolResult','toolOutput','hostContext','content','data'];
+for(var i=0;i<ks.length;i++){if(o[ks[i]]){var r=dig(o[ks[i]],d+1);if(r)return r}}
+return null}
 window.addEventListener('message',function(ev){var m=ev.data;if(!m||m.jsonrpc!=='2.0')return;
-if(m.id===1&&m.result&&m.result.hostContext&&m.result.hostContext.theme)document.documentElement.setAttribute('data-theme',m.result.hostContext.theme);
-if(m.method==='ui/notifications/tool-result'&&m.params&&m.params.structuredContent)render(m.params.structuredContent)});
-window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{capabilities:{},clientInfo:{name:'octagon-dashboard',version:'1.0'},protocolVersion:'2026-01-26',appCapabilities:{availableDisplayModes:['inline','fullscreen']}}},'*');
+var hc=m.result&&m.result.hostContext;if(hc&&hc.theme)document.documentElement.setAttribute('data-theme',hc.theme);
+tryRender(dig(m,0))});
+function announce(){window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{capabilities:{},clientInfo:{name:'octagon-dashboard',version:'1.0'},protocolVersion:'2026-01-26',appCapabilities:{availableDisplayModes:['inline','fullscreen']}}},'*')}
+announce();
+[400,1200,2500].forEach(function(t){setTimeout(function(){if(!DONE)announce()},t)});
+setTimeout(function(){if(!DONE)document.getElementById('app').innerHTML=
+'<h1>Octagon Recruitment Dashboard</h1><div class="banner">The dashboard could not load its data. Reconnect the Octagon Analytics connector and ask again — if it keeps happening, ping Ollie on Slack.</div>'},6000);
 </script></body></html>`;
 
 // Shared scorecard widget for weekly_kpis + billing (branches on the payload shape).
@@ -185,10 +202,23 @@ else if(d.quarter_start){o+='<h1>Quarterly Billing</h1><div class="sub">quarter 
 o+='<table><tr><th>Consultant</th><th class="num">Target</th><th class="num">Won QTD</th><th class="num">Pipeline</th><th class="num">% target</th></tr>'+cs.map(function(c){var tg=c.quarterly_target,wq=c.won_qtr||0,p=(tg?Math.round(100*wq/tg):null);return '<tr><td>'+esc(c.name)+'</td><td class="num">'+(tg!=null?GBP(tg):'—')+'</td><td class="num">'+GBP(wq)+'</td><td class="num">'+GBP(c.pipeline_open)+'</td><td class="num">'+(p!=null?p+'%':'—')+'</td></tr>'}).join('')+'</table>';}
 if(!cs.length)o+='<div class="sub">No data for you yet.</div>';
 document.getElementById('app').innerHTML=o||'<div class="sub">No data.</div>';}
+// Same late-attach race as the dashboard widget — see the note there.
+var DONE=false;
+function tryRender(p){if(DONE||!p||!p.consultants)return false;DONE=true;render(p);return true}
+function dig(o,d){if(!o||typeof o!=='object'||d>4)return null;
+if(o.consultants&&(o.week_start||o.quarter_start))return o;
+if(o.structuredContent)return dig(o.structuredContent,d+1)||o.structuredContent;
+var ks=['result','params','toolResult','toolOutput','hostContext','content','data'];
+for(var i=0;i<ks.length;i++){if(o[ks[i]]){var r=dig(o[ks[i]],d+1);if(r)return r}}
+return null}
 window.addEventListener('message',function(ev){var m=ev.data;if(!m||m.jsonrpc!=='2.0')return;
-if(m.id===1&&m.result&&m.result.hostContext&&m.result.hostContext.theme)document.documentElement.setAttribute('data-theme',m.result.hostContext.theme);
-if(m.method==='ui/notifications/tool-result'&&m.params&&m.params.structuredContent)render(m.params.structuredContent)});
-window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{capabilities:{},clientInfo:{name:'octagon-scorecard',version:'1.0'},protocolVersion:'2026-01-26',appCapabilities:{availableDisplayModes:['inline','fullscreen']}}},'*');
+var hc=m.result&&m.result.hostContext;if(hc&&hc.theme)document.documentElement.setAttribute('data-theme',hc.theme);
+tryRender(dig(m,0))});
+function announce(){window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{capabilities:{},clientInfo:{name:'octagon-scorecard',version:'1.0'},protocolVersion:'2026-01-26',appCapabilities:{availableDisplayModes:['inline','fullscreen']}}},'*')}
+announce();
+[400,1200,2500].forEach(function(t){setTimeout(function(){if(!DONE)announce()},t)});
+setTimeout(function(){if(!DONE)document.getElementById('app').innerHTML=
+'<div class="sub">Could not load the scorecard. Reconnect the Octagon Analytics connector and ask again.</div>'},6000);
 </script></body></html>`;
 
 const TOOLS = [
@@ -260,7 +290,7 @@ function monthWindow(month?: string): { from: string; to: string; label: string 
 function getPrompt(name: string, args: any): any | null {
   const msg = (text: string) => ({ messages: [{ role: "user", content: { type: "text", text } }] });
   if (name === "dashboard") {
-    return { description: "Live dashboard", ...msg("Call get_dashboard. FIRST inspect the payload's health object: if health.overall is not 'ok', lead with a clear banner naming the stale or failing feeds (each health.entities[].entity with its .reason) and warn that the figures below may be stale; if it is 'ok', a one-line 'sync healthy' note is enough. Then present the full dashboard: the KPI cards, the 2026 funnel, per-consultant performance (attributed by job owner), and the deal pipeline. Keep it plain — compact tables, no heavy styling.") };
+    return { description: "Live dashboard", ...msg("Call get_dashboard and then STOP. It is an interactive connector (MCP Apps) and the result renders itself as the inline dashboard widget — that widget IS the dashboard. Do NOT restate it: no KPI list, no funnel, no per-consultant table, no deal-pipeline table, no markdown tables of any kind, no artifact. The only text you add is a single line, and only when there is something the widget does not say: if health.overall is not 'ok', name the stale or failing feeds and warn the figures may be stale. Otherwise say nothing at all beyond a brief acknowledgement. If the user then asks about a specific number, answer that question alone.") };
   }
   if (name === "kpi") {
     return { description: "Headline KPIs", ...msg("Call get_dashboard. Glance at health.overall first — if it is not 'ok', add a single-line warning naming the affected feeds (health.entities[].entity) before the numbers. Then present ONLY the headline KPIs, concisely: placements (2026 and all-time), open jobs, open pipeline value, Won revenue, and the firm totals (candidates, clients, jobs, active consultants). Do NOT include the funnel, the per-consultant breakdown, or the deal-pipeline table — just the top-line numbers.") };
