@@ -52,9 +52,35 @@ async function methodsFor(token: string, path: string) {
   } catch (e) { return { error: String(e) }; }
 }
 
+// Read-only GET passthrough, admin-only (verify_jwt=true). Invoices taught the lesson: building
+// tools for an unused feature is wasted work, so check whether data exists before writing code.
+// Returns counts and field NAMES, never values.
+async function peek(token: string, path: string) {
+  try {
+    const res = await fetch(`${BASE}/${path}`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+    const text = await res.text();
+    let json: any = null; try { json = JSON.parse(text); } catch {}
+    const inner = json?.data ?? json;
+    const rows = Array.isArray(inner) ? inner : (inner?.records ?? (Array.isArray(json) ? json : null));
+    return {
+      status: res.status,
+      rows: Array.isArray(rows) ? rows.length : null,
+      total: json?.total ?? null,
+      top_level_keys: json && typeof json === "object" && !Array.isArray(json) ? Object.keys(json).slice(0, 12) : null,
+      first_record_fields: Array.isArray(rows) && rows[0] && typeof rows[0] === "object" ? Object.keys(rows[0]).slice(0, 30) : null,
+      body_if_empty: Array.isArray(rows) && rows.length === 0 ? text.slice(0, 160) : undefined,
+    };
+  } catch (e) { return { error: String(e) }; }
+}
+
 Deno.serve(async (req) => {
   {
     const probeUrl = new URL(req.url);
+    const getPath = probeUrl.searchParams.get("get_for");
+    if (getPath) {
+      const tk = Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "";
+      return Response.json({ path: getPath, ...(await peek(tk, getPath)) });
+    }
     const optPath = probeUrl.searchParams.get("options_for");
     if (optPath) {
       const tk = Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "";
