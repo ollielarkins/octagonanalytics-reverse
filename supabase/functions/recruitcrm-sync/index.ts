@@ -110,6 +110,48 @@ const mapDeal = (d: any) => ({
   start_date: dateField(d, /^start date$/i),
   end_date: dateField(d, /^end date$/i),
 });
+const mapNote = (n: any) => ({
+  recruitcrm_id: n.id,
+  note_type: n.note_type?.label ?? (typeof n.note_type === "string" ? n.note_type : null),
+  // Strip the HTML RecruitCRM stores so the text is usable in reports and search.
+  description: typeof n.description === "string" ? n.description.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 4000) : null,
+  related_to: n.related_to ?? null,
+  related_to_type: n.related_to_type ?? null,
+  consultant_recruitcrm_id: n.created_by ?? null,
+  created_on: n.created_on ?? null,
+  updated_on: n.updated_on ?? null,
+});
+
+// Off-limit is a small, separate list (~88 rows) rather than a field on the candidate list, so it
+// gets its own pass: clear the flags, then set them from the live list. Guarded — an empty or failed
+// fetch leaves the existing flags alone rather than marking everyone approachable.
+async function syncOffLimit() {
+  const r = await crm(`/candidates/off-limit?limit=100`);
+  if (!r.ok) return { entity: "offlimit", error: r.status };
+  const inner = r.json?.data ?? r.json;
+  const rows = Array.isArray(inner) ? inner : (inner?.records ?? []);
+  if (!rows.length) return { entity: "offlimit", skipped: true, reason: "empty list — flags left untouched" };
+  const slugs = rows.map((c: any) => c.slug).filter(Boolean);
+  await db.from("candidates").update({ off_limit: false, off_limit_until: null, off_limit_reason: null })
+    .eq("off_limit", true).throwOnError();
+  // Count how many actually matched a mirrored candidate. RecruitCRM can hold off-limit people we
+  // have never synced; those cannot be flagged — but they also cannot appear in match_candidates,
+  // which reads the same mirror, so the filter stays complete for anything we can surface.
+  let matched = 0;
+  for (const c of rows) {
+    if (!c.slug) continue;
+    const { data: upd } = await db.from("candidates").update({
+      off_limit: true,
+      off_limit_until: c.off_limit_end_date ? String(c.off_limit_end_date).slice(0, 10) : null,
+      off_limit_reason: c.off_limit_reason ?? null,
+    }).eq("slug", c.slug).select("slug");
+    if (upd?.length) matched++;
+  }
+  await db.from("sync_state").upsert({ entity: "offlimit", last_run_at: new Date().toISOString(),
+    last_status: `off_limit=${slugs.length} matched=${matched}`, last_synced_at: new Date().toISOString() }, { onConflict: "entity" });
+  return { entity: "offlimit", off_limit_in_crm: slugs.length, flagged_in_mirror: matched, not_mirrored: slugs.length - matched };
+}
+
 // PostgREST caps an unbounded select at 1,000 rows. `clients` holds ~4,600, so the lookup map was
 // silently missing three quarters of them and every job whose company fell outside the first page
 // had its client_id resolved to null on write. That is the real cause of the "orphaned jobs" —
@@ -330,6 +372,20 @@ Deno.serve(async (req) => {
       return Response.json(await syncHistory(maxC));
     }
 
+    if (mode === "offlimit") return Response.json(await syncOffLimit());
+
+    // Notes have no sort parameter, so there is no cursor to follow — but the list is newest-first,
+    // so re-walking the first few pages keeps the mirror current. Records sync_state so the feed is
+    // health-monitored; a plain backfill deliberately does not.
+    if (mode === "notes_recent") {
+      const pages = parseInt(url.searchParams.get("max_pages") ?? "3", 10);
+      const res = await backfillLoop("notes", 1, pages, "notes", mapNote, "notes");
+      await db.from("sync_state").upsert({ entity: "notes", last_run_at: new Date().toISOString(),
+        last_status: res.stopped ? `stopped:${res.stopped}` : `pages=${res.pages_processed} +${res.total_upserted}`,
+        last_synced_at: new Date().toISOString() }, { onConflict: "entity" });
+      return Response.json(res);
+    }
+
     if (mode === "history_recent") {
       const days = parseInt(url.searchParams.get("days") ?? "2", 10);
       const maxC = parseInt(url.searchParams.get("max_candidates") ?? "120", 10);
@@ -368,6 +424,7 @@ Deno.serve(async (req) => {
     if (entity === "jobs") { const [cb, sb] = await jobMaps(); return Response.json(await backfillLoop("jobs", startPage, maxPages, "jobs", mapJobFactory(cb, sb), "jobs")); }
     if (entity === "calls") { const cn = await consNameMap(); return Response.json(await backfillLoop("calls", startPage, maxPages, "call-logs", mapCallFactory(cn), "call_activity")); }
     if (entity === "deals") return Response.json(await backfillLoop("deals", startPage, maxPages, "deals", mapDeal, "deals"));
+    if (entity === "notes") return Response.json(await backfillLoop("notes", startPage, maxPages, "notes", mapNote, "notes"));
     return Response.json({ error: "entity must be consultants|clients|candidates|jobs|calls|deals" }, { status: 400 });
   } catch (e) {
     return Response.json({ error: String(e) }, { status: 500 });
