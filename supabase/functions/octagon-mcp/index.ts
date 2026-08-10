@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.29.0" };
+const SERVER = { name: "octagon-analytics", version: "3.30.1" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -43,6 +43,32 @@ async function crmForm(path: string, fields: Record<string, any>) {
   const text = await res.text(); let json: any = null; try { json = JSON.parse(text); } catch {}
   return { ok: res.ok, status: res.status, json, text };
 }
+// RecruitCRM's reference lists — the id/label tables behind its dropdowns. Sixteen endpoints behind
+// one tool, because 174 spec operations must not become 174 tools; a tool list that size wrecks
+// selection. These are the lists we were previously guessing at: create_job inferred currency_id
+// from a sibling job because nothing exposed /v1/currencies (Thermoteknix is 19, not the obvious 1).
+const REFERENCE_LISTS: Record<string, string> = {
+  currencies: "/currencies",
+  industries: "/industries",
+  qualifications: "/qualifications",
+  languages: "/languages",
+  proficiencies: "/proficiencies",
+  salary_types: "/salary-types",
+  call_types: "/custom-call-types",
+  note_types: "/note-types",
+  task_types: "/task-types",
+  meeting_types: "/meeting-types",
+  invoice_status: "/invoice-status",
+  off_limit_status: "/off-limit-status",
+  teams: "/teams",
+  job_stages: "/jobs-pipeline",
+  deal_stages: "/deals-pipeline",
+  contact_stages: "/sales-pipeline",
+  pitch_stages: "/pitch-pipeline",
+  hiring_pipelines: "/hiring-pipelines",
+  enrollment_statuses: "/enrollment-statuses",
+};
+
 // job_status is an integer in RecruitCRM: 0 Closed, 1 Open, 2 On-Hold, 3 Cancelled.
 const JOB_STATUS: Record<string, number> = { closed: 0, open: 1, "on hold": 2, "on-hold": 2, onhold: 2, cancelled: 3, canceled: 3 };
 const JOB_STATUS_NAME: Record<number, string> = { 0: "Closed", 1: "Open", 2: "On Hold", 3: "Cancelled" };
@@ -267,7 +293,8 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
-  { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency_id: { type: "integer", description: "defaults to whatever this client's most recent job uses" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
+  { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
+  { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
   { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
   { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
@@ -556,6 +583,17 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  if (name === "reference_list") {
+    const k = String(args?.kind ?? "").toLowerCase().replace(/[\s-]+/g, "_");
+    if (!(k in REFERENCE_LISTS)) {
+      return toolText({ error: `Unknown list '${args?.kind}'.`, available: Object.keys(REFERENCE_LISTS) });
+    }
+    const r = await crm("GET", REFERENCE_LISTS[k]);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
+    const items = Array.isArray(r.json) ? r.json : (r.json?.data ?? r.json);
+    return toolText({ kind: k, endpoint: REFERENCE_LISTS[k], count: Array.isArray(items) ? items.length : null, items });
+  }
+
   if (name === "create_job") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Creating jobs requires a write-enabled token (an admin sets can_write)." });
     // Resolve the client from the mirror — the recruiter says "Thermoteknix", the API needs a slug.
@@ -580,9 +618,20 @@ async function callTool(name: string, args: any, req: Request) {
       contactNote = `auto-resolved (${[first.first_name, first.last_name].filter(Boolean).join(" ") || first.slug})`;
     }
 
-    // Default the currency from this client's most recent job so we don't guess.
+    // Currency, in order of trust: an explicit code (GBP), an explicit id, this client's most
+    // recent job, then GBP. NEVER fall back to 1 — /v1/currencies says 1 is the Albanian Lek, and
+    // an earlier version of this tool used it as the default.
     let currencyId = args.currency_id;
     let currencyNote = "supplied";
+    if (currencyId == null && args.currency) {
+      const cur = await crm("GET", "/currencies");
+      const list = Array.isArray(cur.json) ? cur.json : (cur.json?.data ?? []);
+      const want = String(args.currency).toUpperCase();
+      const hit = list.find((c: any) => String(c.code).toUpperCase() === want && /united kingdom|america|euro/i.test(String(c.country ?? "")))
+               ?? list.find((c: any) => String(c.code).toUpperCase() === want);
+      if (!hit) return toolText({ error: `No currency matches '${args.currency}'. Call reference_list with kind=currencies to see the options.` });
+      currencyId = hit.currency_id; currencyNote = `${hit.code} — ${hit.country}`;
+    }
     if (currencyId == null) {
       const { data: prev } = await db.from("jobs").select("slug").eq("company_slug", client.company_slug)
         .is("deleted_at", null).order("created_date", { ascending: false }).limit(1);
@@ -591,7 +640,7 @@ async function callTool(name: string, args: any, req: Request) {
         currencyId = j.json?.currency_id ?? j.json?.data?.currency_id ?? null;
         if (currencyId != null) currencyNote = `copied from this client's most recent job`;
       }
-      if (currencyId == null) { currencyId = 1; currencyNote = "defaulted to 1 — NOT verified, check this is the right currency"; }
+      if (currencyId == null) { currencyId = 19; currencyNote = "defaulted to GBP (19)"; }
     }
 
     const statusKey = String(args.status ?? "open").toLowerCase();
