@@ -32,6 +32,12 @@ verify_jwt = false
 # Public read-only aggregates behind the dashboard page. No PII.
 verify_jwt = false
 
+[functions.feedback]
+# Posted from the connect page on octagongroup.co.uk by people who may not have a working token —
+# an auth failure is exactly the thing they would be reporting. Protected by field validation, a
+# length cap, a honeypot and a per-IP rate limit rather than by a JWT.
+verify_jwt = false
+
 # --- Locked: internal only, must present a Supabase JWT -------------------------------------
 [functions.recruitcrm-sync]
 # Holds the RecruitCRM API token and writes the mirror. Driven by pg_cron. Never open this.
