@@ -7,6 +7,7 @@
 // and returns ONLY the field names + value *types* of the first record — never
 // the values themselves. Delete this function once the shapes are captured.
 
+export {};   // marks this as a module so `node --check` strips types (CJS path does not)
 const BASE = "https://api.recruitcrm.io/v1";
 // Probing where the FEE lives: the placement record has no fee column, so it is either on the
 // linked deal or in custom_fields. Custom-field NAMES are configuration, not data — safe to return.
@@ -39,7 +40,31 @@ function shapeOf(rec: unknown): Record<string, string> {
   return out;
 }
 
-Deno.serve(async () => {
+// Capability probe: which HTTP methods does an endpoint accept? OPTIONS has no side effects, so
+// this is safe to run against the live CRM — unlike POSTing a deliberately-invalid body, which can
+// create junk records in the system of record.
+async function methodsFor(token: string, path: string) {
+  try {
+    const res = await fetch(`${BASE}/${path}`, { method: "OPTIONS", headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+    const h: Record<string, string> = {};
+    res.headers.forEach((v, k) => { if (/allow|access-control-allow-methods/i.test(k)) h[k] = v; });
+    return { status: res.status, headers: Object.keys(h).length ? h : null };
+  } catch (e) { return { error: String(e) }; }
+}
+
+Deno.serve(async (req) => {
+  {
+    const probeUrl = new URL(req.url);
+    const optPath = probeUrl.searchParams.get("options_for");
+    if (optPath) {
+      const tk = Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "";
+      return Response.json({ path: optPath, ...(await methodsFor(tk, optPath)) });
+    }
+  }
+  return await originalHandler();
+});
+
+async function originalHandler(): Promise<Response> {
   // The project secret is RECRUIT_CRM_API_TOKEN; keep the old name as a fallback.
   const token = Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN");
   if (!token) {
@@ -76,4 +101,4 @@ Deno.serve(async () => {
   }
 
   return Response.json({ probed_at: "on-demand", base: BASE, endpoints: report });
-});
+}
