@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.21.1" };
+const SERVER = { name: "octagon-analytics", version: "3.21.2" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -115,6 +115,8 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 var GBP=function(n){return n==null?'—':'£'+Math.round(Number(n)).toLocaleString('en-GB')};
 var N=function(n){return n==null?'—':Number(n).toLocaleString('en-GB')};
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+// House date format is DD/MM/YYYY; the RPCs hand back ISO.
+function D(s){var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s==null?'':s));return m?m[3]+'/'+m[2]+'/'+m[1]:esc(s)}
 function cards(cd){return '<div class="cards">'+cd.map(function(c){return '<div class="card"><div class="v">'+c[1]+'</div><div class="l">'+c[0]+'</div></div>'}).join('')+'</div>'}
 function syncline(h){var ok=(h.overall==='ok'),o='<div class="sub"><span class="pill '+(ok?'ok':'stale')+'">'+(ok?'sync healthy':'sync issue')+'</span></div>';
 if(!ok){var fe=(h.entities||[]).filter(function(e){return e.status!=='ok'}).map(function(e){return esc(e.entity)+' ('+esc(e.reason)+')'}).join(', ');o+='<div class="banner">Sync not OK — figures may be stale: '+(fe||'unknown')+'</div>'}return o}
@@ -126,9 +128,9 @@ function meView(d,v){var o='',h=d.health||{},k=d.kpis||{},w=v.my_weekly||{},b=v.
 o+='<h1>Your desk'+(v.name?' — '+esc(v.name):'')+'</h1>'+syncline(h);
 o+=cards([['Placed 2026',N(y.placed)],['Won this quarter',GBP(b.won_qtr)],['Open pipeline',GBP(b.pipeline_open)],['Active in play',N(md.active_in_play)],['Aging offers',N(md.aging_offers?md.aging_offers.length:null)],['Cold open roles',N(md.cold_open_roles)]]);
 var rw=[['CV sends','cv_sent'],['Interview requests','interview_request'],['Interviews','first_interview'],['BD calls','bd_calls'],['Client calls','client_calls']];
-if(v.my_weekly){o+='<h2>Your week vs target'+(v.week_start?' — from '+esc(v.week_start):'')+'</h2>'+rw.map(function(r){var m=w[r[1]]||{},a=m.actual||0,t=m.target,cl=(t!=null&&a<t)?'behind':'met';return '<div class="kpi"><span>'+r[0]+'</span><span class="'+cl+'">'+a+(t!=null?' / '+t:'')+'</span></div>'}).join('')+'<div class="foot">BD/client calls count categorised Devyce calls only, so can undercount.</div>'}
+if(v.my_weekly){o+='<h2>Your week vs target'+(v.week_start?' — from '+D(v.week_start):'')+'</h2>'+rw.map(function(r){var m=w[r[1]]||{},a=m.actual||0,t=m.target,cl=(t!=null&&a<t)?'behind':'met';return '<div class="kpi"><span>'+r[0]+'</span><span class="'+cl+'">'+a+(t!=null?' / '+t:'')+'</span></div>'}).join('')+'<div class="foot">BD/client calls count categorised Devyce calls only, so can undercount.</div>'}
 if(v.my_billing){var tg=b.quarterly_target,wq=b.won_qtr||0,pc=(tg?Math.round(100*wq/tg):null),sh=(tg!=null?tg-wq:null);
-o+='<h2>Your billing'+(v.quarter_start?' — quarter from '+esc(v.quarter_start):'')+'</h2>'
+o+='<h2>Your billing'+(v.quarter_start?' — quarter from '+D(v.quarter_start):'')+'</h2>'
 +'<div class="kpi"><span>Won (billed)</span><span class="'+(tg!=null&&wq<tg?'behind':'met')+'">'+GBP(wq)+(tg!=null?' / '+GBP(tg):'')+(pc!=null?' ('+pc+'%)':'')+'</span></div>'
 +(sh!=null&&sh>0?'<div class="kpi"><span>Still to bill</span><span class="behind">'+GBP(sh)+'</span></div>':'')
 +'<div class="kpi"><span>Open pipeline</span><span>'+GBP(b.pipeline_open)+'</span></div>'}
@@ -170,11 +172,13 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}.behind{color:v
 </style></head><body><div id="app"><div class="sub">Loading…</div></div><script>
 var GBP=function(n){return n==null?'—':'£'+Math.round(Number(n)).toLocaleString('en-GB')};
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
+// House date format is DD/MM/YYYY; the RPCs hand back ISO.
+function D(s){var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s==null?'':s));return m?m[3]+'/'+m[2]+'/'+m[1]:esc(s)}
 function render(d){if(!d)return;var o='',cs=d.consultants||[];
-if(d.week_start){o+='<h1>Weekly KPIs</h1><div class="sub">week from '+esc(d.week_start)+(d.has_targets?'':' · targets not loaded')+' · BD/client calls count categorised Devyce calls only</div>';
+if(d.week_start){o+='<h1>Weekly KPIs</h1><div class="sub">week from '+D(d.week_start)+(d.has_targets?'':' · targets not loaded')+' · BD/client calls count categorised Devyce calls only</div>';
 var m=[['CV','cv_sent'],['Int req','interview_request'],['Int','first_interview'],['BD','bd_calls'],['Client','client_calls'],['Placed','placed']];
 o+='<table><tr><th>Consultant</th>'+m.map(function(x){return '<th class="num">'+x[0]+'</th>'}).join('')+'</tr>'+cs.map(function(c){return '<tr><td>'+esc(c.name)+'</td>'+m.map(function(x){var v=c[x[1]]||{},a=v.actual||0,t=v.target,cl=(t!=null&&a<t)?'behind':(t!=null?'met':'');return '<td class="num '+cl+'">'+a+(t!=null?'/'+t:'')+'</td>'}).join('')+'</tr>'}).join('')+'</table>';}
-else if(d.quarter_start){o+='<h1>Quarterly Billing</h1><div class="sub">quarter from '+esc(d.quarter_start)+' · Won = billed (Deal → Won); pipeline is the forward indicator</div>';
+else if(d.quarter_start){o+='<h1>Quarterly Billing</h1><div class="sub">quarter from '+D(d.quarter_start)+' · Won = billed (Deal → Won); pipeline is the forward indicator</div>';
 o+='<table><tr><th>Consultant</th><th class="num">Target</th><th class="num">Won QTD</th><th class="num">Pipeline</th><th class="num">% target</th></tr>'+cs.map(function(c){var tg=c.quarterly_target,wq=c.won_qtr||0,p=(tg?Math.round(100*wq/tg):null);return '<tr><td>'+esc(c.name)+'</td><td class="num">'+(tg!=null?GBP(tg):'—')+'</td><td class="num">'+GBP(wq)+'</td><td class="num">'+GBP(c.pipeline_open)+'</td><td class="num">'+(p!=null?p+'%':'—')+'</td></tr>'}).join('')+'</table>';}
 if(!cs.length)o+='<div class="sub">No data for you yet.</div>';
 document.getElementById('app').innerHTML=o||'<div class="sub">No data.</div>';}
