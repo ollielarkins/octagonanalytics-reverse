@@ -28,6 +28,22 @@ function customField(obj: any, nameRe: RegExp) {
   const v = f ? (f.value ?? f.field_value ?? f.val ?? null) : null;
   return (v != null && String(v).trim() !== "") ? String(v).trim() : null;
 }
+// Custom fields arrive as text. Strip currency symbols, commas and % before casting.
+function numField(obj: any, nameRe: RegExp) {
+  const s = customField(obj, nameRe);
+  if (s == null) return null;
+  const n = Number(s.replace(/[^0-9.\-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+// Don't hand ambiguous strings to Date(): "05/08/2026" is 5 August here and 8 May to JS.
+function dateField(obj: any, nameRe: RegExp) {
+  const s = customField(obj, nameRe);
+  if (s == null) return null;
+  const dmy = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  const iso = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  return iso ? iso[1] : null;
+}
 const mapClient = (c: any) => ({
   recruitcrm_id: c.id, company_name: c.company_name ?? null, company_slug: c.slug ?? null, country: c.country ?? null, active: true,
   company_status: customField(c, /company status/i),
@@ -69,6 +85,7 @@ function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
     status: job.job_status?.label ?? (typeof job.job_status === "string" ? job.job_status : null),
     salary_min: job.min_annual_salary ?? null, salary_max: job.max_annual_salary ?? null,
     created_date: job.created_on ?? null,
+    forecast_fee: numField(job, /^forecast fee/i),   // "Forecast Fee (£)" — per-role forward indicator
   });
 }
 const mapDeal = (d: any) => ({
@@ -84,6 +101,13 @@ const mapDeal = (d: any) => ({
   created_date: d.created_on ?? null,
   updated_date: d.updated_on ?? null,
   resource_url: d.resource_url ?? null,
+  // Fee components (0043). Anchored regexes: /annual salary/ alone would also match
+  // "Percentage of Annual Salary" and silently put the percentage in the salary column.
+  annual_salary: numField(d, /^annual salary$/i),
+  fee_percentage: numField(d, /^percentage of annual salary$/i),
+  fee_currency: customField(d, /^currency$/i),
+  start_date: dateField(d, /^start date$/i),
+  end_date: dateField(d, /^end date$/i),
 });
 async function jobMaps() {
   const [{ data: cons }, { data: cls }] = await Promise.all([
