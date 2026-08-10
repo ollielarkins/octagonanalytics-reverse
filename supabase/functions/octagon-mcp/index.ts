@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.31.0" };
+const SERVER = { name: "octagon-analytics", version: "3.32.2" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -68,6 +68,35 @@ const REFERENCE_LISTS: Record<string, string> = {
   hiring_pipelines: "/hiring-pipelines",
   enrollment_statuses: "/enrollment-statuses",
 };
+
+// Resolve a candidate from the mirror by name or slug, so a recruiter can say "Tim Stratton"
+// rather than dig out a slug.
+async function resolveCandidate(q: string) {
+  const s = q.trim();
+  const { data } = await db.from("candidates").select("slug,name,recruitcrm_id")
+    .or(`slug.eq.${s},name.ilike.%${s}%`).limit(5);
+  return data ?? [];
+}
+// Contacts are NOT mirrored, so they come from the live API. Either an exact slug, or the contacts
+// at a named client optionally filtered by person name.
+async function resolveContact(opts: { contact_slug?: string; client?: string; contact_name?: string }) {
+  if (opts.contact_slug) {
+    const r = await crm("GET", `/contacts/${encodeURIComponent(opts.contact_slug)}`);
+    const rec = r.json?.data ?? r.json;
+    return r.ok && rec ? [rec] : [];
+  }
+  if (!opts.client) return [];
+  const { data: cl } = await db.from("clients").select("company_slug,company_name")
+    .is("deleted_at", null).or(`company_slug.eq.${opts.client},company_name.ilike.%${opts.client}%`).limit(1);
+  if (!cl?.length) return [];
+  const r = await crm("GET", `/contacts/search?company_slug=${encodeURIComponent(cl[0].company_slug)}`);
+  let list = r.json?.data ?? (Array.isArray(r.json) ? r.json : []);
+  if (opts.contact_name) {
+    const want = opts.contact_name.toLowerCase();
+    list = list.filter((c: any) => [c.first_name, c.last_name].filter(Boolean).join(" ").toLowerCase().includes(want));
+  }
+  return list;
+}
 
 // Deletable entities. RecruitCRM keys some by slug and some by numeric id — getting that wrong
 // means either a 404 or, worse, deleting the wrong record, so it is declared rather than guessed.
@@ -312,6 +341,8 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
+  { name: "pitch_history", description: "Speculative pitches recorded in RecruitCRM — who has been pitched to whom, and when. This is the 'pitched candidates' activity the business asks about; it lives in RecruitCRM's pitch feature, which nothing else in this platform reads. Give a candidate (name or slug) to see everywhere they've been pitched, or a contact slug to see everyone pitched to them, or both for that pair's history. Returns candidate and contact names (PII). Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string", description: "contact slug" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "pitch_candidate", description: "Record a speculative pitch in RecruitCRM: candidate X pitched to contact Y. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview naming both people, get approval, then confirm=true. Identify the contact by contact_slug, or by client (company name) plus optionally contact_name. Optionally pass stage_id to move an existing pitch to a different pitch stage instead (see reference_list kind=pitch_stages). Attributed to you.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string" }, client: { type: "string", description: "company name, to find the contact" }, contact_name: { type: "string", description: "narrows the contacts at that client" }, stage_id: { type: "integer", description: "move an existing pitch to this stage instead of creating one" }, remark: { type: "string", description: "note against a stage change" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "delete_record", description: "PERMANENTLY DELETE a record in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY and IRREVERSIBLE — there is no undo and no restore. Call without confirm to get a preview naming the exact record; show that to the recruiter verbatim and get explicit approval; only then call again with confirm=true. entity: job, candidate, company, contact, deal, note, task, meeting, invoice, placement, hotlist, call_log. Jobs/candidates/companies/contacts/deals are identified by slug (a job also accepts its numeric ID); the rest by numeric ID. Never call this speculatively, never to 'clean up', and never on a record the recruiter has not explicitly named.", inputSchema: { type: "object", properties: { entity: { type: "string", description: "what kind of record" }, id: { type: "string", description: "slug, or numeric ID depending on entity" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = permanently delete" }, ...AUTH_ARG }, required: ["entity", "id"], additionalProperties: false } },
   { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
@@ -603,6 +634,80 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  if (name === "pitch_history") {
+    const cq = String(args?.candidate ?? "").trim();
+    const contact = String(args?.contact_slug ?? "").trim();
+    if (!cq && !contact) return toolText({ error: "Give a candidate, a contact_slug, or both." });
+
+    let candSlug = "", candName = "";
+    if (cq) {
+      const m = await resolveCandidate(cq);
+      if (!m.length) return toolText({ error: `No candidate matches '${cq}'.` });
+      if (m.length > 1 && !m.some((c: any) => c.slug === cq)) {
+        return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name), instruction: "Ask which one." });
+      }
+      const hit = m.find((c: any) => c.slug === cq) ?? m[0];
+      candSlug = hit.slug; candName = hit.name;
+    }
+
+    let path: string, scope: string;
+    if (candSlug && contact) { path = `/pitch/${candSlug}/history/${contact}`; scope = "this candidate and contact"; }
+    else if (candSlug)       { path = `/pitch/pitch-candidate-history/${candSlug}`; scope = `everywhere ${candName} has been pitched`; }
+    else                     { path = `/pitch/pitch-contact-history/${contact}`; scope = "everyone pitched to this contact"; }
+
+    const r = await crm("GET", path);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
+    // Pitch endpoints wrap in {records:[...]}, unlike the paginated {data:[...]} used elsewhere.
+    // Pitch responses nest as {data:{records:[...]}} — unwrap data first, then records.
+    const inner = r.json?.data ?? r.json;
+    const items = inner?.records ?? inner;
+    const n = Array.isArray(items) ? items.length : null;
+    // Also list where the candidate currently sits, which is a different endpoint.
+    let pitchedTo: any = undefined;
+    if (candSlug && !contact) {
+      const w = await crm("GET", `/pitch/candidate/pitch-stage/${candSlug}`);
+      if (w.ok) { const wi = w.json?.data ?? w.json; pitchedTo = wi?.records ?? wi; }
+    }
+    return toolText({ scope, candidate: candName || undefined, count: n, history: items, currently_pitched_to: pitchedTo,
+      note: n === 0 ? "No pitches recorded. Either none have happened or they were not logged in RecruitCRM." : undefined });
+  }
+
+  if (name === "pitch_candidate") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Recording a pitch requires a write-enabled token (an admin sets can_write)." });
+    const m = await resolveCandidate(String(args.candidate ?? ""));
+    if (!m.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
+    if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) {
+      return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name), instruction: "Ask which one, then call again." });
+    }
+    const cand = m.find((c: any) => c.slug === args.candidate) ?? m[0];
+
+    const contacts = await resolveContact({ contact_slug: args.contact_slug, client: args.client, contact_name: args.contact_name });
+    if (!contacts.length) return toolText({ error: "no_contact", message: "Could not find that contact. Give contact_slug, or a client name (plus contact_name to narrow it)." });
+    if (contacts.length > 1) {
+      return toolText({ error: "ambiguous_contact", matches: contacts.slice(0, 8).map((c: any) => ({ name: [c.first_name, c.last_name].filter(Boolean).join(" "), contact_slug: c.slug, position: c.position ?? null })), instruction: "Ask which contact, then call again with contact_slug." });
+    }
+    const ct = contacts[0];
+    const ctName = [ct.first_name, ct.last_name].filter(Boolean).join(" ") || ct.slug;
+    const movingStage = args.stage_id != null;
+
+    if (!args.confirm) {
+      return toolText({ mode: "preview", action: movingStage ? "update_pitch_stage" : "pitch_candidate",
+        candidate: cand.name, contact: `${ctName}${ct.company_name ? " — " + ct.company_name : ""}`,
+        stage_id: args.stage_id, remark: args.remark,
+        instruction: `This records in RecruitCRM that ${cand.name} was pitched to ${ctName}. Show it to the recruiter. To apply, call again with confirm=true.` });
+    }
+
+    // Note the shape difference: creating a pitch is query-params only, the stage update is JSON.
+    const r = movingStage
+      ? await crm("POST", `/pitch/${cand.slug}/updated-stage/${ct.slug}?updated_by=${encodeURIComponent(String(actor.id))}`,
+          { status_id: args.stage_id, remark: args.remark ?? null, stage_date: new Date().toISOString().slice(0, 10) })
+      : await crm("POST", `/pitch/${cand.slug}/contact/${ct.slug}?created_by=${encodeURIComponent(String(actor.id))}`);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    await audit({ actor: String(actor.id), action: movingStage ? "update_pitch_stage" : "pitch_candidate", entity: "candidate", entity_id: cand.slug,
+      before: null, after: { contact_slug: ct.slug, contact: ctName, stage_id: args.stage_id ?? null }, via: "claude" });
+    return toolText({ mode: "applied", candidate: cand.name, contact: ctName, action: movingStage ? "pitch stage updated" : "pitch recorded", note: "Recorded in RecruitCRM." });
+  }
+
   if (name === "delete_record") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Deleting requires a write-enabled token (an admin sets can_write)." });
     const ent = String(args?.entity ?? "").toLowerCase().replace(/[\s-]+/g, "_").replace(/^client$/, "company");
