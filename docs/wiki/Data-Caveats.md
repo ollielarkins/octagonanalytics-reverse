@@ -108,26 +108,32 @@ window for that reason. Comparisons across that boundary aren't like-for-like.
 
 ---
 
-## Not tracked at all
+## The metrics we said weren't tracked — all of them are
 
-Leads, pitched candidates, internal interviews, client visits. No field exists for them.
+Corrected 10/08/2026 after reading the full RecruitCRM API. Leads and internal interviews are
+**note types**; pitched candidates use RecruitCRM's **pitch feature**; client visits are
+**meetings**. 2026 to date: 422 leads, 255 internal interviews, 92 job order forms.
 
-They aren't hard to add, and none of it needs new tables — the sync already mirrors every
-extensibility point RecruitCRM offers:
+Notes are now mirrored (60,000+ rows, 2018 onward) so the note-based ones are countable by
+consultant and period. Nothing needed adding to RecruitCRM — the data was always there.
 
-| Metric | Where it should live | Work needed |
-|---|---|---|
-| Internal interview | A hiring-pipeline stage | One row in `stage_lookup` |
-| Pitched candidates | A hiring stage, or a Devyce call category | One row, or one label in the KPI mapping |
-| Client visits | A Devyce call category | One label in the KPI mapping |
-| Leads | A `Lead` company status | Flows into `bd_report` automatically |
+The remaining caveat is recording, not capability: these count what was logged. Low numbers may
+mean low activity or low logging, exactly like Devyce call tagging.
 
-Precedent: someone added a **Shortlist** stage to the pipeline and it has been recording silently
-since 13/02/2025 — 1,595 events — with no engineering work at all.
+A `Job Lead` deal stage also exists with zero deals in it. If it starts being used, leads will
+live in two places and will need reconciling.
 
-Two caveats. Each only counts from the day it's switched on, with no history. And the call-category
-route inherits the 26.6% tagging problem, while the hiring-stage route doesn't — moving a candidate
-*is* the work, rather than admin done afterwards. Prefer stages where there's a choice.
+---
+
+## 88 candidates are off limit — 61 of them are flagged here
+
+RecruitCRM marks 88 candidates do-not-approach, with reasons recorded. `match_candidates` used to
+return them; it now excludes them and reports `off_limit_excluded` rather than silently shortening
+a shortlist. A single "engineer" search was surfacing 14.
+
+Of the 88, **61 exist in our candidate mirror and carry the flag; 27 have never been synced**. That
+is not a hole in the filter — the shortlist reads the same mirror, so anything it can surface it can
+also exclude — but the two numbers are different and both are true.
 
 ---
 

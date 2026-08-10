@@ -1,7 +1,7 @@
 # Metrics and definitions
 
 The canonical meaning of every figure. If a number appears in two places it comes from the same
-view or RPC — there is no second implementation. Anything not defined here isn't tracked.
+view or RPC — there is no second implementation.
 
 ## Attribution — who gets the credit
 
@@ -106,8 +106,27 @@ them produced a list of 1,517 items that nobody could act on.
 - Default window: 2026 year to date, end exclusive.
 - Tables: highest first.
 
-## Not tracked
+## Previously "not tracked" — all of it is tracked
 
-Leads, pitched candidates, internal interviews, client visits. RecruitCRM has no field for any of
-them. Nothing can report them and nothing should try. See [Data Caveats](Data-Caveats) for how they
-could be added.
+Every metric this project documented as unmeasurable turned out to be recorded in RecruitCRM. The
+platform simply never read it. Corrected 10/08/2026.
+
+| Metric | Where it lives | 2026 to date |
+|---|---|---|
+| **Leads** | A `Lead` **note type** | 422 |
+| **Internal interviews** | A `Candidate - Internal Interview` **note type** | 255 |
+| **Job order form complete** | A `Job Order Form Complete` **note type** | 92 |
+| **Pitched candidates** | RecruitCRM's pitch feature — its own pipeline, stages and history | in use |
+| **Client visits** | Meetings | 64 in August |
+
+Notes are now mirrored, so the three note-based figures are countable by consultant and period —
+ask for them, or call `notes_kpi`. Pitches and meetings are read live from the API via
+`pitch_history` and `activity_report`.
+
+Two caveats that matter when quoting these:
+
+- **They count what was logged, not what happened.** A lead nobody wrote a note about does not
+  exist here. Low numbers may mean low activity or low recording — the same problem as Devyce call
+  tagging.
+- **There is also a `Job Lead` deal stage** with zero deals in it. If anyone starts using it, leads
+  will exist in two places and will need reconciling before either figure is quoted.
