@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.36.0" };
+const SERVER = { name: "octagon-analytics", version: "3.37.1" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -364,6 +364,9 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
+  { name: "candidate_profile", description: "The full picture on one candidate straight from RecruitCRM: their work history, education, and every job they are on with the current stage. Use before writing a summary, prepping an interview or pitching someone, so the detail is real rather than remembered. Returns PII: internal only. Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
+  { name: "off_limit", description: "Off-limit status — candidates who must NOT be approached or pitched, usually because they were recently placed. action: list (everyone currently off limit), check (one candidate, with history), mark (set off limit until a date), release (make available again). Checking before pitching or sending a CV avoids a serious client problem. mark and release are WRITES: preview first, then confirm=true.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | check | mark | release" }, candidate: { type: "string", description: "candidate name or slug" }, until: { type: "string", description: "YYYY-MM-DD, for mark" }, reason: { type: "string" }, status_id: { type: "integer", description: "off-limit status id — see reference_list kind=off_limit_status" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["action"], additionalProperties: false } },
+  { name: "invoices_report", description: "Invoices raised in RecruitCRM for a date window, with status and totals. Billing in this platform means Won deal value; invoices are the finance side of the same story and nothing here has ever read them. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string", description: "YYYY-MM-DD issue date" }, to: { type: "string", description: "YYYY-MM-DD" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "manage_client", description: "Create or edit a company (client) or a contact in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. kind: company | contact. Omit `id` to create, pass it (company/contact slug, or company name) to edit. A contact should carry a client so it attaches to the right company. Checks for an existing record before creating. Attributed to you.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "company or contact" }, id: { type: "string", description: "slug or name of an existing record — omit to create" }, name: { type: "string", description: "company name (companies only)" }, first_name: { type: "string" }, last_name: { type: "string" }, client: { type: "string", description: "company to attach a contact to" }, email: { type: "string" }, phone: { type: "string" }, designation: { type: "string", description: "job title (contacts)" }, website: { type: "string" }, city: { type: "string" }, country: { type: "string" }, linkedin: { type: "string" }, about: { type: "string", description: "about the company" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "notes_read", description: "Read notes already recorded in RecruitCRM against a candidate, job, company or contact — call notes, intake notes, client conversations. The platform could write notes but never read them, so prior context was invisible. Give a candidate name, or a job, or a client. Returns note text, which is internal-only PII. Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, job: { type: "string", description: "job ID/slug/title" }, client: { type: "string", description: "company name" }, from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "hotlist", description: "Shared talent pools in RecruitCRM. action: list (show hotlists), create (new one), add (put a candidate on one), remove. Use it to turn a shortlist into something the team can see rather than a message in a chat. Creating or changing one is a WRITE: preview first, then confirm=true.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | create | add | remove" }, name: { type: "string", description: "hotlist name (create)" }, hotlist_id: { type: "integer" }, candidate: { type: "string", description: "candidate name or slug (add/remove)" }, shared: { type: "boolean", description: "visible to the team (create)" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["action"], additionalProperties: false } },
@@ -666,6 +669,113 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  if (name === "candidate_profile") {
+    const m = await resolveCandidate(String(args.candidate ?? ""));
+    if (!m.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
+    if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) {
+      return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name) });
+    }
+    const cand = m.find((c: any) => c.slug === args.candidate) ?? m[0];
+    const unwrap = (r: any) => { const i = r.json?.data ?? r.json; return Array.isArray(i) ? i : (i?.records ?? []); };
+    const [work, edu, stages] = await Promise.all([
+      crm("GET", `/candidates/${cand.slug}/work-history`),
+      crm("GET", `/candidates/${cand.slug}/education-history`),
+      crm("GET", `/candidates/${cand.slug}/hiring-stages`),
+    ]);
+    // Pass work and education through as-is. A first attempt mapped them to guessed field names
+    // (position/organization/institution) and returned rows of nulls — worse than raw, because it
+    // looked like the candidate had no history rather than like the mapping was wrong.
+    const inPlay = unwrap(stages);
+    const slugs = inPlay.map((h: any) => h.job_slug).filter(Boolean);
+    const { data: jobRows } = slugs.length
+      ? await db.from("jobs").select("slug,title").in("slug", slugs)
+      : { data: [] as any[] };
+    const titleBySlug = new Map((jobRows ?? []).map((j: any) => [j.slug, j.title]));
+    return toolText({
+      candidate: cand.name,
+      work_history: unwrap(work),
+      education: unwrap(edu),
+      in_play_on: inPlay.map((h: any) => ({
+        job: h.job_name ?? titleBySlug.get(h.job_slug) ?? h.job_slug ?? null,
+        stage: h.candidate_status ?? h.status?.label ?? null,
+        updated: (h.updated_on ?? "").toString().slice(0, 10),
+      })),
+    });
+  }
+
+  if (name === "off_limit") {
+    const action = String(args.action ?? "").toLowerCase();
+    const unwrap = (r: any) => { const i = r.json?.data ?? r.json; return Array.isArray(i) ? i : (i?.records ?? []); };
+
+    if (action === "list") {
+      const r = await crm("GET", "/candidates/off-limit");
+      if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
+      const rows = unwrap(r).map((c: any) => ({ name: [c.first_name, c.last_name].filter(Boolean).join(" ") || c.slug, until: c.off_limit_end_date ?? null, reason: c.off_limit_reason ?? null }));
+      return toolText({ count: rows.length, off_limit: rows, note: "These candidates must not be approached or pitched." });
+    }
+
+    const m = await resolveCandidate(String(args.candidate ?? ""));
+    if (!m.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
+    if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name) });
+    const cand = m.find((c: any) => c.slug === args.candidate) ?? m[0];
+
+    if (action === "check") {
+      const [hist, cur] = await Promise.all([
+        crm("GET", `/candidates/${cand.slug}/off-limit-history`),
+        crm("GET", `/candidates/${cand.slug}`),
+      ]);
+      const c = cur.json?.data ?? cur.json ?? {};
+      const isOff = !!(c.off_limit_status_id || c.off_limit_end_date);
+      return toolText({ candidate: cand.name, currently_off_limit: isOff,
+        until: c.off_limit_end_date ?? null, reason: c.off_limit_reason ?? null,
+        history: unwrap(hist).slice(0, 10),
+        verdict: isOff ? "DO NOT approach or pitch this candidate." : "No off-limit restriction recorded." });
+    }
+
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Changing off-limit status requires a write-enabled token." });
+    if (action === "mark") {
+      if (!args.until || !/^\d{4}-\d{2}-\d{2}$/.test(String(args.until))) return toolText({ error: "mark needs until=YYYY-MM-DD." });
+      if (args.status_id == null) return toolText({ error: "mark needs status_id — call reference_list with kind=off_limit_status." });
+      const body = { candidate_slugs: cand.slug, end_date: args.until, status_id: args.status_id, reason: args.reason ?? undefined };
+      if (!args.confirm) return toolText({ mode: "preview", action: "mark_off_limit", candidate: cand.name, until: args.until, reason: args.reason ?? "(none)", instruction: "This blocks the candidate from being approached. To apply, call again with confirm=true." });
+      const r = await crm("POST", "/candidates/mark-off-limit", body);
+      if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+      await audit({ actor: String(actor.id), action: "mark_off_limit", entity: "candidate", entity_id: cand.slug, before: null, after: body, via: "claude" });
+      return toolText({ mode: "applied", candidate: cand.name, off_limit_until: args.until });
+    }
+    if (action === "release") {
+      if (!args.confirm) return toolText({ mode: "preview", action: "mark_as_available", candidate: cand.name, instruction: "This lifts the off-limit block. To apply, call again with confirm=true." });
+      const r = await crm("POST", "/candidates/mark-as-available", { candidate_slugs: cand.slug });
+      if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+      await audit({ actor: String(actor.id), action: "mark_as_available", entity: "candidate", entity_id: cand.slug, before: null, after: { candidate_slugs: cand.slug }, via: "claude" });
+      return toolText({ mode: "applied", candidate: cand.name, off_limit: false });
+    }
+    return toolText({ error: "action must be list, check, mark or release" });
+  }
+
+  if (name === "invoices_report") {
+    const to = args?.to ?? new Date().toISOString().slice(0, 10);
+    const from = args?.from ?? new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+    const r = await crm("GET", `/invoices/search?issue_date_from=${from}&issue_date_to=${to}`);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
+    const inner = r.json?.data ?? r.json;
+    const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
+    const rows = list.map((i: any) => ({ id: i.id ?? i.invoice_number ?? null, issued: (i.issue_date ?? "").toString().slice(0, 10), due: (i.due_date ?? "").toString().slice(0, 10), status: i.status?.label ?? i.invoice_status ?? null, total: i.total ?? i.amount ?? null }));
+    const total = rows.reduce((s: number, x: any) => s + (Number(x.total) || 0), 0);
+    // An empty search is ambiguous: no invoices in the window, or invoicing simply not used. Check
+    // the unfiltered list before reporting zero as though it were a finding.
+    let note: string | undefined = rows.length >= 100 ? "Capped by the API; narrow the window." : undefined;
+    if (!rows.length) {
+      const any = await crm("GET", "/invoices?limit=1");
+      const ai = any.json?.data ?? any.json;
+      const anyRows = Array.isArray(ai) ? ai : (ai?.records ?? []);
+      note = anyRows.length
+        ? "No invoices issued in this window, though invoicing is in use — try a wider window."
+        : "No invoices exist in RecruitCRM at all, so invoicing is not being used here.";
+    }
+    return toolText({ window: { from, to }, count: rows.length, total_value: Math.round(total), invoices: rows.slice(0, 50), note });
+  }
+
   if (name === "manage_client") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. This requires a write-enabled token (an admin sets can_write)." });
     const kind = String(args.kind ?? "").toLowerCase();
