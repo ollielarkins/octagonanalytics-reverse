@@ -215,17 +215,55 @@ async function runBg(entity: string, fn: () => Promise<any>) {
   catch (e) { await db.from("sync_state").upsert({ entity, last_run_at: new Date().toISOString(), last_status: "error:" + String(e).slice(0, 200) }, { onConflict: "entity" }); }
 }
 
-// ---- history: rebuild candidate_stage_events from per-candidate /history ----
-async function syncHistory(maxCandidates: number) {
-  const [{ data: sl }, { data: cons }, { data: st }] = await Promise.all([
+// ---- history: candidate_stage_events, rebuilt from per-candidate /history -------------------
+//
+// Two modes, because these are genuinely different jobs:
+//   history         one-off backfill. Walks every candidate by id, latches "complete" when done.
+//   history_recent  the ONGOING feed. Walks only candidates changed in the last N days.
+//
+// The ongoing feed was missing entirely until 10/08/2026 and nobody noticed for six days. The
+// backfill latched "complete" on 04/08 and the every-minute cron short-circuited from then on, so
+// candidate_stage_events — the single source for the whole funnel — simply stopped. Stage-change
+// webhooks fire entity=candidates, which refreshes the candidate ROW; they never touched the event
+// stream. A full re-walk is 16,600 API calls, but only ~500 candidates change in a week, so the
+// recent walk is the right shape for keeping up.
+async function historyMaps() {
+  const [{ data: sl }, cons] = await Promise.all([
     db.from("stage_lookup").select("recruitcrm_stage_id,stage_metric,stage_name"),
-    db.from("consultants").select("recruitcrm_id,name"),
-    db.from("sync_state").select("cursor,last_status").eq("entity", "history").maybeSingle(),
+    allRows("consultants", "recruitcrm_id,name"),
   ]);
+  return {
+    byId: new Map((sl ?? []).map((s: any) => [s.recruitcrm_stage_id, s])),
+    byLabel: new Map((sl ?? []).map((s: any) => [String(s.stage_name).toLowerCase(), s])),
+    consName: new Map(cons.map((c: any) => [c.recruitcrm_id, c.name])),
+  };
+}
+
+// Fetch and upsert one candidate's stage history. Shared by both modes so the row mapping can
+// never drift between them.
+async function historyForCandidate(cand: any, maps: any) {
+  const r = await crm(`/candidates/${cand.slug}/history`);
+  if (!r.ok) return { ok: false, status: r.status, events: 0 };
+  const rows: any[] = [];
+  for (const e of (Array.isArray(r.json) ? r.json : [])) {
+    const s = maps.byId.get(e.candidate_status_id) ?? maps.byLabel.get(String(e.candidate_status ?? "").toLowerCase());
+    if (!s || !e.updated_on || !e.job_slug) continue;
+    rows.push({
+      candidate_id: cand.recruitcrm_id, candidate_slug: cand.slug, candidate_name: cand.name,
+      job_slug: e.job_slug, job_title: e.job_name ?? null,
+      consultant_id: e.updated_by ?? null, consultant: maps.consName.get(e.updated_by) ?? null,
+      stage_name: s.stage_name, stage_metric: s.stage_metric,
+      event_timestamp: e.updated_on, event_date: String(e.updated_on).slice(0, 10),
+    });
+  }
+  if (rows.length) await db.from("candidate_stage_events").upsert(rows, { onConflict: "candidate_slug,job_slug,stage_metric,event_timestamp" }).throwOnError();
+  return { ok: true, status: 200, events: rows.length };
+}
+
+async function syncHistory(maxCandidates: number) {
+  const { data: st } = await db.from("sync_state").select("cursor,last_status").eq("entity", "history").maybeSingle();
   if (st?.last_status === "complete") return { entity: "history", complete: true, note: "already complete" };
-  const byId = new Map((sl ?? []).map((s: any) => [s.recruitcrm_stage_id, s]));
-  const byLabel = new Map((sl ?? []).map((s: any) => [String(s.stage_name).toLowerCase(), s]));
-  const consName = new Map((cons ?? []).map((c: any) => [c.recruitcrm_id, c.name]));
+  const maps = await historyMaps();
   let cursor = st?.cursor ? Number(st.cursor) : 0;
 
   const { data: cands } = await db.from("candidates").select("recruitcrm_id,slug,name").gt("recruitcrm_id", cursor).order("recruitcrm_id", { ascending: true }).limit(maxCandidates);
@@ -235,29 +273,48 @@ async function syncHistory(maxCandidates: number) {
   }
   let events = 0, processed = 0, skipped = 0, stopped: any = null;
   for (const cand of cands) {
-    const r = await crm(`/candidates/${cand.slug}/history`);
-    if (!r.ok) {
-      if (r.status === 429) { stopped = 429; break; }   // back off; don't advance cursor
+    const res = await historyForCandidate(cand, maps);
+    if (!res.ok) {
+      if (res.status === 429) { stopped = 429; break; }   // back off; don't advance cursor
       skipped++; cursor = cand.recruitcrm_id; continue;   // 404/etc: skip candidate, advance
     }
-    const arr = Array.isArray(r.json) ? r.json : [];
-    const rows: any[] = [];
-    for (const e of arr) {
-      const s = byId.get(e.candidate_status_id) ?? byLabel.get(String(e.candidate_status ?? "").toLowerCase());
-      if (!s || !e.updated_on || !e.job_slug) continue;
-      rows.push({
-        candidate_id: cand.recruitcrm_id, candidate_slug: cand.slug, candidate_name: cand.name,
-        job_slug: e.job_slug, job_title: e.job_name ?? null,
-        consultant_id: e.updated_by ?? null, consultant: consName.get(e.updated_by) ?? null,
-        stage_name: s.stage_name, stage_metric: s.stage_metric,
-        event_timestamp: e.updated_on, event_date: String(e.updated_on).slice(0, 10),
-      });
-    }
-    if (rows.length) await db.from("candidate_stage_events").upsert(rows, { onConflict: "candidate_slug,job_slug,stage_metric,event_timestamp" }).throwOnError();
-    events += rows.length; processed++; cursor = cand.recruitcrm_id; await sleep(50);
+    events += res.events; processed++; cursor = cand.recruitcrm_id; await sleep(50);
   }
   await db.from("sync_state").upsert({ entity: "history", cursor: String(cursor), last_run_at: new Date().toISOString(), last_status: stopped ? `stopped:${stopped}@${cursor}` : `cursor=${cursor} +${events}ev` }, { onConflict: "entity" });
   return { entity: "history", processed, skipped, events, cursor, stopped };
+}
+
+// The ongoing feed. A hiring-stage change bumps the candidate's updated_on in RecruitCRM, and the
+// incremental sync keeps candidates.updated_date current, so "changed recently" is a reliable and
+// very cheap filter — ~90 candidates a day against 16,600 total.
+// offset lets a large catch-up be run in chunks — the walk is ordered by updated_date desc, so
+// without it every run would redo the same first N candidates and never reach the tail.
+// sleepMs paces against RecruitCRM's rate limit: 50ms (~4.6 req/s in practice) earns a 429, so the
+// default is deliberately slower. Ordinary runs are ~90 candidates and finish well inside it.
+async function syncHistoryRecent(days: number, maxCandidates: number, offset = 0, sleepMs = 600) {
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const maps = await historyMaps();
+  const { data: cands } = await db.from("candidates")
+    .select("recruitcrm_id,slug,name,updated_date")
+    .gte("updated_date", since)
+    .order("updated_date", { ascending: false })
+    .range(offset, offset + maxCandidates - 1);
+
+  let events = 0, processed = 0, skipped = 0, stopped: any = null;
+  for (const cand of (cands ?? [])) {
+    const res = await historyForCandidate(cand, maps);
+    if (!res.ok) {
+      if (res.status === 429) { stopped = 429; break; }
+      skipped++; continue;
+    }
+    events += res.events; processed++; await sleep(sleepMs);
+  }
+  const status = stopped ? `stopped:${stopped}@offset${offset + processed}` : `days=${days} cands=${processed} +${events}ev`;
+  // Only the routine (offset 0) run marks freshness — a chunked catch-up shouldn't reset the clock.
+  const row: any = { entity: "history_recent", last_run_at: new Date().toISOString(), last_status: status };
+  if (offset === 0 && !stopped) row.last_synced_at = new Date().toISOString();
+  await db.from("sync_state").upsert(row, { onConflict: "entity" });
+  return { entity: "history_recent", days, offset, candidates_seen: (cands ?? []).length, processed, skipped, events, stopped, next_offset: offset + processed };
 }
 
 Deno.serve(async (req) => {
@@ -270,6 +327,14 @@ Deno.serve(async (req) => {
     if (mode === "history") {
       const maxC = parseInt(url.searchParams.get("max_candidates") ?? "70", 10);
       return Response.json(await syncHistory(maxC));
+    }
+
+    if (mode === "history_recent") {
+      const days = parseInt(url.searchParams.get("days") ?? "2", 10);
+      const maxC = parseInt(url.searchParams.get("max_candidates") ?? "120", 10);
+      const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
+      const sleepMs = parseInt(url.searchParams.get("sleep_ms") ?? "600", 10);
+      return Response.json(await syncHistoryRecent(days, maxC, offset, sleepMs));
     }
 
     if (mode === "incremental") {
