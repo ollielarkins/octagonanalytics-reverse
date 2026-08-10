@@ -61,6 +61,9 @@ async function consNameMap() {
 function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
   return (job: any) => ({
     recruitcrm_id: job.id, slug: job.slug ?? null, title: job.name ?? null,
+    // Keep the raw company_slug even when it doesn't resolve — ~40% of companies are archived in
+    // RecruitCRM and never appear in `clients`, and without the slug those jobs are unrecoverable.
+    company_slug: job.company_slug ?? null,
     client_id: clientBySlug.get(job.company_slug) ?? null,
     consultant_id: consByRid.get(job.owner) ?? null,
     status: job.job_status?.label ?? (typeof job.job_status === "string" ? job.job_status : null),
