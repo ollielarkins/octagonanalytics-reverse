@@ -23,7 +23,6 @@ calls are tagged.
 | Jennifer Seress | 345 | 80 | 23.2% |
 | Georgia Cook | 397 | 71 | 17.9% |
 | Chloe Edwards | 273 | 44 | 16.1% |
-| Dale Barnett | 100 | 14 | 14.0% |
 
 Note the shape: **the busiest desks tag least**. Georgia and Chloe make the most calls and record
 the least about them, so their BD and client KPIs look worst precisely because they're busiest.
