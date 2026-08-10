@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.33.0" };
+const SERVER = { name: "octagon-analytics", version: "3.34.1" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -364,6 +364,8 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
+  { name: "activity_report", description: "Meetings or tasks logged in RecruitCRM for a date window, optionally for one consultant. Meetings are where CLIENT VISITS live — the activity the business asks about that no other tool here reports. Tasks are the to-do layer. Defaults to the last 30 days and to YOU; pass consultant to see someone else, or all=true for the firm. kind: meetings | tasks. Read-only.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meetings or tasks" }, from: { type: "string", description: "YYYY-MM-DD, default 30 days ago" }, to: { type: "string", description: "YYYY-MM-DD, default today" }, consultant: { type: "string", description: "consultant name; omit for yourself" }, all: { type: "boolean", description: "true = whole firm" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
+  { name: "log_activity", description: "Log a meeting (e.g. a client visit) or a task in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Link it to a client, job or candidate so it shows against that record. Meetings need a start and end; tasks need only a start. Times are 'YYYY-MM-DD HH:MM'. Created by and owned by you. Use for 'log my visit to X yesterday', 'remind me to chase Y on Friday'.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meeting or task" }, title: { type: "string" }, start: { type: "string", description: "YYYY-MM-DD HH:MM" }, end: { type: "string", description: "YYYY-MM-DD HH:MM — meetings only" }, description: { type: "string" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, candidate: { type: "string", description: "candidate name to link" }, type_id: { type: "integer", description: "meeting/task type id — see reference_list" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind", "title", "start"], additionalProperties: false } },
   { name: "update_deal", description: "Change a deal in RecruitCRM — most importantly moving it to Won and entering the value, which IS how billing is recorded at Octagon. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the deal by its numeric ID, slug, or part of its name. stage accepts a stage name (Won, Lost, Open, CV Sent, Interview Request, 1st/2nd/3rd Interview, Offered, Declined, Job Lead) resolved against the live pipeline. Note RecruitCRM requires name, value, stage and close_date on every edit, so the tool reads the deal first and preserves anything you don't change.", inputSchema: { type: "object", properties: { deal: { type: "string", description: "deal ID, slug, or part of the name" }, stage: { type: "string", description: "target stage name" }, value: { type: "number", description: "deal value (the fee)" }, name: { type: "string", description: "rename the deal" }, close_date: { type: "string", description: "YYYY-MM-DD" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["deal"], additionalProperties: false } },
   { name: "create_deal", description: "Create a deal in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Requires a name, a value, a stage and a close date. Optionally link it to a job, client or candidate. Billing is Won deal value, so a deal is how revenue enters the system — created owned by and attributed to you.", inputSchema: { type: "object", properties: { name: { type: "string", description: "deal name" }, value: { type: "number", description: "deal value (the fee)" }, stage: { type: "string", description: "stage name, e.g. Open or Job Lead" }, close_date: { type: "string", description: "YYYY-MM-DD" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["name", "value", "stage", "close_date"], additionalProperties: false } },
   { name: "pitch_history", description: "Speculative pitches recorded in RecruitCRM — who has been pitched to whom, and when. This is the 'pitched candidates' activity the business asks about; it lives in RecruitCRM's pitch feature, which nothing else in this platform reads. Give a candidate (name or slug) to see everywhere they've been pitched, or a contact slug to see everyone pitched to them, or both for that pair's history. Returns candidate and contact names (PII). Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string", description: "contact slug" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -659,6 +661,94 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  if (name === "activity_report") {
+    const kind = String(args?.kind ?? "").toLowerCase().replace(/s$/, "");
+    if (kind !== "meeting" && kind !== "task") return toolText({ error: "kind must be meetings or tasks" });
+    const to = args?.to ?? new Date().toISOString().slice(0, 10);
+    const from = args?.from ?? new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const qs = new URLSearchParams({ starting_from: String(from), starting_to: String(to) });
+    // Default to the caller's own activity; the firm view is opt-in.
+    let scope = "you";
+    if (args?.all) scope = "whole firm";
+    else if (args?.consultant) { qs.set("owner_name", String(args.consultant)); scope = String(args.consultant); }
+    else if (actor.id) { qs.set("owner_id", String(actor.id)); }
+
+    const r = await crm("GET", `/${kind === "meeting" ? "meetings" : "tasks"}/search?${qs}`);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
+    const inner = r.json?.data ?? r.json;
+    const items = Array.isArray(inner) ? inner : (inner?.records ?? inner?.data ?? []);
+    const rows = (Array.isArray(items) ? items : []).map((x: any) => ({
+      title: x.title ?? x.name ?? null,
+      start: (x.start_date ?? x.starting_date ?? "").toString().slice(0, 16),
+      type: x.meeting_type?.label ?? x.task_type?.label ?? null,
+      related_to: x.related_to_type ? `${x.related_to_type}:${x.related_to}` : null,
+      owner: x.owner?.name ?? x.owner_id ?? null,
+    }));
+    // The search endpoints take no page/limit parameter and stop at 100, so a full result set is
+    // indistinguishable from a truncated one. Say so rather than reporting 100 as a total.
+    const capped = rows.length >= 100;
+    const notes = [
+      kind === "meeting" ? "Meetings are the closest thing to a client-visit record; only visits actually logged in RecruitCRM appear here." : null,
+      capped ? "RecruitCRM returned the maximum 100 results and offers no paging on this endpoint — the real total is AT LEAST this. Narrow the window for an exact count." : null,
+    ].filter(Boolean);
+    return toolText({ kind: kind + "s", window: { from, to }, scope,
+      count: rows.length, count_is_capped: capped, items: rows,
+      note: notes.length ? notes.join(" ") : undefined });
+  }
+
+  if (name === "log_activity") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Logging activity requires a write-enabled token (an admin sets can_write)." });
+    const kind = String(args.kind ?? "").toLowerCase().replace(/s$/, "");
+    if (kind !== "meeting" && kind !== "task") return toolText({ error: "kind must be meeting or task" });
+    const start = String(args.start ?? "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2})?$/.test(start)) return toolText({ error: "start must be 'YYYY-MM-DD HH:MM' (or just the date)." });
+    if (kind === "meeting" && !args.end) return toolText({ error: "A meeting needs an end time as well as a start." });
+
+    // Resolve the things it hangs off, so the entry appears against the right record.
+    const links: Record<string, any> = {};
+    let linkDesc: string[] = [];
+    if (args.client) {
+      const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
+        .or(`company_slug.eq.${args.client},company_name.ilike.%${args.client}%`).limit(2);
+      if (!cl?.length) return toolText({ error: `No client matches '${args.client}'.` });
+      if (cl.length > 1) return toolText({ error: "ambiguous_client", matches: cl.map((c: any) => c.company_name) });
+      links.associated_companies = cl[0].company_slug; links.related_to = cl[0].company_slug; links.related_to_type = "company";
+      linkDesc.push(`client ${cl[0].company_name}`);
+    }
+    if (args.job) {
+      const jm = await resolveJob(String(args.job));
+      if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
+      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
+      links.associated_jobs = jm[0].slug; linkDesc.push(`job ${jm[0].title}`);
+    }
+    if (args.candidate) {
+      const cm = await resolveCandidate(String(args.candidate));
+      if (!cm.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
+      if (cm.length > 1) return toolText({ error: "ambiguous_candidate", matches: cm.map((c: any) => c.name) });
+      links.associated_candidates = cm[0].slug; linkDesc.push(`candidate ${cm[0].name}`);
+    }
+
+    const body: Record<string, any> = {
+      title: args.title, start_date: start, description: args.description ?? undefined,
+      reminder: -1,                       // -1 = no reminder; the field is required
+      owner_id: actor.id, created_by: actor.id, updated_by: actor.id, ...links,
+    };
+    if (kind === "meeting") { body.end_date = String(args.end); if (args.type_id != null) body.meeting_type_id = args.type_id; }
+    else if (args.type_id != null) body.task_type_id = args.type_id;
+
+    if (!args.confirm) {
+      return toolText({ mode: "preview", action: `create_${kind}`, will_create: {
+        kind, title: body.title, start, end: body.end_date ?? undefined,
+        linked_to: linkDesc.length ? linkDesc.join(", ") : "nothing", owner: "you", reminder: "none" },
+        instruction: `This creates a real ${kind} in RecruitCRM. Show it to the recruiter. To apply, call again with confirm=true.` });
+    }
+    const r = await crm("POST", kind === "meeting" ? "/meetings" : "/tasks", body);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    const created = r.json?.data ?? r.json ?? {};
+    await audit({ actor: String(actor.id), action: `create_${kind}`, entity: kind, entity_id: String(created.id ?? ""), before: null, after: body, via: "claude" });
+    return toolText({ mode: "applied", kind, id: created.id ?? null, title: body.title, start, linked_to: linkDesc.join(", ") || "nothing", note: `${kind[0].toUpperCase() + kind.slice(1)} created in RecruitCRM.` });
+  }
+
   if (name === "update_deal") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Editing deals requires a write-enabled token (an admin sets can_write)." });
     const m = await resolveDeal(String(args.deal ?? ""));
