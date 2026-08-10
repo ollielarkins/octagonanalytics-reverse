@@ -23,13 +23,39 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.28.0" };
+const SERVER = { name: "octagon-analytics", version: "3.29.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   const text = await res.text(); let json: any = null; try { json = JSON.parse(text); } catch {}
   return { ok: res.ok, status: res.status, json, text };
 }
+// The job write endpoints take multipart/form-data, NOT JSON — posting JSON to them returns an
+// empty 422 that looks like "endpoint doesn't exist". Undefined/null fields are dropped so an edit
+// only sends what is actually changing (POST /v1/jobs/{slug} has no required fields = partial).
+async function crmForm(path: string, fields: Record<string, any>) {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === undefined || v === null || v === "") continue;
+    fd.append(k, typeof v === "object" ? JSON.stringify(v) : String(v));
+  }
+  const res = await fetch(`${BASE}${path}`, { method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" }, body: fd });
+  const text = await res.text(); let json: any = null; try { json = JSON.parse(text); } catch {}
+  return { ok: res.ok, status: res.status, json, text };
+}
+// job_status is an integer in RecruitCRM: 0 Closed, 1 Open, 2 On-Hold, 3 Cancelled.
+const JOB_STATUS: Record<string, number> = { closed: 0, open: 1, "on hold": 2, "on-hold": 2, onhold: 2, cancelled: 3, canceled: 3 };
+const JOB_STATUS_NAME: Record<number, string> = { 0: "Closed", 1: "Open", 2: "On Hold", 3: "Cancelled" };
+
+// Resolve a job the same way job_pipeline does: numeric id, exact slug, or partial title.
+async function resolveJob(q: string) {
+  const isNum = /^[0-9]+$/.test(q.trim());
+  let sel = db.from("jobs").select("recruitcrm_id,slug,title,status,company_slug,client_id").is("deleted_at", null);
+  sel = isNum ? sel.eq("recruitcrm_id", Number(q)) : sel.or(`slug.eq.${q},title.ilike.%${q}%`);
+  const { data } = await sel.limit(5);
+  return data ?? [];
+}
+
 async function stageLookup() {
   const { data } = await db.from("stage_lookup").select("recruitcrm_stage_id,stage_metric,stage_name");
   return new Map((data ?? []).map((s: any) => [s.recruitcrm_stage_id, s]));
@@ -241,6 +267,8 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
+  { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency_id: { type: "integer", description: "defaults to whatever this client's most recent job uses" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
+  { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
   { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
 ];
@@ -528,6 +556,111 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  if (name === "create_job") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Creating jobs requires a write-enabled token (an admin sets can_write)." });
+    // Resolve the client from the mirror — the recruiter says "Thermoteknix", the API needs a slug.
+    const cq = String(args.client ?? "").trim();
+    const { data: clients } = await db.from("clients").select("company_slug,company_name")
+      .is("deleted_at", null).or(`company_slug.eq.${cq},company_name.ilike.%${cq}%`).limit(5);
+    if (!clients?.length) return toolText({ error: `No client matches '${cq}'. Give the exact company name or its slug.` });
+    if (clients.length > 1 && !clients.some((c: any) => c.company_slug === cq)) {
+      return toolText({ error: "ambiguous_client", matches: clients.map((c: any) => c.company_name), instruction: "Ask which one, then call again with the exact name." });
+    }
+    const client = clients.find((c: any) => c.company_slug === cq) ?? clients[0];
+
+    // RecruitCRM requires a contact on the job. Resolve one from the company rather than making
+    // the recruiter dig out a slug.
+    let contactSlug = String(args.contact_slug ?? "").trim();
+    let contactNote = "supplied";
+    if (!contactSlug) {
+      const r = await crm("GET", `/contacts/search?company_slug=${encodeURIComponent(client.company_slug)}`);
+      const first = r.json?.data?.[0] ?? (Array.isArray(r.json) ? r.json[0] : null);
+      if (!first?.slug) return toolText({ error: "no_contact", message: `RecruitCRM requires a contact on every job, and none was found for ${client.company_name}. Add a contact to that company first, or pass contact_slug.` });
+      contactSlug = first.slug;
+      contactNote = `auto-resolved (${[first.first_name, first.last_name].filter(Boolean).join(" ") || first.slug})`;
+    }
+
+    // Default the currency from this client's most recent job so we don't guess.
+    let currencyId = args.currency_id;
+    let currencyNote = "supplied";
+    if (currencyId == null) {
+      const { data: prev } = await db.from("jobs").select("slug").eq("company_slug", client.company_slug)
+        .is("deleted_at", null).order("created_date", { ascending: false }).limit(1);
+      if (prev?.[0]?.slug) {
+        const j = await crm("GET", `/jobs/${prev[0].slug}`);
+        currencyId = j.json?.currency_id ?? j.json?.data?.currency_id ?? null;
+        if (currencyId != null) currencyNote = `copied from this client's most recent job`;
+      }
+      if (currencyId == null) { currencyId = 1; currencyNote = "defaulted to 1 — NOT verified, check this is the right currency"; }
+    }
+
+    const statusKey = String(args.status ?? "open").toLowerCase();
+    if (!(statusKey in JOB_STATUS)) return toolText({ error: `status must be one of: open, closed, on hold, cancelled` });
+    const fields: Record<string, any> = {
+      name: args.name, company_slug: client.company_slug, contact_slug: contactSlug,
+      job_description_text: args.description, number_of_openings: args.openings ?? 1,
+      currency_id: currencyId, enable_job_application_form: 0, job_status: JOB_STATUS[statusKey],
+      min_annual_salary: args.salary_min, max_annual_salary: args.salary_max,
+      city: args.city, country: args.country,
+      owner_id: actor.id, created_by: actor.id, updated_by: actor.id,
+    };
+
+    if (!args.confirm) {
+      return toolText({ mode: "preview", action: "create_job", will_create: {
+        title: fields.name, client: client.company_name, contact: contactNote,
+        status: JOB_STATUS_NAME[fields.job_status], openings: fields.number_of_openings,
+        salary: (args.salary_min || args.salary_max) ? `${args.salary_min ?? "?"}–${args.salary_max ?? "?"}` : "not set",
+        location: [args.city, args.country].filter(Boolean).join(", ") || "not set",
+        currency_id: `${currencyId} (${currencyNote})`, owner: "you", description_chars: String(args.description ?? "").length,
+      }, instruction: "Show this to the recruiter in full. This CREATES A REAL JOB in RecruitCRM. To apply, call again with confirm=true." });
+    }
+
+    const r = await crmForm("/jobs", fields);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    const created = r.json?.data ?? r.json ?? {};
+    await audit({ actor: String(actor.id), action: "create_job", entity: "job", entity_id: created.slug ?? null, before: null, after: { ...fields, id: created.id, slug: created.slug }, via: "claude" });
+    // Pull the new job into the mirror immediately rather than waiting for the next sync.
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=jobs`,
+      { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    return toolText({ mode: "applied", job_id: created.id ?? null, job_title: fields.name, client: client.company_name, status: JOB_STATUS_NAME[fields.job_status], note: "Job created in RecruitCRM and the mirror refreshed." });
+  }
+
+  if (name === "update_job") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Editing jobs requires a write-enabled token (an admin sets can_write)." });
+    const matches = await resolveJob(String(args.job ?? ""));
+    if (!matches.length) return toolText({ error: `No job matches '${args.job}'.` });
+    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: matches.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, status: j.status })), instruction: "Ask which one, then call again with that job ID." });
+    const job = matches[0];
+
+    const fields: Record<string, any> = {
+      name: args.title, job_description_text: args.description, number_of_openings: args.openings,
+      min_annual_salary: args.salary_min, max_annual_salary: args.salary_max,
+      city: args.city, country: args.country, updated_by: actor.id,
+    };
+    if (args.status != null) {
+      const k = String(args.status).toLowerCase();
+      if (!(k in JOB_STATUS)) return toolText({ error: "status must be one of: open, closed, on hold, cancelled" });
+      fields.job_status = JOB_STATUS[k];
+    }
+    const changing = Object.entries(fields).filter(([k, v]) => k !== "updated_by" && v !== undefined && v !== null);
+    if (!changing.length) return toolText({ error: "Nothing to change — pass at least one field (status, title, description, openings, salary_min/max, city, country)." });
+
+    if (!args.confirm) {
+      return toolText({ mode: "preview", action: "update_job",
+        job: { job_id: job.recruitcrm_id, title: job.title, current_status: job.status },
+        changes: Object.fromEntries(changing.map(([k, v]) => [k === "job_status" ? "status" : k, k === "job_status" ? JOB_STATUS_NAME[v as number] : v])),
+        untouched: "every other field is left exactly as it is",
+        instruction: "Show this to the recruiter. To apply, call again with confirm=true." });
+    }
+
+    const r = await crmForm(`/jobs/${job.slug}`, fields);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    await audit({ actor: String(actor.id), action: "update_job", entity: "job", entity_id: job.slug, before: { title: job.title, status: job.status }, after: fields, via: "claude" });
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=jobs`,
+      { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    return toolText({ mode: "applied", job_id: job.recruitcrm_id, job_title: job.title, changed: Object.keys(Object.fromEntries(changing)), note: "Job updated in RecruitCRM and the mirror refreshed." });
+  }
+
   if (name === "assign_candidate") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Assigning candidates requires a write-enabled token (an admin sets can_write)." });
     if (!args.confirm) return toolText({ mode: "preview", action: "assign_candidate", candidate_slug: args.candidate_slug, job_slug: args.job_slug, acting_as: actor.id, instruction: "Show this to the recruiter. To apply, call again with confirm=true." });
