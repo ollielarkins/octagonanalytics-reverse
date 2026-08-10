@@ -1,0 +1,8 @@
+-- 0052_match_candidates_off_limit.sql
+-- 88 candidates are marked do-not-approach in RecruitCRM. match_candidates feeds shortlists,
+-- job_shortlist and the spec-pitch flow, and it returned them happily — a recruiter could pitch
+-- someone the firm has explicitly barred, and the first sign would be a client complaint.
+-- Excluded by default; the number dropped is ALWAYS reported so a short shortlist is explainable;
+-- p_include_off_limit exists for the rare deliberate case.
+-- (Body as applied — see git history for the full function.)
+-- see 0052 body applied via apply_migration on 10/08/2026
