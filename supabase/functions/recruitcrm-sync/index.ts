@@ -77,8 +77,8 @@ async function consNameMap() {
 function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
   return (job: any) => ({
     recruitcrm_id: job.id, slug: job.slug ?? null, title: job.name ?? null,
-    // Keep the raw company_slug even when it doesn't resolve — ~40% of companies are archived in
-    // RecruitCRM and never appear in `clients`, and without the slug those jobs are unrecoverable.
+    // Keep the raw company_slug even when it doesn't resolve, so an unresolved job can be repaired
+    // later instead of losing its only link to the company.
     company_slug: job.company_slug ?? null,
     client_id: clientBySlug.get(job.company_slug) ?? null,
     consultant_id: consByRid.get(job.owner) ?? null,
@@ -109,12 +109,28 @@ const mapDeal = (d: any) => ({
   start_date: dateField(d, /^start date$/i),
   end_date: dateField(d, /^end date$/i),
 });
+// PostgREST caps an unbounded select at 1,000 rows. `clients` holds ~4,600, so the lookup map was
+// silently missing three quarters of them and every job whose company fell outside the first page
+// had its client_id resolved to null on write. That is the real cause of the "orphaned jobs" —
+// not archived companies. Page explicitly.
+async function allRows(table: string, cols: string) {
+  const out: any[] = [];
+  const size = 1000;
+  for (let from = 0; ; from += size) {
+    const { data, error } = await db.from(table).select(cols).range(from, from + size - 1);
+    if (error) throw error;
+    if (!data?.length) break;
+    out.push(...data);
+    if (data.length < size) break;
+  }
+  return out;
+}
 async function jobMaps() {
-  const [{ data: cons }, { data: cls }] = await Promise.all([
-    db.from("consultants").select("id,recruitcrm_id"),
-    db.from("clients").select("id,company_slug"),
+  const [cons, cls] = await Promise.all([
+    allRows("consultants", "id,recruitcrm_id"),
+    allRows("clients", "id,company_slug"),
   ]);
-  return [new Map((cons ?? []).map((c: any) => [c.recruitcrm_id, c.id])), new Map((cls ?? []).map((c: any) => [c.company_slug, c.id]))] as const;
+  return [new Map(cons.map((c: any) => [c.recruitcrm_id, c.id])), new Map(cls.map((c: any) => [c.company_slug, c.id]))] as const;
 }
 
 async function backfillLoop(entity: string, startPage: number, maxPages: number, ep: string, mapRow: (x: any) => any, table: string) {

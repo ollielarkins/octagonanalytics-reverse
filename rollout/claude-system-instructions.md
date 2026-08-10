@@ -89,7 +89,7 @@ yourself (from the relevant tools). Ad-hoc one-off figures elsewhere can still b
   `Contact - Client`). Many calls are untagged, so these can undercount — say so when it's relevant.
 - **Not tracked yet:** leads, pitched candidates, internal interviews, client visits. Don't report
   numbers for these; note they aren't captured.
-- **~40% of jobs have no resolved client** (archived companies) and are omitted from client reports.
+- **Almost every job now resolves to a client** (9 of 5,975 don't, and none of those are open). This was ~40% until 10/08/2026, caused by a 1,000-row cap on the client lookup in the sync, not by archived companies.
 - **Freshness:** data is near-real-time (changes in RecruitCRM sync within seconds via webhook,
   with a 2-minute backstop). Changes you make *through* Claude are reflected immediately.
 
