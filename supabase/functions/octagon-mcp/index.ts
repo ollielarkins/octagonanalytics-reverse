@@ -7,7 +7,8 @@
 //
 // READ tools : get_dashboard, funnel_report, client_report, time_to_fill, cold_jobs,
 //              placements_report, consultant_leaderboard, bd_report, find_candidate,
-//              job_pipeline, stalled_report, my_day, match_candidates, call_activity, weekly_kpis, billing
+//              job_pipeline, stalled_report, my_day, match_candidates, call_activity, weekly_kpis, billing,
+//              rejection_report (why candidates fall out), fee_analysis (fee %, salary band, forecast)
 // WRITE tools: update_hiring_stage, assign_candidate, add_note  (require token.can_write;
 //              two-step preview->confirm, optimistic concurrency, audit, write-through)
 // PROMPTS    : dashboard, kpi, weekly_team_review, my_cold_roles, client_health, month_in_review, my_day, match_jd
@@ -22,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.25.1" };
+const SERVER = { name: "octagon-analytics", version: "3.26.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -198,6 +199,8 @@ const TOOLS = [
   { name: "cold_jobs", description: "OPEN roles with no candidate activity in the last N days (default 14), oldest first. Job titles/clients only, no candidate PII. Use for 'which of my roles have gone cold', 'stale open jobs'. Read-only.", inputSchema: { type: "object", properties: { days: { type: "integer", description: "staleness threshold in days (default 14)" }, consultant: { type: "string" }, limit: { type: "integer" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "placements_report", description: "Placements in a window (event-stream 'placed' count; the placements table is empty so there are no fees) plus Won-deal revenue, broken down by consultant and client. Use for 'placements this quarter', 'who placed the most'. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "consultant_leaderboard", description: "Consultants ranked by a chosen metric ('placed' default, or 'cv_sent' / 'first_interview') for a window, with CV->placed rate. Owner-attributed. Use for 'top performers', 'leaderboard by CVs'. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, metric: { type: "string", enum: ["placed", "cv_sent", "first_interview"] }, limit: { type: "integer" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "rejection_report", description: "Why candidates fall out: rejected_by_client (the client turned them down) vs rejected_by_consultant (we screened them out), with the client rejection rate as a percentage of CVs sent, broken down by consultant and by client. Owner-attributed. Use for 'what's our CV rejection rate', 'which accounts reject the most', 'is X sending the wrong people'. Aggregates only, no candidate names. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, limit: { type: "integer" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "fee_analysis", description: "The money behind Won deals: total and median fee, the fee percentage actually achieved (median + quartiles), the salary band being placed, a per-consultant breakdown, and total Forecast Fee across open roles. The fee IS the Won deal value; annual_salary and fee_percentage are the RecruitCRM custom fields behind it. Deal-owner attributed. Quote the MEDIAN — a couple of deals carry a mistyped percentage, and the count excluded is reported. Use for 'what's our average fee', 'what percentage are we charging', 'what salaries are we placing', 'what's the forecast'. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, limit: { type: "integer" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "bd_report", description: "Business-development / client funnel: how many companies sit at each 'Company Status' (Prospect, Engaged, Client, Passive, Blocklisted, Do-not-contact), from RecruitCRM company custom fields. Use for 'how many prospects vs clients', 'BD pipeline', 'account status breakdown'. NOTE: RecruitCRM has no 'Lead' status, and 'pitched candidates'/'job order form complete' are not tracked. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "find_candidate", description: "Look up a candidate by name -> their candidate_slug and current hiring stage on each job. Use this FIRST to resolve who someone is before acting on them (e.g. before update_hiring_stage). Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { name: { type: "string", description: "candidate name, partial match" }, limit: { type: "integer" }, ...AUTH_ARG }, required: ["name"], additionalProperties: false } },
   { name: "job_pipeline", description: "For a job (by title or slug), the candidates in play and their current stage, plus the in-play count. Use for 'what's happening on the Bosch role', 'who's shortlisted for X', or to find a job_slug before acting. Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job title (partial) or exact job_slug" }, limit: { type: "integer" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
@@ -453,6 +456,14 @@ async function callTool(name: string, args: any, req: Request) {
   }
   if (name === "consultant_leaderboard") {
     const { data, error } = await db.rpc("consultant_leaderboard", { p_from: args?.from ?? "2026-01-01", p_to: args?.to ?? "2100-01-01", p_metric: args?.metric ?? "placed", p_limit: args?.limit ?? 20 });
+    return toolText(error ? { error: error.message } : data);
+  }
+  if (name === "rejection_report") {
+    const { data, error } = await db.rpc("rejection_report", { p_from: args?.from ?? "2026-01-01", p_to: args?.to ?? "2100-01-01", p_consultant: args?.consultant ?? null, p_limit: args?.limit ?? 20 });
+    return toolText(error ? { error: error.message } : data);
+  }
+  if (name === "fee_analysis") {
+    const { data, error } = await db.rpc("fee_analysis", { p_from: args?.from ?? "2026-01-01", p_to: args?.to ?? "2100-01-01", p_consultant: args?.consultant ?? null, p_limit: args?.limit ?? 20 });
     return toolText(error ? { error: error.message } : data);
   }
   if (name === "bd_report") { const { data, error } = await db.rpc("bd_report"); return toolText(error ? { error: error.message } : data); }
