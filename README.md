@@ -1,4 +1,4 @@
-# Octagon Recruitment Analytics Platform
+# Octagon Recruitment Analytics Platform v3.40.0
 
 A live analytics platform on top of **RecruitCRM**. It replaces manual spreadsheet
 reporting with an always-current mirror of the firm's recruitment data, exposed two
