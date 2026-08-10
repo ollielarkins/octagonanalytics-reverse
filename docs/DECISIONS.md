@@ -46,7 +46,9 @@ Running log of the decisions behind the schema and semantic layer. Each entry: t
 
 **Why.** Mixing the two silently double-counts or disagrees. Keep the funnel internally consistent (all from one source), and treat `placements` as the authoritative money view, then reconcile.
 
-**Status:** **As-built** for the funnel — the canonical "placement" is the event-stream `placed` count, and write-back sets `create_placement=true` when moving a candidate to Placed (so the two stay coupled at source). `placements`-table fee reconciliation remains a follow-up.
+**Status:** **As-built** for the funnel — the canonical "placement" is the event-stream `placed` count, and write-back sets `create_placement=true` when moving a candidate to Placed (so the two stay coupled at source).
+
+**Update 10/08/2026 — the `placements` table will never be the fee source.** `GET /v1/placements` was probed directly: it exists and returns paginated data, but a placement record carries **no money at all**. Its fields are `id, archived, company_slug, candidate_slug, job_slug, contact_slugs, deal_slugs, custom_fields, currency_id, joining_date, created_on/by, updated_on/by`, and `custom_fields` came back empty across a full page. A placement in RecruitCRM is a *join record* — candidate ↔ job ↔ company ↔ deal — not a finance record. The fee lives on the deal (see [D5]). If placements are ever synced it should be for that join, particularly `deal_slugs`, which is the only route to a per-placement fee.
 
 ---
 
@@ -55,11 +57,31 @@ Running log of the decisions behind the schema and semantic layer. Each entry: t
 **Decision.**
 - **Pipeline value** = `sum(deal_value)` over **open** deals (not Won/Lost).
 - **Revenue (won)** = `sum(deal_value)` where `deal_stage = 'Won'`, bucketed by **`close_date`** (the month it closed), not `created_date`.
-- **Fees** = `sum(fee_amount)` from `placements` (the finance source of record).
+- ~~**Fees** = `sum(fee_amount)` from `placements` (the finance source of record).~~ **Superseded — see the update below.**
 
 **Why.** Legacy views conflated these: `monthly_revenue` filtered Won but bucketed by created_date; `client_revenue`/`funnel_stage` summed all stages as if revenue. Naming each precisely stops "revenue" meaning three things.
 
-**Status:** Proposed — confirm the exact `deal_stage` label(s) that mean Won/Lost once RecruitCRM values are known.
+**Status:** **As-built**, with the fee definition corrected on 10/08/2026.
+
+**Update 10/08/2026 — the fee IS the Won deal value.** There is no `placements.fee_amount`; the placement record holds no money (see [D4]). `deals.deal_value` was already the fee all along, which the distribution confirms: Won deals have a median of £6,432 and 713 of 862 fall between £2,000 and £30,000 — fee-shaped, not salary-shaped.
+
+The components are deal custom fields, landed by migration 0043:
+
+| Field | Column |
+|---|---|
+| Annual Salary | `deals.annual_salary` |
+| Percentage of Annual Salary | `deals.fee_percentage` |
+| Currency | `deals.fee_currency` |
+| Start date / End date | `deals.start_date` / `deals.end_date` |
+
+This reconciles: **629 of 722** deals holding both components satisfy `deal_value = annual_salary × fee_percentage ÷ 100` to within £1, and the median fee percentage is **18.0%** (5th–95th percentile 15–20%). Two rows carry a nonsense percentage (one reads 7000) — data entry to be corrected at source, and the reason the median rather than the mean is the figure to quote.
+
+Jobs also carry a `Forecast Fee (£)` custom field, landed as `jobs.forecast_fee` — a per-role forward indicator, £1,546,032 across open roles at the time of writing.
+
+So the canonical definitions are:
+- **Billing / fee revenue** = `sum(deal_value)` where `deal_stage = 'Won'`, bucketed by `close_date`.
+- **Fee components** = `annual_salary` × `fee_percentage` on the deal.
+- **Forecast** = `sum(jobs.forecast_fee)` over open roles.
 
 ---
 
