@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.21.2" };
+const SERVER = { name: "octagon-analytics", version: "3.22.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -128,7 +128,7 @@ function meView(d,v){var o='',h=d.health||{},k=d.kpis||{},w=v.my_weekly||{},b=v.
 o+='<h1>Your desk'+(v.name?' — '+esc(v.name):'')+'</h1>'+syncline(h);
 o+=cards([['Placed 2026',N(y.placed)],['Won this quarter',GBP(b.won_qtr)],['Open pipeline',GBP(b.pipeline_open)],['Active in play',N(md.active_in_play)],['Aging offers',N(md.aging_offers?md.aging_offers.length:null)],['Cold open roles',N(md.cold_open_roles)]]);
 var rw=[['CV sends','cv_sent'],['Interview requests','interview_request'],['Interviews','first_interview'],['BD calls','bd_calls'],['Client calls','client_calls']];
-if(v.my_weekly){o+='<h2>Your week vs target'+(v.week_start?' — from '+D(v.week_start):'')+'</h2>'+rw.map(function(r){var m=w[r[1]]||{},a=m.actual||0,t=m.target,cl=(t!=null&&a<t)?'behind':'met';return '<div class="kpi"><span>'+r[0]+'</span><span class="'+cl+'">'+a+(t!=null?' / '+t:'')+'</span></div>'}).join('')+'<div class="foot">BD/client calls count categorised Devyce calls only, so can undercount.</div>'}
+if(v.my_weekly){o+='<h2>Your week vs target'+(v.week_start?' — from '+D(v.week_start):'')+'</h2>'+rw.map(function(r){var m=w[r[1]]||{},a=m.actual||0,t=m.target,cl=(t!=null&&a<t)?'behind':'met';return '<div class="kpi"><span>'+r[0]+'</span><span class="'+cl+'">'+a+(t!=null?' / '+t:'')+'</span></div>'}).join('')+'<div class="foot">BD/client calls count categorised Devyce calls only, so can undercount.'+(v.my_calls&&v.my_calls.logged?' You logged '+N(v.my_calls.logged)+' call'+(v.my_calls.logged===1?'':'s')+' this week and tagged '+N(v.my_calls.tagged)+' ('+Math.round(100*v.my_calls.tagged/v.my_calls.logged)+'%) — untagged calls cannot count toward these targets.':'')+'</div>'}
 if(v.my_billing){var tg=b.quarterly_target,wq=b.won_qtr||0,pc=(tg?Math.round(100*wq/tg):null),sh=(tg!=null?tg-wq:null);
 o+='<h2>Your billing'+(v.quarter_start?' — quarter from '+D(v.quarter_start):'')+'</h2>'
 +'<div class="kpi"><span>Won (billed)</span><span class="'+(tg!=null&&wq<tg?'behind':'met')+'">'+GBP(wq)+(tg!=null?' / '+GBP(tg):'')+(pc!=null?' ('+pc+'%)':'')+'</span></div>'
@@ -389,10 +389,22 @@ async function callTool(name: string, args: any, req: Request) {
       const { data: md } = await db.rpc("my_day", { p_consultant_id: actor.id, p_consultant: null });
       myDay = md && !md.error ? md : null;
     }
+    // Untagged Devyce calls can't count toward the BD/client targets (the split keys off
+    // custom_call_type), and firm-wide only ~27% are tagged. Show the recruiter their own tagging
+    // rate next to the KPI it depresses, so a red number reads as "tag your calls", not "call more".
+    let myCalls: any = null;
+    if (viewerName && !actor.is_admin && wk?.week_start) {
+      const scoped = () => db.from("call_activity").select("*", { count: "exact", head: true })
+        .eq("consultant_recruitcrm_id", actor.id).gte("call_date", wk.week_start);
+      const [{ count: logged }, { count: tagged }] = await Promise.all([
+        scoped(), scoped().not("custom_call_type", "is", null).neq("custom_call_type", ""),
+      ]);
+      myCalls = { logged: logged ?? 0, tagged: tagged ?? 0 };
+    }
     data.viewer = {
       name: viewerName ?? (actor.is_admin ? "Admin" : null), is_admin: !!actor.is_admin,
       week_start: wk?.week_start ?? null, quarter_start: bill?.quarter_start ?? null,
-      my_weekly: myWeekly, my_billing: myBilling, my_2026: my2026, my_day: myDay,
+      my_weekly: myWeekly, my_billing: myBilling, my_2026: my2026, my_day: myDay, my_calls: myCalls,
     };
     if (!actor.is_admin) delete data.consultants;   // hide the whole-team per-recruiter breakdown from regular recruiters
     // MCP Apps: structuredContent drives the inline widget; content is the model-facing fallback.
@@ -411,6 +423,7 @@ async function callTool(name: string, args: any, req: Request) {
         `${viewerName} — this week (from ${wk?.week_start ?? "?"}): ${behind ? `behind on ${behind}` : "all weekly targets met"}.`,
         `Billing this quarter ${gbp(myBilling?.won_qtr)}${myBilling?.quarterly_target != null ? ` of ${gbp(myBilling.quarterly_target)}` : ""}, open pipeline ${gbp(myBilling?.pipeline_open)}.`,
         myDay ? `Attention: ${(myDay.aging_offers ?? []).length} aging offer(s), ${(myDay.stalled ?? []).length} stalled, ${myDay.cold_open_roles ?? 0} cold open role(s), ${myDay.active_in_play ?? 0} active in play, ${myDay.placed_last_7d ?? 0} placed in the last 7 days.` : "",
+        myCalls?.logged ? `Calls logged this week ${myCalls.logged}, tagged ${myCalls.tagged} (${Math.round(100 * myCalls.tagged / myCalls.logged)}%) — untagged calls cannot count toward the BD/client targets.` : "",
       ];
       summary = parts.filter(Boolean).join(" ") + " " + firmLine;
     }
