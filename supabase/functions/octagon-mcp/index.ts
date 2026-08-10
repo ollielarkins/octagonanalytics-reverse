@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.37.1" };
+const SERVER = { name: "octagon-analytics", version: "3.38.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -364,6 +364,8 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
+  { name: "files_list", description: "Files attached to a candidate, job, company or contact in RecruitCRM — CVs, job specs, documents — with their names and links. Use to find someone's CV rather than asking them to resend it. Returns links to PII documents: internal only, never share externally. Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, job: { type: "string", description: "job ID/slug/title" }, client: { type: "string", description: "company name" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "manage_assignment", description: "Change a candidate's relationship to a job. action: unassign (take them off the job entirely), hide / show (visibility to the client in the job's shortlist), apply (record them as having applied). WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Unassign removes them from the job's pipeline, so use update_hiring_stage instead if you only want to move their stage.", inputSchema: { type: "object", properties: { action: { type: "string", description: "unassign | hide | show | apply" }, candidate: { type: "string", description: "candidate name or slug" }, job: { type: "string", description: "job ID, slug or title" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["action", "candidate", "job"], additionalProperties: false } },
   { name: "candidate_profile", description: "The full picture on one candidate straight from RecruitCRM: their work history, education, and every job they are on with the current stage. Use before writing a summary, prepping an interview or pitching someone, so the detail is real rather than remembered. Returns PII: internal only. Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "off_limit", description: "Off-limit status — candidates who must NOT be approached or pitched, usually because they were recently placed. action: list (everyone currently off limit), check (one candidate, with history), mark (set off limit until a date), release (make available again). Checking before pitching or sending a CV avoids a serious client problem. mark and release are WRITES: preview first, then confirm=true.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | check | mark | release" }, candidate: { type: "string", description: "candidate name or slug" }, until: { type: "string", description: "YYYY-MM-DD, for mark" }, reason: { type: "string" }, status_id: { type: "integer", description: "off-limit status id — see reference_list kind=off_limit_status" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["action"], additionalProperties: false } },
   { name: "invoices_report", description: "Invoices raised in RecruitCRM for a date window, with status and totals. Billing in this platform means Won deal value; invoices are the finance side of the same story and nothing here has ever read them. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string", description: "YYYY-MM-DD issue date" }, to: { type: "string", description: "YYYY-MM-DD" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -669,6 +671,75 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  if (name === "files_list") {
+    let entity = "", slug = "", who = "";
+    if (args?.candidate) {
+      const m = await resolveCandidate(String(args.candidate));
+      if (!m.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
+      if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name) });
+      const hit = m.find((c: any) => c.slug === args.candidate) ?? m[0];
+      entity = "candidate"; slug = hit.slug; who = hit.name;
+    } else if (args?.job) {
+      const jm = await resolveJob(String(args.job));
+      if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
+      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
+      entity = "job"; slug = jm[0].slug; who = jm[0].title;
+    } else if (args?.client) {
+      const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
+        .or(`company_slug.eq.${args.client},company_name.ilike.%${args.client}%`).limit(2);
+      if (!cl?.length) return toolText({ error: `No client matches '${args.client}'.` });
+      if (cl.length > 1) return toolText({ error: "ambiguous_client", matches: cl.map((c: any) => c.company_name) });
+      entity = "company"; slug = cl[0].company_slug; who = cl[0].company_name;
+    } else {
+      return toolText({ error: "Give a candidate, job or client." });
+    }
+    const r = await crm("GET", `/files/${entity}/${slug}`);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
+    const inner = r.json?.data ?? r.json;
+    const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
+    return toolText({ about: `${entity}: ${who}`, count: list.length,
+      files: list.map((f: any) => ({ name: f.file_name, link: f.file_link, added: (f.created_on ?? "").toString().slice(0, 10) })),
+      note: "Links point at documents containing personal data — internal use only." });
+  }
+
+  if (name === "manage_assignment") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. This requires a write-enabled token (an admin sets can_write)." });
+    const action = String(args.action ?? "").toLowerCase();
+    if (!["unassign", "hide", "show", "apply"].includes(action)) return toolText({ error: "action must be unassign, hide, show or apply" });
+
+    const m = await resolveCandidate(String(args.candidate ?? ""));
+    if (!m.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
+    if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name) });
+    const cand = m.find((c: any) => c.slug === args.candidate) ?? m[0];
+    const jm = await resolveJob(String(args.job ?? ""));
+    if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
+    if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
+    const job = jm[0];
+
+    const what: Record<string, string> = {
+      unassign: `REMOVE ${cand.name} from "${job.title}" entirely — they leave that job's pipeline, along with their place in it.`,
+      hide: `Hide ${cand.name} from the client's view on "${job.title}".`,
+      show: `Make ${cand.name} visible to the client on "${job.title}".`,
+      apply: `Record ${cand.name} as having applied to "${job.title}".`,
+    };
+    if (!args.confirm) {
+      return toolText({ mode: "preview", action, candidate: cand.name, job: job.title, job_id: job.recruitcrm_id,
+        effect: what[action],
+        caution: action === "unassign" ? "If you only meant to change their stage, use update_hiring_stage instead." : undefined,
+        instruction: "Show this to the recruiter. To apply, call again with confirm=true." });
+    }
+    const enc = encodeURIComponent;
+    const path = action === "unassign" ? `/candidates/${cand.slug}/unassign?job_slug=${enc(job.slug)}`
+      : action === "apply" ? `/candidates/${cand.slug}/apply?job_slug=${enc(job.slug)}&updated_by=${enc(String(actor.id))}`
+      : `/candidates/${cand.slug}/visibility/${job.slug}?visibility=${action === "show" ? 1 : 0}`;
+    const r = await crm("POST", path);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    await audit({ actor: String(actor.id), action: `assignment_${action}`, entity: "candidate", entity_id: cand.slug,
+      before: null, after: { job_slug: job.slug, job: job.title, action }, via: "claude" });
+    await refreshCandidate(cand.slug).catch(() => {});
+    return toolText({ mode: "applied", action, candidate: cand.name, job: job.title, note: "Done in RecruitCRM; the candidate's events were refreshed." });
+  }
+
   if (name === "candidate_profile") {
     const m = await resolveCandidate(String(args.candidate ?? ""));
     if (!m.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
