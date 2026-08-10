@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.34.1" };
+const SERVER = { name: "octagon-analytics", version: "3.35.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -364,6 +364,8 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
+  { name: "create_candidate", description: "Add a new candidate to RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Only a first name is strictly required, but supply as much as you have — email, phone, current role and employer, skills, salary and notice all make the record useful and searchable. Checks for an existing candidate with the same email or name first and refuses rather than creating a duplicate. Owned by and attributed to you. Candidate details are PII: internal only.", inputSchema: { type: "object", properties: { first_name: { type: "string" }, last_name: { type: "string" }, email: { type: "string" }, phone: { type: "string" }, position: { type: "string", description: "current job title" }, employer: { type: "string", description: "current organisation" }, skills: { type: "string", description: "comma separated" }, city: { type: "string" }, country: { type: "string" }, linkedin: { type: "string" }, current_salary: { type: "string" }, salary_expectation: { type: "string" }, notice_period: { type: "integer", description: "days" }, source: { type: "string" }, summary: { type: "string", description: "candidate summary / notes" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["first_name"], additionalProperties: false } },
+  { name: "update_candidate", description: "Edit an existing candidate in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: before/after preview, then confirm=true. Identify them by name or slug. Only the fields you pass change — but note RecruitCRM demands first_name on every edit, so the tool reads the record first and carries it forward rather than risking a blank. Candidate details are PII: internal only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, first_name: { type: "string" }, last_name: { type: "string" }, email: { type: "string" }, phone: { type: "string" }, position: { type: "string" }, employer: { type: "string" }, skills: { type: "string" }, city: { type: "string" }, country: { type: "string" }, linkedin: { type: "string" }, current_salary: { type: "string" }, salary_expectation: { type: "string" }, notice_period: { type: "integer" }, summary: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "activity_report", description: "Meetings or tasks logged in RecruitCRM for a date window, optionally for one consultant. Meetings are where CLIENT VISITS live — the activity the business asks about that no other tool here reports. Tasks are the to-do layer. Defaults to the last 30 days and to YOU; pass consultant to see someone else, or all=true for the firm. kind: meetings | tasks. Read-only.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meetings or tasks" }, from: { type: "string", description: "YYYY-MM-DD, default 30 days ago" }, to: { type: "string", description: "YYYY-MM-DD, default today" }, consultant: { type: "string", description: "consultant name; omit for yourself" }, all: { type: "boolean", description: "true = whole firm" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "log_activity", description: "Log a meeting (e.g. a client visit) or a task in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Link it to a client, job or candidate so it shows against that record. Meetings need a start and end; tasks need only a start. Times are 'YYYY-MM-DD HH:MM'. Created by and owned by you. Use for 'log my visit to X yesterday', 'remind me to chase Y on Friday'.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meeting or task" }, title: { type: "string" }, start: { type: "string", description: "YYYY-MM-DD HH:MM" }, end: { type: "string", description: "YYYY-MM-DD HH:MM — meetings only" }, description: { type: "string" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, candidate: { type: "string", description: "candidate name to link" }, type_id: { type: "integer", description: "meeting/task type id — see reference_list" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind", "title", "start"], additionalProperties: false } },
   { name: "update_deal", description: "Change a deal in RecruitCRM — most importantly moving it to Won and entering the value, which IS how billing is recorded at Octagon. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the deal by its numeric ID, slug, or part of its name. stage accepts a stage name (Won, Lost, Open, CV Sent, Interview Request, 1st/2nd/3rd Interview, Offered, Declined, Job Lead) resolved against the live pipeline. Note RecruitCRM requires name, value, stage and close_date on every edit, so the tool reads the deal first and preserves anything you don't change.", inputSchema: { type: "object", properties: { deal: { type: "string", description: "deal ID, slug, or part of the name" }, stage: { type: "string", description: "target stage name" }, value: { type: "number", description: "deal value (the fee)" }, name: { type: "string", description: "rename the deal" }, close_date: { type: "string", description: "YYYY-MM-DD" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["deal"], additionalProperties: false } },
@@ -661,6 +663,83 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  // Shared field mapping for candidate create/edit — friendly arg names to RecruitCRM's field names.
+  const candidateFields = (a: any) => ({
+    first_name: a.first_name, last_name: a.last_name, email: a.email, contact_number: a.phone,
+    position: a.position, current_organization: a.employer, skill: a.skills,
+    city: a.city, country: a.country, linkedin: a.linkedin,
+    current_salary: a.current_salary, salary_expectation: a.salary_expectation,
+    notice_period: a.notice_period, source: a.source, candidate_summary: a.summary,
+  });
+
+  if (name === "create_candidate") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Adding candidates requires a write-enabled token (an admin sets can_write)." });
+    // Duplicate candidates are the classic CRM mess, and an API makes them easy to create by
+    // accident. Check before writing, not after.
+    const full = [args.first_name, args.last_name].filter(Boolean).join(" ");
+    let dupQ = db.from("candidates").select("slug,name,email").limit(5);
+    dupQ = args.email ? dupQ.or(`email.eq.${args.email},name.ilike.${full}`) : dupQ.ilike("name", full);
+    const { data: dups } = await dupQ;
+    if (dups?.length) {
+      return toolText({ error: "possible_duplicate",
+        existing: dups.map((d: any) => ({ name: d.name, email: d.email })),
+        message: `A candidate with that ${args.email ? "email or " : ""}name already exists. Check whether this is the same person; if it genuinely is someone new, add a distinguishing detail or update the existing record instead.` });
+    }
+
+    const fields = candidateFields(args);
+    if (!args.confirm) {
+      const filled = Object.entries(fields).filter(([, v]) => v != null && v !== "");
+      return toolText({ mode: "preview", action: "create_candidate",
+        will_create: Object.fromEntries(filled), owner: "you",
+        blank_fields: Object.keys(fields).filter((k) => !(fields as any)[k]).length,
+        instruction: "This creates a real candidate record. Show it to the recruiter. To apply, call again with confirm=true." });
+    }
+    const r = await crmForm("/candidates", { ...fields, owner_id: actor.id, created_by: actor.id, updated_by: actor.id });
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    const created = r.json?.data ?? r.json ?? {};
+    await audit({ actor: String(actor.id), action: "create_candidate", entity: "candidate", entity_id: created.slug ?? null, before: null, after: fields, via: "claude" });
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=candidates`,
+      { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    return toolText({ mode: "applied", candidate: full, candidate_slug: created.slug ?? null, note: "Candidate created in RecruitCRM and the mirror refreshed." });
+  }
+
+  if (name === "update_candidate") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Editing candidates requires a write-enabled token (an admin sets can_write)." });
+    const m = await resolveCandidate(String(args.candidate ?? ""));
+    if (!m.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
+    if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) {
+      return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name), instruction: "Ask which one, then call again." });
+    }
+    const cand = m.find((c: any) => c.slug === args.candidate) ?? m[0];
+
+    const fields = candidateFields(args);
+    const changing = Object.entries(fields).filter(([, v]) => v != null && v !== "");
+    if (!changing.length) return toolText({ error: "Nothing to change — pass at least one field." });
+
+    // first_name is required on every edit, so an edit that doesn't set it must re-send the
+    // existing one or the API rejects it (or worse, accepts a blank).
+    const cur = await crm("GET", `/candidates/${cand.slug}`);
+    const c = cur.json?.data ?? cur.json ?? {};
+    const body: Record<string, any> = { ...Object.fromEntries(changing), updated_by: actor.id };
+    if (!body.first_name) body.first_name = c.first_name ?? String(cand.name ?? "").split(" ")[0];
+    if (!body.first_name) return toolText({ error: "Could not determine the candidate's first name, which RecruitCRM requires on every edit." });
+
+    if (!args.confirm) {
+      const before = Object.fromEntries(changing.map(([k]) => [k, (c as any)[k] ?? null]));
+      return toolText({ mode: "preview", action: "update_candidate", candidate: cand.name,
+        before, after: Object.fromEntries(changing),
+        carried_forward: body.first_name && !fields.first_name ? `first_name "${body.first_name}" re-sent unchanged (required by the API)` : undefined,
+        instruction: "Show before/after to the recruiter. To apply, call again with confirm=true." });
+    }
+    const r = await crmForm(`/candidates/${cand.slug}`, body);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    await audit({ actor: String(actor.id), action: "update_candidate", entity: "candidate", entity_id: cand.slug,
+      before: Object.fromEntries(changing.map(([k]) => [k, (c as any)[k] ?? null])), after: body, via: "claude" });
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=candidates`,
+      { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    return toolText({ mode: "applied", candidate: cand.name, changed: changing.map(([k]) => k), note: "Candidate updated in RecruitCRM and the mirror refreshed." });
+  }
+
   if (name === "activity_report") {
     const kind = String(args?.kind ?? "").toLowerCase().replace(/s$/, "");
     if (kind !== "meeting" && kind !== "task") return toolText({ error: "kind must be meetings or tasks" });
