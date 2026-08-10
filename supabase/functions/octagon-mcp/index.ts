@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.38.0" };
+const SERVER = { name: "octagon-analytics", version: "3.39.1" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -121,6 +121,14 @@ async function resolveContact(opts: { contact_slug?: string; client?: string; co
   return list;
 }
 
+// RecruitCRM returns is_email_opted_out as the STRING "false"/"true", not a boolean. A naive
+// truthiness check treats "false" as opted out and blocks everyone; comparing === true would send
+// to people who HAVE opted out. Parse it explicitly — this one is a legal obligation, not a UI nicety.
+function isOptedOut(v: any): boolean {
+  if (v === true || v === 1) return true;
+  const s = String(v ?? "").trim().toLowerCase();
+  return s === "true" || s === "1" || s === "yes";
+}
 // Deletable entities. RecruitCRM keys some by slug and some by numeric id — getting that wrong
 // means either a 404 or, worse, deleting the wrong record, so it is declared rather than guessed.
 // `label` builds the human description shown in the preview: nobody should confirm a deletion
@@ -364,6 +372,7 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
+  { name: "send_email", description: "Send an email to a candidate or contact through RecruitCRM, or save it as a draft. WRITE, two-step, EXPLICIT-ONLY and OUTWARD-FACING — unlike every other action here, a sent email leaves the building and cannot be recalled. Always call without confirm first: the preview shows the full recipient, subject and body, and checks whether the recipient has opted out of marketing. Read the whole thing back to the recruiter and get explicit approval before confirm=true. Set draft=true to save it in RecruitCRM for a human to review and send instead — prefer that when there is any doubt. Sends are logged in RecruitCRM and to the audit log.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug (recipient)" }, contact_slug: { type: "string", description: "contact slug (recipient)" }, subject: { type: "string" }, body: { type: "string", description: "the email body" }, draft: { type: "boolean", description: "true = save as a draft instead of sending" }, include_signature: { type: "boolean", description: "default true" }, include_opt_out_link: { type: "boolean", description: "default true" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = actually send" }, ...AUTH_ARG }, required: ["subject", "body"], additionalProperties: false } },
   { name: "files_list", description: "Files attached to a candidate, job, company or contact in RecruitCRM — CVs, job specs, documents — with their names and links. Use to find someone's CV rather than asking them to resend it. Returns links to PII documents: internal only, never share externally. Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, job: { type: "string", description: "job ID/slug/title" }, client: { type: "string", description: "company name" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "manage_assignment", description: "Change a candidate's relationship to a job. action: unassign (take them off the job entirely), hide / show (visibility to the client in the job's shortlist), apply (record them as having applied). WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Unassign removes them from the job's pipeline, so use update_hiring_stage instead if you only want to move their stage.", inputSchema: { type: "object", properties: { action: { type: "string", description: "unassign | hide | show | apply" }, candidate: { type: "string", description: "candidate name or slug" }, job: { type: "string", description: "job ID, slug or title" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["action", "candidate", "job"], additionalProperties: false } },
   { name: "candidate_profile", description: "The full picture on one candidate straight from RecruitCRM: their work history, education, and every job they are on with the current stage. Use before writing a summary, prepping an interview or pitching someone, so the detail is real rather than remembered. Returns PII: internal only. Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
@@ -671,6 +680,68 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  if (name === "send_email") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Sending email requires a write-enabled token (an admin sets can_write)." });
+
+    // Resolve the recipient and get a real address to show in the preview — nobody should approve
+    // an email without seeing who it actually goes to.
+    let rcpt: { type: string; identifier: string }, who = "", email = "";
+    if (args.candidate) {
+      const m = await resolveCandidate(String(args.candidate));
+      if (!m.length) return toolText({ error: `No candidate matches '${args.candidate}'.` });
+      if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name) });
+      const hit = m.find((c: any) => c.slug === args.candidate) ?? m[0];
+      const det = await crm("GET", `/candidates/${hit.slug}`);
+      const d = det.json?.data ?? det.json ?? {};
+      rcpt = { type: "candidate", identifier: hit.slug }; who = hit.name; email = d.email ?? "";
+      if (isOptedOut(d.is_email_opted_out)) {
+        return toolText({ error: "opted_out", recipient: who,
+          message: `${who} has opted out of email in RecruitCRM. Nothing has been sent. Opt-outs are a legal obligation, not a preference — contact them another way if it is genuinely necessary.` });
+      }
+    } else if (args.contact_slug) {
+      const det = await crm("GET", `/contacts/${args.contact_slug}`);
+      const d = det.json?.data ?? det.json ?? {};
+      if (!d?.slug) return toolText({ error: `No contact found for '${args.contact_slug}'.` });
+      rcpt = { type: "contact", identifier: d.slug };
+      who = [d.first_name, d.last_name].filter(Boolean).join(" ") || d.slug; email = d.email ?? "";
+      if (isOptedOut(d.is_email_opted_out)) {
+        return toolText({ error: "opted_out", recipient: who, message: `${who} has opted out of email in RecruitCRM. Nothing has been sent.` });
+      }
+    } else {
+      return toolText({ error: "Give a candidate or a contact_slug to send to." });
+    }
+    if (!email) return toolText({ error: "no_email", recipient: who, message: `${who} has no email address on record, so nothing can be sent.` });
+
+    const asDraft = !!args.draft;
+    if (!args.confirm) {
+      return toolText({
+        mode: "preview", action: asDraft ? "create_draft" : "send_email",
+        to: `${who} <${email}>`, subject: args.subject, body: args.body,
+        signature: args.include_signature === false ? "not included" : "included",
+        opt_out_link: args.include_opt_out_link === false ? "NOT included" : "included",
+        opted_out_check: "passed — this recipient has not opted out",
+        warning: asDraft
+          ? "This saves a draft in RecruitCRM. Nothing is sent until a human sends it."
+          : "THIS SENDS A REAL EMAIL TO A REAL PERSON. It cannot be recalled, unsent or edited afterwards.",
+        instruction: "Read the recipient, subject and the FULL body back to the recruiter and get explicit approval. Only then call again with confirm=true. If they hesitate at all, use draft=true instead.",
+      });
+    }
+
+    const fd: Record<string, any> = {
+      subject: args.subject, body: args.body, to: JSON.stringify(rcpt), from: actor.id,
+      include_signature: args.include_signature === false ? false : true,
+      include_opt_out_link: args.include_opt_out_link === false ? false : true,
+    };
+    const r = await crmForm(asDraft ? "/drafts" : "/emails", fd);
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    const out = r.json?.data ?? r.json ?? {};
+    await audit({ actor: String(actor.id), action: asDraft ? "create_draft" : "send_email", entity: rcpt.type, entity_id: rcpt.identifier,
+      before: null, after: { to: `${who} <${email}>`, subject: args.subject, body: String(args.body).slice(0, 2000) }, via: "claude" });
+    return toolText({ mode: "applied", action: asDraft ? "draft saved" : "email sent", to: `${who} <${email}>`,
+      subject: args.subject, status_id: out.email_status_id ?? out.draft_status_id ?? out.id ?? null,
+      note: asDraft ? "Saved as a draft in RecruitCRM — not sent." : "Sent via RecruitCRM and recorded in the audit log." });
+  }
+
   if (name === "files_list") {
     let entity = "", slug = "", who = "";
     if (args?.candidate) {
