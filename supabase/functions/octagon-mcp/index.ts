@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.30.1" };
+const SERVER = { name: "octagon-analytics", version: "3.31.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -67,6 +67,25 @@ const REFERENCE_LISTS: Record<string, string> = {
   pitch_stages: "/pitch-pipeline",
   hiring_pipelines: "/hiring-pipelines",
   enrollment_statuses: "/enrollment-statuses",
+};
+
+// Deletable entities. RecruitCRM keys some by slug and some by numeric id — getting that wrong
+// means either a 404 or, worse, deleting the wrong record, so it is declared rather than guessed.
+// `label` builds the human description shown in the preview: nobody should confirm a deletion
+// against a bare identifier.
+const DELETABLE: Record<string, { path: string; key: "slug" | "id"; label: (r: any) => string }> = {
+  job:       { path: "/jobs",       key: "slug", label: (r) => `${r.name ?? "(untitled)"} — ${r.job_status?.label ?? r.job_status ?? "?"}` },
+  candidate: { path: "/candidates", key: "slug", label: (r) => [r.first_name, r.last_name].filter(Boolean).join(" ") || r.slug },
+  company:   { path: "/companies",  key: "slug", label: (r) => r.company_name ?? r.slug },
+  contact:   { path: "/contacts",   key: "slug", label: (r) => [r.first_name, r.last_name].filter(Boolean).join(" ") || r.slug },
+  deal:      { path: "/deals",      key: "slug", label: (r) => `${r.name ?? "(unnamed deal)"} — ${r.deal_stage?.label ?? "?"} — ${r.deal_value ?? "?"}` },
+  note:      { path: "/notes",      key: "id",   label: (r) => String(r.description ?? "").slice(0, 120) || `note ${r.id}` },
+  task:      { path: "/tasks",      key: "id",   label: (r) => r.name ?? r.title ?? `task ${r.id}` },
+  meeting:   { path: "/meetings",   key: "id",   label: (r) => r.title ?? r.name ?? `meeting ${r.id}` },
+  invoice:   { path: "/invoices",   key: "id",   label: (r) => `invoice ${r.invoice_number ?? r.id}` },
+  placement: { path: "/placements", key: "id",   label: (r) => `placement ${r.id} (candidate ${r.candidate_slug ?? "?"}, job ${r.job_slug ?? "?"})` },
+  hotlist:   { path: "/hotlists",   key: "id",   label: (r) => r.name ?? `hotlist ${r.id}` },
+  call_log:  { path: "/call-logs",  key: "id",   label: (r) => `call ${r.id} — ${r.custom_call_type?.label ?? r.call_type ?? "?"}` },
 };
 
 // job_status is an integer in RecruitCRM: 0 Closed, 1 Open, 2 On-Hold, 3 Cancelled.
@@ -293,6 +312,7 @@ const TOOLS = [
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "billing", description: "Quarter-to-date billing vs quarterly target (owner-attributed): Won revenue this quarter (the billing figure), all-time Won, and in-play pipeline as the forward indicator. Scoped: a recruiter sees their own row, admins the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
   { name: "update_hiring_stage", description: "Move a candidate to a new hiring stage on a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: first call WITHOUT confirm for a preview (current vs proposed); show it and get explicit approval; then call again confirm=true with expected_status_id = the current status_id from the preview. The acting consultant is taken from your token (not an argument). status_id: CV Sent=390955, Interview Request=381800, 1st Interview=381799, 2nd Interview=381801, Offered=381805, Placed=8. Set create_placement=true only when moving to Placed.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, status_id: { type: "integer" }, remark: { type: "string" }, create_placement: { type: "boolean" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = apply" }, expected_status_id: { type: "integer", description: "current status_id from the preview; write refused if it changed" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug", "status_id"], additionalProperties: false } },
+  { name: "delete_record", description: "PERMANENTLY DELETE a record in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY and IRREVERSIBLE — there is no undo and no restore. Call without confirm to get a preview naming the exact record; show that to the recruiter verbatim and get explicit approval; only then call again with confirm=true. entity: job, candidate, company, contact, deal, note, task, meeting, invoice, placement, hotlist, call_log. Jobs/candidates/companies/contacts/deals are identified by slug (a job also accepts its numeric ID); the rest by numeric ID. Never call this speculatively, never to 'clean up', and never on a record the recruiter has not explicitly named.", inputSchema: { type: "object", properties: { entity: { type: "string", description: "what kind of record" }, id: { type: "string", description: "slug, or numeric ID depending on entity" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = permanently delete" }, ...AUTH_ARG }, required: ["entity", "id"], additionalProperties: false } },
   { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
   { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
@@ -583,6 +603,54 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
   }
+  if (name === "delete_record") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Deleting requires a write-enabled token (an admin sets can_write)." });
+    const ent = String(args?.entity ?? "").toLowerCase().replace(/[\s-]+/g, "_").replace(/^client$/, "company");
+    const spec = DELETABLE[ent];
+    if (!spec) return toolText({ error: `Cannot delete '${args?.entity}'.`, deletable: Object.keys(DELETABLE) });
+
+    // Resolve a job given by numeric id to its slug, so "delete job 6011" works like every other tool.
+    let ident = String(args?.id ?? "").trim();
+    if (ent === "job" && /^[0-9]+$/.test(ident)) {
+      const m = await resolveJob(ident);
+      if (!m.length) return toolText({ error: `No job with ID ${ident}.` });
+      ident = m[0].slug;
+    }
+    if (spec.key === "id" && !/^[0-9]+$/.test(ident)) {
+      return toolText({ error: `A ${ent} is identified by its numeric ID, and '${ident}' is not a number.` });
+    }
+
+    // Fetch the record first. Confirming a deletion against a bare identifier is how the wrong
+    // thing gets deleted; the recruiter should see what it actually is.
+    const got = await crm("GET", `${spec.path}/${encodeURIComponent(ident)}`);
+    const rec = got.json?.data ?? got.json;
+    if (!got.ok || !rec || (Array.isArray(rec) && !rec.length)) {
+      return toolText({ error: "not_found", message: `No ${ent} found for '${ident}' — nothing was deleted.`, status: got.status });
+    }
+
+    if (!args?.confirm) {
+      return toolText({
+        mode: "preview", action: "delete_record", entity: ent, identifier: ident,
+        record: spec.label(rec),
+        warning: "THIS PERMANENTLY DELETES THE RECORD IN RECRUITCRM. It cannot be undone and there is no restore.",
+        instruction: "Show the record description and the warning to the recruiter verbatim. Only if they explicitly confirm, call again with confirm=true.",
+      });
+    }
+
+    const res = await fetch(`${BASE}${spec.path}/${encodeURIComponent(ident)}`, { method: "DELETE", headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" } });
+    const body = await res.text();
+    if (!res.ok) return toolText({ error: "recruitcrm_error", status: res.status, detail: body.slice(0, 300) });
+    await audit({ actor: String(actor.id), action: "delete_record", entity: ent, entity_id: ident, before: { label: spec.label(rec), record: rec }, after: null, via: "claude" });
+    // The mirror still holds the row; the nightly reconcile soft-deletes it. Nudge the relevant sync.
+    const syncEntity = ent === "job" ? "jobs" : ent === "candidate" ? "candidates" : ent === "company" ? "clients" : ent === "deal" ? "deals" : null;
+    if (syncEntity) {
+      await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=${syncEntity}`,
+        { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    }
+    return toolText({ mode: "applied", deleted: { entity: ent, identifier: ident, was: spec.label(rec) },
+      note: syncEntity ? "Deleted in RecruitCRM. The mirror clears on the next reconcile." : "Deleted in RecruitCRM." });
+  }
+
   if (name === "reference_list") {
     const k = String(args?.kind ?? "").toLowerCase().replace(/[\s-]+/g, "_");
     if (!(k in REFERENCE_LISTS)) {
