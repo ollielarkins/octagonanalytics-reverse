@@ -14,6 +14,8 @@ Running log of the decisions behind the schema and semantic layer. Each entry: t
 
 **Status:** **Confirmed as-built.** `candidate_stage_events` is now populated by the live sync's `history` mode (hiring-stage history per candidate, mapped via `stage_lookup`), and is the sole source for every funnel/consultant metric and for `funnel_report` (0014). Pre-2026 history is sparse in RecruitCRM, so reporting defaults to a 2026-onward window — see [D8].
 
+**Update 10/08/2026 — `daily_activity` removed (0042).** The provenance question was never answered, so no ingestion path was ever built and the table stayed a one-off import. Both of its intended roles had since been filled: `candidate_stage_events` for the funnel, and `call_activity` (0027, Devyce) for activity/leading indicators. Half its columns — `lead`, `pitched`, `internal_interview`, `job_order_form_complete`, `prospect_bd`, `client`, `call_time_minutes`, `jobs_added`, `assigned` — were zero in every row, and the populated ones disagreed with the event stream by roughly 6× (Jan 2026: 56 `cv_sent` vs 256). Table and `reported_activity_daily` dropped. If leads / pitched candidates / internal interviews are tracked in future, build the capture deliberately rather than reviving this table.
+
 ---
 
 ## D2 — Stage taxonomy: `stage_metric` is canonical; `stage_name` is display-only
