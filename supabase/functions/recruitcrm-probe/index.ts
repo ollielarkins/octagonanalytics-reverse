@@ -69,6 +69,18 @@ async function peek(token: string, path: string) {
       top_level_keys: json && typeof json === "object" && !Array.isArray(json) ? Object.keys(json).slice(0, 12) : null,
       first_record_fields: Array.isArray(rows) && rows[0] && typeof rows[0] === "object" ? Object.keys(rows[0]).slice(0, 30) : null,
       body_if_empty: Array.isArray(rows) && rows.length === 0 ? text.slice(0, 160) : undefined,
+      // For a single record, return only boolean/number fields — enough to check a flag's real
+      // value without exposing any personal data.
+      scalar_flags: (!Array.isArray(rows) && inner && typeof inner === "object")
+        ? Object.fromEntries(Object.entries(inner).filter(([, v]) => typeof v === "boolean" || typeof v === "number"))
+        : undefined,
+      // Opt-out flags specifically, whatever their type — a string "0" is truthy in JS and would
+      // silently block every recipient, so the exact value matters.
+      optout_fields: (!Array.isArray(rows) && inner && typeof inner === "object")
+        ? Object.fromEntries(Object.entries(inner)
+            .filter(([k]) => /opt|unsubscrib/i.test(k))
+            .map(([k, v]) => [k, { value: v, type: typeof v }]))
+        : undefined,
     };
   } catch (e) { return { error: String(e) }; }
 }
