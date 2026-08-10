@@ -8,9 +8,20 @@
 // the values themselves. Delete this function once the shapes are captured.
 
 const BASE = "https://api.recruitcrm.io/v1";
-// placements: probing whether the API exposes them at all — the placements table is empty, so
-// fee-per-placement reporting is impossible until we know if this endpoint exists.
-const ENDPOINTS = ["placements", "placement", "jobs"];
+// Probing where the FEE lives: the placement record has no fee column, so it is either on the
+// linked deal or in custom_fields. Custom-field NAMES are configuration, not data — safe to return.
+const ENDPOINTS = ["placements", "deals", "jobs"];
+
+// Field names only from a custom_fields array — never the values.
+function customFieldNames(rec: any): string[] | null {
+  const cf = rec?.custom_fields;
+  if (!Array.isArray(cf)) return null;
+  return cf.map((f: any) =>
+    typeof f === "object" && f !== null
+      ? String(f.field_name ?? f.name ?? f.label ?? f.key ?? Object.keys(f).join("|"))
+      : String(f)
+  );
+}
 
 // Map a record to { field: "type" } — redacts every actual value.
 function shapeOf(rec: unknown): Record<string, string> {
@@ -53,6 +64,11 @@ Deno.serve(async () => {
         top_level_keys: json && typeof json === "object" ? Object.keys(json) : null,
         record_count_this_page: Array.isArray(json?.data) ? json.data.length : null,
         first_record_shape: firstRecord ? shapeOf(firstRecord) : null,
+        // Names across the whole page, not just record 1 — custom fields are sparsely populated.
+        custom_field_names: Array.isArray(json?.data)
+          ? Array.from(new Set(json.data.flatMap((r: any) => customFieldNames(r) ?? []))).sort()
+          : null,
+        total: json?.total ?? null,
       };
     } catch (e) {
       report[ep] = { error: String(e) };

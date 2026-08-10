@@ -22,7 +22,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.23.0" };
+const SERVER = { name: "octagon-analytics", version: "3.24.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -138,7 +138,7 @@ var ao=md.aging_offers||[],sl=md.stalled||[];
 if(ao.length){o+='<h2>Aging offers — chase today</h2><table><tr><th>Candidate</th><th>Role</th><th class="num">Days</th></tr>'+ao.map(function(x){return '<tr><td>'+esc(x.candidate)+'</td><td>'+esc(x.job_title)+'</td><td class="num behind">'+N(x.days)+'</td></tr>'}).join('')+'</table>'}
 if(sl.length){var top=sl.slice(0,10);o+='<h2>Stalled candidates'+(sl.length>10?' — top 10 of '+sl.length:'')+'</h2><table><tr><th>Candidate</th><th>Role</th><th>Stage</th><th class="num">Days</th></tr>'+top.map(function(x){return '<tr><td>'+esc(x.candidate)+'</td><td>'+esc(x.job_title)+'</td><td>'+esc(x.stage)+'</td><td class="num">'+N(x.days)+'</td></tr>'}).join('')+'</table>'}
 if(v.my_day&&!ao.length&&!sl.length)o+='<h2>Needs attention</h2><div class="foot">Nothing aging or stalled on your open roles. '+N(md.cold_open_roles)+' cold role(s), '+N(md.placed_last_7d)+' placed in the last 7 days.</div>';
-if(v.my_2026){o+='<h2>Your 2026 funnel</h2>'+bars([['CV Sent',y.cv_sent],['Interview Request',y.interview_request],['1st Interview',y.first_interview],['Offered',y.offered],['Placed',y.placed]])+'<div class="foot">2nd/3rd interview are not broken out per consultant here — ask for your funnel_report.</div>'}
+if(v.my_2026){o+='<h2>Your 2026 funnel</h2>'+bars([['Shortlist',y.shortlist],['CV Sent',y.cv_sent],['Interview Request',y.interview_request],['1st Interview',y.first_interview],['Offered',y.offered],['Placed',y.placed]])+'<div class="foot">2nd/3rd interview are not broken out per consultant here — ask for your funnel_report.</div>'}
 o+='<h2>Firm — 2026</h2><div class="foot">'+N(k.cv_2026)+' CV sent · '+N(k.placed_2026)+' placed · '+N(k.open_jobs)+' open jobs · '+GBP(k.open_pipeline)+' open pipeline</div>';
 return o}
 // Admin view: firm first, then the whole-team breakdown.
@@ -146,7 +146,8 @@ function firmView(d){var h=d.health||{},k=d.kpis||{},f=d.funnel||{},pl=d.pipelin
 o+='<h1>Octagon Recruitment Dashboard</h1>'+syncline(h);
 o+=cards([['Placed 2026',N(k.placed_2026)],['Placed all-time',N(k.placed_all)],['Open jobs',N(k.open_jobs)],['Open pipeline',GBP(k.open_pipeline)],['Won',GBP(k.won)],['Candidates in pipeline',N(k.candidates_in_pipeline!=null?k.candidates_in_pipeline:k.candidates)],['Candidates on CRM',N(k.candidates_total)],['Clients',N(k.clients)],['Consultants',N(k.consultants)]]);
 if(k.jobs_no_client)o+='<div class="foot">'+N(k.jobs_no_client)+' of '+N(k.jobs)+' jobs have no resolved client (company archived in RecruitCRM) — client/account reporting excludes them.</div>';
-o+='<h2>2026 Funnel</h2>'+bars([['CV Sent',f.cv_sent],['Interview Request',f.interview_request],['1st Interview',f.first_interview],['2nd Interview',f.second_interview],['3rd Interview',f.third_interview],['Offered',f.offered],['Placed',f.placed]]);
+o+='<h2>2026 Funnel</h2>'+bars([['Shortlist',f.shortlist],['CV Sent',f.cv_sent],['Interview Request',f.interview_request],['1st Interview',f.first_interview],['2nd Interview',f.second_interview],['3rd Interview',f.third_interview],['Offered',f.offered],['Placed',f.placed]])
++'<div class="foot">Shortlist is partially adopted — fewer shortlist events than CV sends, so don\'t read it as a top-of-funnel denominator.</div>';
 if(pl.length){o+='<h2>Deal Pipeline</h2><table><tr><th>Stage</th><th class="num">Deals</th><th class="num">Value</th></tr>'+pl.map(function(p){return '<tr><td>'+esc(p.stage)+'</td><td class="num">'+N(p.deals)+'</td><td class="num">'+GBP(p.value)+'</td></tr>'}).join('')+'</table>'}
 if(d.consultants&&d.consultants.length){o+='<h2>Team — by job owner</h2><table><tr><th>Consultant</th><th class="num">CV</th><th class="num">1st Int</th><th class="num">Placed</th></tr>'+d.consultants.map(function(c){return '<tr><td>'+esc(c.name)+'</td><td class="num">'+N(c.cv_sent)+'</td><td class="num">'+N(c.first_interview)+'</td><td class="num">'+N(c.placed)+'</td></tr>'}).join('')+'</table>'}
 return o}
