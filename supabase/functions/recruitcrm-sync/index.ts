@@ -90,6 +90,7 @@ function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
 }
 const mapDeal = (d: any) => ({
   recruitcrm_id: d.id,
+  slug: d.slug ?? null,          // keyed by slug on the write endpoints (0050)
   deal_name: d.name ?? null,
   deal_stage: d.deal_stage?.label ?? (typeof d.deal_stage === "string" ? d.deal_stage : null),
   deal_value: typeof d.deal_value === "number" ? d.deal_value : (d.deal_value != null ? Number(d.deal_value) : null),
