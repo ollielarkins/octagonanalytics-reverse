@@ -20,10 +20,11 @@
 //
 // Connector URL: https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { dashboardPNG } from "./render.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.42.0" };
+const SERVER = { name: "octagon-analytics", version: "3.43.1" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -243,7 +244,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .behind{color:var(--bad);font-weight:700}.met{color:var(--good);font-weight:600}
 .foot{color:var(--mut);font-size:.7rem;margin-top:5px;line-height:1.4}
 .banner{background:rgba(176,0,32,.12);color:var(--bad);border:1px solid rgba(176,0,32,.3);border-radius:8px;padding:8px 10px;font-size:.78rem;margin-bottom:12px}
-</style></head><body><div id="app"><div style="border:2px dashed #888;border-radius:10px;padding:14px;font:14px system-ui"><b>Octagon dashboard widget v3.41</b><br><span id="stat">loaded — waiting for data from Claude…</span></div></div><script>
+</style></head><body><div id="app"><div class="sub">Loading dashboard…</div></div><script>
 var GBP=function(n){return n==null?'—':'£'+Math.round(Number(n)).toLocaleString('en-GB')};
 var N=function(n){return n==null?'—':Number(n).toLocaleString('en-GB')};
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
@@ -305,7 +306,7 @@ tryRender(dig(m,0))});
 function announce(){window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{capabilities:{},clientInfo:{name:'octagon-dashboard',version:'1.0'},protocolVersion:'2026-01-26',appCapabilities:{availableDisplayModes:['inline','fullscreen']}}},'*')}
 announce();
 [400,1200,2500].forEach(function(t){setTimeout(function(){if(!DONE)announce()},t)});
-setTimeout(function(){if(!DONE){var s=document.getElementById('stat');if(s)s.innerHTML='<b>No data arrived.</b> The widget loaded but Claude never sent the dashboard payload. Reconnect the Octagon Analytics connector and try again.'}},6000);
+setTimeout(function(){if(!DONE)document.getElementById('app').innerHTML='<div class="sub">Widget rendering is unavailable in this client — the dashboard is delivered as an image instead.</div>'},6000);
 </script></body></html>`;
 
 // Shared scorecard widget for weekly_kpis + billing (branches on the payload shape).
@@ -390,7 +391,6 @@ const TOOLS = [
   { name: "pitch_history", description: "Speculative pitches recorded in RecruitCRM — who has been pitched to whom, and when. This is the 'pitched candidates' activity the business asks about; it lives in RecruitCRM's pitch feature, which nothing else in this platform reads. Give a candidate (name or slug) to see everywhere they've been pitched, or a contact slug to see everyone pitched to them, or both for that pair's history. Returns candidate and contact names (PII). Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string", description: "contact slug" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "pitch_candidate", description: "Record a speculative pitch in RecruitCRM: candidate X pitched to contact Y. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview naming both people, get approval, then confirm=true. Identify the contact by contact_slug, or by client (company name) plus optionally contact_name. Optionally pass stage_id to move an existing pitch to a different pitch stage instead (see reference_list kind=pitch_stages). Attributed to you.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string" }, client: { type: "string", description: "company name, to find the contact" }, contact_name: { type: "string", description: "narrows the contacts at that client" }, stage_id: { type: "integer", description: "move an existing pitch to this stage instead of creating one" }, remark: { type: "string", description: "note against a stage change" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "delete_record", description: "PERMANENTLY DELETE a record in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY and IRREVERSIBLE — there is no undo and no restore. Call without confirm to get a preview naming the exact record; show that to the recruiter verbatim and get explicit approval; only then call again with confirm=true. entity: job, candidate, company, contact, deal, note, task, meeting, invoice, placement, hotlist, call_log. Jobs/candidates/companies/contacts/deals are identified by slug (a job also accepts its numeric ID); the rest by numeric ID. Never call this speculatively, never to 'clean up', and never on a record the recruiter has not explicitly named.", inputSchema: { type: "object", properties: { entity: { type: "string", description: "what kind of record" }, id: { type: "string", description: "slug, or numeric ID depending on entity" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = permanently delete" }, ...AUTH_ARG }, required: ["entity", "id"], additionalProperties: false } },
-  { name: "render_test", description: "TEMPORARY diagnostic. Returns the same tiny chart three ways — as an MCP image block (PNG), as an image block (SVG), and as a markdown data URI — so we can see which of them claude.ai renders INLINE in the conversation. Call it and describe what you actually see. Read-only, no data.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
   { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
@@ -615,7 +615,25 @@ async function callTool(name: string, args: any, req: Request) {
       ];
       summary = parts.filter(Boolean).join(" ") + " " + firmLine;
     }
-    return { content: [{ type: "text", text: summary }], structuredContent: data, _meta: { ui: { resourceUri: DASH_UI } } };
+    // Claude Web drops ui:// widgets for custom connectors (claude-ai-mcp#471) but renders image
+    // blocks inline, so the dashboard ships as a PNG. structuredContent still rides along so
+    // follow-up questions ("what's my billing gap?") need no second call — it is for the model to
+    // read, never to reprint. _meta.ui stays for hosts that do render widgets.
+    const content: any[] = [];
+    try {
+      const png = await dashboardPNG(data);
+      content.push({ type: "text", text: (data?.health?.overall === "ok")
+        ? "Dashboard below. Sync healthy."
+        : `Dashboard below. SYNC ISSUE — figures may be stale: ${((data?.health?.entities ?? []).filter((e: any) => e.status !== "ok").map((e: any) => e.entity).join(", ")) || "unknown"}.` });
+      content.push({ type: "image", data: png, mimeType: "image/png" });
+      content.push({ type: "text", text: `[Figures for your own reference only — do NOT restate them unless asked a specific question. ${summary}]` });
+    } catch (e) {
+      // If rasterising fails the recruiter still needs their numbers.
+      content.push({ type: "text", text: `(Dashboard image failed to render: ${String(e).slice(0, 120)})
+
+${summary}` });
+    }
+    return { content, structuredContent: data, _meta: { ui: { resourceUri: DASH_UI } } };
   }
   if (name === "funnel_report") {
     const { data, error } = await db.rpc("funnel_report", { p_from: args?.from ?? "2026-01-01", p_to: args?.to ?? "2100-01-01", p_consultant: args?.consultant ?? null, p_team: args?.team ?? null });
@@ -1441,26 +1459,6 @@ async function callTool(name: string, args: any, req: Request) {
     }
     return toolText({ mode: "applied", deleted: { entity: ent, identifier: ident, was: spec.label(rec) },
       note: syncEntity ? "Deleted in RecruitCRM. The mirror clears on the next reconcile." : "Deleted in RecruitCRM." });
-  }
-
-  if (name === "render_test") {
-    // Diagnostic for the MCP Apps rendering bug (anthropics/claude-ai-mcp#471): widgets never draw
-    // for custom remote connectors. Images are a different content type and may render inline where
-    // ui:// resources do not. Three encodings, so we learn which — if any — the host draws.
-    const PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAWgAAABaCAIAAAAaQluQAAABZElEQVR42u3csQ2AIABFQXoaGcLJnMRF3MOZrMXWxAGIFhLE+7kJDLxOQjIze7jgE5iZcJhZxXDkfAAUCAcgHIBwAMIBCAcgHMIBCAcgHMAXwzFOG3TD/RcOEA7hAOEQDhAO4QDhEA7hQDgQDhAO4QDhEA4QDuEA4RAO4UA4EA4QDuEA4RAOEA7hAOEQDuFAOBAOEA7hAOEQDhAOb44CwgEgHIBwAMIBCAcgHIBwCAcgHEAr4RjWmf9wPRAOhAPhQDgQDoQD4UA4EA7hEA4QDoQD4UA4EA6EA+FAOBAOhAPhEA6EA+FAOBAOhAPhQDgQDoQD4RAOhAPhQDgQDoQDb44CwgEIB4BwAMIBCAcgHIBwXPYl9s2BAOEQDhAO4QDhEA4QDuEA4RAOQDiEA4RDOEA4hAOEQzhAOIQDEA7hAOEQDvB3LCAcgHAAwiEcgHAAwgEIByAcgHCYmd2fcJiZcJjZ+zsBeHdxkNzmbqcAAAAASUVORK5CYII=";
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="90">
-<rect width="360" height="90" fill="#f6f6f7" stroke="#111" stroke-width="3"/>
-<rect x="12" y="12" width="240" height="18" fill="#2563eb"/>
-<rect x="12" y="40" width="165" height="18" fill="#10b981"/>
-<rect x="12" y="66" width="75" height="12" fill="#f59e0b"/></svg>`;
-    return {
-      content: [
-        { type: "text", text: "Render test. Three encodings of the same bar chart follow: (1) PNG image block, (2) SVG image block, (3) markdown data URI. Tell me which of them you can SEE inline in the conversation." },
-        { type: "image", data: PNG_B64, mimeType: "image/png" },
-        { type: "image", data: btoa(svg), mimeType: "image/svg+xml" },
-        { type: "text", text: `Markdown attempt: ![chart](data:image/png;base64,${PNG_B64})` },
-      ],
-    };
   }
 
   if (name === "reference_list") {
