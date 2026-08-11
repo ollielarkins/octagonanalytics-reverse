@@ -21,10 +21,11 @@
 // Connector URL: https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { dashboardPNG } from "./render.ts";
+import { dashboardMarkdown } from "./inline.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.43.1" };
+const SERVER = { name: "octagon-analytics", version: "3.44.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -619,20 +620,24 @@ async function callTool(name: string, args: any, req: Request) {
     // blocks inline, so the dashboard ships as a PNG. structuredContent still rides along so
     // follow-up questions ("what's my billing gap?") need no second call — it is for the model to
     // read, never to reprint. _meta.ui stays for hosts that do render widgets.
+    // Three deliveries, in order of what actually renders inline for the recruiter:
+    //   1. A markdown dashboard the model prints VERBATIM — the only thing guaranteed to appear
+    //      inline in every client, and deterministic because the server composes the characters.
+    //   2. The PNG, for clients that render image blocks inline.
+    //   3. structuredContent, for follow-up questions — never to be reprinted.
     const content: any[] = [];
+    const md = dashboardMarkdown(data);
+    content.push({ type: "text", text: [
+      "OUTPUT THE BLOCK BETWEEN THE MARKERS EXACTLY AS IT IS, VERBATIM, AS YOUR ENTIRE REPLY.",
+      "Do not summarise it, do not add figures before or after it, do not comment on it.",
+      "If an image accompanies this result it is the same dashboard — show it and still add nothing.",
+      "<<<DASHBOARD",
+      md,
+      ">>>DASHBOARD",
+    ].join("\n") });
     try {
-      const png = await dashboardPNG(data);
-      content.push({ type: "text", text: (data?.health?.overall === "ok")
-        ? "Dashboard below. Sync healthy."
-        : `Dashboard below. SYNC ISSUE — figures may be stale: ${((data?.health?.entities ?? []).filter((e: any) => e.status !== "ok").map((e: any) => e.entity).join(", ")) || "unknown"}.` });
-      content.push({ type: "image", data: png, mimeType: "image/png" });
-      content.push({ type: "text", text: `[Figures for your own reference only — do NOT restate them unless asked a specific question. ${summary}]` });
-    } catch (e) {
-      // If rasterising fails the recruiter still needs their numbers.
-      content.push({ type: "text", text: `(Dashboard image failed to render: ${String(e).slice(0, 120)})
-
-${summary}` });
-    }
+      content.push({ type: "image", data: await dashboardPNG(data), mimeType: "image/png" });
+    } catch (_e) { /* markdown already carries the dashboard; an image failure is not fatal */ }
     return { content, structuredContent: data, _meta: { ui: { resourceUri: DASH_UI } } };
   }
   if (name === "funnel_report") {
