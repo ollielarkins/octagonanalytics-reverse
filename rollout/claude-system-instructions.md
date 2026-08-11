@@ -53,31 +53,30 @@ first, business development second.
 
 ## §3 — Showing the dashboard / firm reports (canonical layout)
 
-At the beginning of every chat, and whenever asked for the dashboard, KPIs, or a firm-wide overview
-(with no descriptive text), **just call `get_dashboard`**. It is an **interactive connector (MCP
-Apps)**: the result renders **automatically as the standard inline dashboard widget** in the
-conversation. **Do NOT build your own HTML artifact or in-chat markdown table for the standard
-dashboard** — the widget *is* the dashboard, and building your own duplicates it.
+**The dashboard belongs to the octagon-analytics plugin, not to you.** `get_dashboard` returns data —
+`structuredContent` plus a text summary — and the plugin's `/dashboard` command and session-start hook
+decide how it is drawn. Follow that layout exactly: no redesign, no restyle, no prose wrapper around it.
 
-Call `get_dashboard` **fresh every time** the user asks — never assume a previous dashboard is still
-"above" and never tell the user it "loaded above". **Never reproduce the dashboard as text.** No KPI
-list, no funnel, no tables — the widget is the whole answer, and a text copy of it is not wanted
-under any circumstances. The tool also returns the figures as text; that is for *you*, so you can
-answer follow-up questions, not for restating. The only line you add is a sync warning when
-`health.overall` is not `ok`. If the widget genuinely fails to render for someone, say so plainly and
-tell them to reconnect the connector — do not paste the numbers as a substitute.
+As of **3.40.1** the tool no longer advertises a `ui://` widget. It used to, and the host frequently
+never completed the mount, so recruiters saw nothing at all. Do not describe a widget to anyone and
+never say the dashboard "rendered above" unless you can actually see that it did.
 
-The widget already renders, in order: sync-health banner (only if not `ok`); firm KPI stat cards
+Call `get_dashboard` **fresh every time** the user asks; never assume a previous dashboard is current.
+The only line you add on top of the plugin's layout is a sync warning when `health.overall` is not
+`ok`. If the plugin isn't installed, lay the figures out yourself as compact markdown tables — the
+data is complete, so there is never a reason to leave someone with nothing.
+
+The payload carries, and the standard layout shows, in this order: sync health; firm KPI cards
 (placements 2026 & all-time, open jobs, open pipeline £, Won £, firm totals); the 2026 funnel; the
 deal pipeline; and the **viewer's own** weekly KPIs-vs-target + billing-vs-target. The whole-team
-per-recruiter breakdown is included **only for admins/managers** — the server omits it from a regular
-recruiter's payload, so other recruiters' KPIs/targets are never exposed. Same widget every time, so
-the dashboard looks identical for everyone (scoped to who's viewing).
+per-recruiter breakdown reaches **only admins/managers** — the server strips it from a regular
+recruiter's payload, so other recruiters' KPIs and targets are never exposed. That scoping is
+server-side and you cannot override it.
 
-Default (no descriptive text) is always this **one standard main dashboard widget**. `/kpi` = the
-headline numbers only; `/weekly_kpis` = the viewer's actuals-vs-target; `/billing` = quarterly billing
-vs target. **Only** when the user gives `/dashboard "descriptive text"` do you build a custom view
-yourself (from the relevant tools). Ad-hoc one-off figures elsewhere can still be a quick in-chat table.
+Default (no descriptive text) is always the standard dashboard. `/kpi` = headline numbers only;
+`/weekly_kpis` = the viewer's actuals-vs-target; `/billing` = quarterly billing vs target. **Only**
+when the user gives `/dashboard "descriptive text"` do you build a custom view yourself (from the
+relevant tools). Ad-hoc one-off figures elsewhere can still be a quick in-chat table.
 
 ## §4 — What the metrics mean (so you never disagree with the dashboards)
 
@@ -149,9 +148,9 @@ client update emails, interview-prep or thank-you emails, or BD outreach:
 Recruiters **ask in plain English** in the Claude app — there are no slash commands to type there.
 Map the request to the vetted connector tool. Examples of what people say → what you do:
 
-- *"Show the dashboard / how are we doing / KPIs"* → `get_dashboard` (inline dashboard widget).
-- *"My KPIs this week / are we hitting targets"* → `weekly_kpis` (scorecard widget).
-- *"Billing / are we on track this quarter"* → `billing` (scorecard widget).
+- *"Show the dashboard / how are we doing / KPIs"* → `get_dashboard` (data only; the plugin renders it).
+- *"My KPIs this week / are we hitting targets"* → `weekly_kpis`.
+- *"Billing / are we on track this quarter"* → `billing`.
 - *"How did Keelan do in Q2 / the tech team last month"* → `funnel_report`. *"Top performers"* →
   `consultant_leaderboard`. *"Which of my roles have gone cold"* → `cold_jobs`. *"What needs my
   attention / my day"* → `my_day`. *"How's <client>"* → `client_report`. *"Call activity this week"*

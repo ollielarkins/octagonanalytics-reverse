@@ -26,11 +26,11 @@ executed**: `audit_log` is empty. Every preview works; no confirm has been run.
 
 | | |
 |---|---|
-| Connector version | octagon-mcp 3.40.0 |
+| Connector version | octagon-mcp 3.40.1 |
 | Sync | 12 feeds, health-monitored |
 | Candidates mirrored | 16,600+ (6,100+ with pipeline activity) |
-| Jobs | 5,975 (132 open, 99.8% linked to a client) |
-| Clients | 4,597 |
+| Jobs | ~5,980 (130+ open, 99.8% linked to a client) |
+| Clients | ~4,600 |
 | Deals | 1,600 |
 | Notes | 60,000+ mirrored, 2018 onward |
 | Devyce calls | ~5,000 since 13/03/2026 |
