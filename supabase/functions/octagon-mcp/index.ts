@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.40.0" };
+const SERVER = { name: "octagon-analytics", version: "3.40.1" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -353,7 +353,7 @@ setTimeout(function(){if(!DONE)document.getElementById('app').innerHTML=
 </script></body></html>`;
 
 const TOOLS = [
-  { name: "get_dashboard", description: "Live Octagon dashboard, scoped to who is asking. A recruiter gets their OWN desk: week vs weekly targets, quarterly billing vs target, their 2026 funnel, and their attention list (aging offers, stalled candidates, cold open roles) — this part names candidates, so it is internal-only, not client-facing. Admins get firm KPIs, the 2026 funnel, deal pipeline and the whole-team breakdown. Always includes sync health. Call at the start of a conversation and for overviews. Renders as an inline dashboard widget.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: DASH_UI, visibility: ["model", "app"] } } },
+  { name: "get_dashboard", description: "Live Octagon dashboard, scoped to who is asking. A recruiter gets their OWN desk: week vs weekly targets, quarterly billing vs target, their 2026 funnel, and their attention list (aging offers, stalled candidates, cold open roles) — this part names candidates, so it is internal-only, not client-facing. Admins get firm KPIs, the 2026 funnel, deal pipeline and the whole-team breakdown. Always includes sync health. Call at the start of a conversation and for overviews. Returns JSON only — the octagon-dashboard skill renders it.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "funnel_report", description: "Recruitment funnel + conversion ratios for a date window, optionally filtered to one consultant (partial name match) or team. Use for 'how did Keelan do in Q2', 'the tech team last month', 'firm funnel this year'. Dates ISO (YYYY-MM-DD); 'to' is exclusive. Defaults to 2026 YTD. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "client_report", description: "Per-client (account) activity for a window: CVs sent, first interviews, placements, open/total jobs, and CV->placed rate, ranked by volume. Use for 'how is <client> doing', 'our busiest accounts this year'. Covers ~99.8% of jobs; a handful with no company on the record are omitted. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, client: { type: "string", description: "client name, partial match" }, limit: { type: "integer" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "time_to_fill", description: "Time-to-fill in days (job created -> first placement) for jobs placed in the window: firm avg/median/min/max plus a per-consultant breakdown. Owner-attributed. Use for 'how long are we taking to fill roles', 'time to fill by consultant'. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -615,7 +615,11 @@ async function callTool(name: string, args: any, req: Request) {
       ];
       summary = parts.filter(Boolean).join(" ") + " " + firmLine;
     }
-    return { content: [{ type: "text", text: summary }], structuredContent: data, _meta: { ui: { resourceUri: DASH_UI } } };
+    // No _meta.ui: the host's fetch-and-mount of the advertised UI resource fails often enough to be
+    // useless, and the reliable render path (octagon-dashboard skill -> visualize) reads
+    // structuredContent, not the widget. Content and structuredContent are unchanged, so every
+    // existing caller is unaffected — this only stops the client attempting a mount that breaks.
+    return { content: [{ type: "text", text: summary }], structuredContent: data };
   }
   if (name === "funnel_report") {
     const { data, error } = await db.rpc("funnel_report", { p_from: args?.from ?? "2026-01-01", p_to: args?.to ?? "2100-01-01", p_consultant: args?.consultant ?? null, p_team: args?.team ?? null });
