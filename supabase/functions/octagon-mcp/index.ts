@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.40.0" };
+const SERVER = { name: "octagon-analytics", version: "3.41.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -243,7 +243,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .behind{color:var(--bad);font-weight:700}.met{color:var(--good);font-weight:600}
 .foot{color:var(--mut);font-size:.7rem;margin-top:5px;line-height:1.4}
 .banner{background:rgba(176,0,32,.12);color:var(--bad);border:1px solid rgba(176,0,32,.3);border-radius:8px;padding:8px 10px;font-size:.78rem;margin-bottom:12px}
-</style></head><body><div id="app"><div class="sub">Loading dashboard…</div></div><script>
+</style></head><body><div id="app"><div style="border:2px dashed #888;border-radius:10px;padding:14px;font:14px system-ui"><b>Octagon dashboard widget v3.41</b><br><span id="stat">loaded — waiting for data from Claude…</span></div></div><script>
 var GBP=function(n){return n==null?'—':'£'+Math.round(Number(n)).toLocaleString('en-GB')};
 var N=function(n){return n==null?'—':Number(n).toLocaleString('en-GB')};
 function esc(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c]})}
@@ -305,8 +305,7 @@ tryRender(dig(m,0))});
 function announce(){window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{capabilities:{},clientInfo:{name:'octagon-dashboard',version:'1.0'},protocolVersion:'2026-01-26',appCapabilities:{availableDisplayModes:['inline','fullscreen']}}},'*')}
 announce();
 [400,1200,2500].forEach(function(t){setTimeout(function(){if(!DONE)announce()},t)});
-setTimeout(function(){if(!DONE)document.getElementById('app').innerHTML=
-'<h1>Octagon Recruitment Dashboard</h1><div class="banner">The dashboard could not load its data. Reconnect the Octagon Analytics connector and ask again — if it keeps happening, ping Ollie on Slack.</div>'},6000);
+setTimeout(function(){if(!DONE){var s=document.getElementById('stat');if(s)s.innerHTML='<b>No data arrived.</b> The widget loaded but Claude never sent the dashboard payload. Reconnect the Octagon Analytics connector and try again.'}},6000);
 </script></body></html>`;
 
 // Shared scorecard widget for weekly_kpis + billing (branches on the payload shape).
