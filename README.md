@@ -57,11 +57,11 @@ not a platform limitation (see [D8](docs/DECISIONS.md) and the leg-A finding bel
 
 ```
 supabase/
-  migrations/       0000–0014, version-controlled schema + semantic layer + functions
+  migrations/       0000–0052, version-controlled schema + semantic layer + functions
   functions/
     recruitcrm-sync/    the sync engine (backfill | incremental | reconcile | history)
     dashboard-data/     public JSON API returning dashboard_json() (aggregates, no PII)
-    octagon-mcp/        the MCP connector: 4 tools (2 read, 2 write)
+    octagon-mcp/        the MCP connector: 69 tools, prompts, OAuth bridge
 web/
   dashboard.html      static page that renders dashboard-data (host anywhere static)
 docs/

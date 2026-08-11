@@ -119,6 +119,9 @@ everywhere at once.
 inside a TypeScript template literal becomes a bare quote in the emitted JS, killing the whole
 widget script. It rendered as a permanent "Loading dashboard…".
 *Guard:* `scripts/check-widgets.js` evaluates the template literal and parses the result.
+*Postscript:* the deeper problem was never the syntax error. Hosts often never mount an advertised
+`ui://` resource from a custom remote connector at all, so a perfect widget still showed nothing.
+`get_dashboard` stopped advertising it in 3.40.1 and the plugin renders the dashboard instead.
 
 **5. The connect page's script was destroyed by WordPress.** `wpautop` injects `</p> <p>` at blank
 lines, including inside `<script>`, which broke both the feedback button and OAuth sign-in.
