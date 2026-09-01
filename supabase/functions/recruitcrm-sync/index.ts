@@ -191,22 +191,29 @@ async function backfillLoop(entity: string, startPage: number, maxPages: number,
 async function incremental(entity: string, ep: string, mapRow: (x: any) => any, table: string) {
   const { data: st } = await db.from("sync_state").select("last_synced_at").eq("entity", entity).maybeSingle();
   const since = st?.last_synced_at ? Date.parse(st.last_synced_at) : 0;
-  let page = 1, more = true, caught = false, upserted = 0, maxSeen = since, stopped: any = null, done = 0;
+  let page = 1, more = true, caught = false, upserted = 0, maxSeen = since, stopped: any = null, done = 0, noId = 0;
   const CAP = 40;
   while (more && !caught && done < CAP) {
     const r = await crm(`/${ep}?page=${page}&sort_by=updatedon&sort_order=desc&limit=100`);
     if (!r.ok) { stopped = r.status; break; }
-    const rows = (r.json?.data ?? []).map((rec: any) => {
+    const rows: any[] = [];
+    for (const rec of (r.json?.data ?? [])) {
       const upd = Date.parse(rec.updated_on ?? rec.created_on ?? "");
       if (upd) { maxSeen = Math.max(maxSeen, upd); if (upd <= since) caught = true; }
-      return mapRow(rec);
-    });
+      // A record with no usable id cannot be keyed. On 21/08/2026 RecruitCRM served a freshly
+      // created candidate with id 0; we mirrored it, and because that row then owned the slug,
+      // every later run tried to INSERT the real record — ON CONFLICT(recruitcrm_id) never
+      // matched — and hit candidates_slug_key instead. One row froze jobs and calls for eleven
+      // days. Skip what we cannot key rather than writing a placeholder id.
+      if (rec?.id == null || rec.id === 0) { noId += 1; continue; }
+      rows.push(mapRow(rec));
+    }
     if (rows.length) await db.from(table).upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
     upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(100);
   }
   const newSince = new Date(Math.max(maxSeen, since)).toISOString();
   await db.from("sync_state").upsert({ entity, last_synced_at: newSince, last_run_at: new Date().toISOString(), last_status: stopped ? `stopped:${stopped}` : caught ? "caught_up" : "page_cap" }, { onConflict: "entity" });
-  return { entity, pages: done, upserted, caught, stopped };
+  return { entity, pages: done, upserted, caught, stopped, skipped_no_id: noId };
 }
 
 async function syncConsultants() {
@@ -396,12 +403,27 @@ Deno.serve(async (req) => {
 
     if (mode === "incremental") {
       const out: any = { mode: "incremental", results: [] };
-      if (entity === "all" || entity === "consultants") out.results.push(await syncConsultants());
-      if (entity === "all" || entity === "clients") out.results.push(await incremental("clients", "companies", mapClient, "clients"));
-      if (entity === "all" || entity === "candidates") out.results.push(await incremental("candidates", "candidates", mapCandidate, "candidates"));
-      if (entity === "all" || entity === "jobs") { const [cb, sb] = await jobMaps(); out.results.push(await incremental("jobs", "jobs", mapJobFactory(cb, sb), "jobs")); }
-      if (entity === "all" || entity === "calls") { const cn = await consNameMap(); out.results.push(await incremental("calls", "call-logs", mapCallFactory(cn), "call_activity")); }
-      if (entity === "all" || entity === "deals") out.results.push(await incremental("deals", "deals", mapDeal, "deals"));
+      // One entity must never be able to abort the ones behind it. A single unmirrorable candidate
+      // threw here on 21/08/2026 and took jobs and calls down with it for eleven days — silently,
+      // because pg_cron records only the HTTP post, not the 500 that came back, and the entities
+      // that never ran kept their last good sync_state row and so still looked merely "stale".
+      // Isolate each step; record the failure against its own entity so sync_health() goes
+      // critical on it (last_status outside the good set is an immediate critical), and leave
+      // last_run_at untouched so the staleness clock keeps running too.
+      const step = async (name: string, fn: () => Promise<any>) => {
+        try { out.results.push(await fn()); }
+        catch (e) {
+          const msg = String(e).slice(0, 200);
+          out.results.push({ entity: name, error: msg });
+          try { await db.from("sync_state").update({ last_status: "error:" + msg }).eq("entity", name); } catch {}
+        }
+      };
+      if (entity === "all" || entity === "consultants") await step("consultants", () => syncConsultants());
+      if (entity === "all" || entity === "clients") await step("clients", () => incremental("clients", "companies", mapClient, "clients"));
+      if (entity === "all" || entity === "candidates") await step("candidates", () => incremental("candidates", "candidates", mapCandidate, "candidates"));
+      if (entity === "all" || entity === "jobs") await step("jobs", async () => { const [cb, sb] = await jobMaps(); return incremental("jobs", "jobs", mapJobFactory(cb, sb), "jobs"); });
+      if (entity === "all" || entity === "calls") await step("calls", async () => { const cn = await consNameMap(); return incremental("calls", "call-logs", mapCallFactory(cn), "call_activity"); });
+      if (entity === "all" || entity === "deals") await step("deals", () => incremental("deals", "deals", mapDeal, "deals"));
       return Response.json(out);
     }
 
