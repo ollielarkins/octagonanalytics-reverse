@@ -1,0 +1,10 @@
+{
+  // The edge functions are Deno modules, not Node/browser TypeScript. Without this, VS Code's
+  // built-in TS server analyses them with the wrong globals and reports every `Deno.` reference
+  // and every `jsr:` import as an error - ~54 phantom problems across the eight functions.
+  // Scoped rather than global: `deno.enable` stays false so anything added outside
+  // supabase/functions is untouched.
+  "deno.enable": false,
+  "deno.enablePaths": ["supabase/functions"],
+  "deno.lint": true
+}
