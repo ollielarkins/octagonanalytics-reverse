@@ -6,18 +6,36 @@
 
 ---
 
-## Status (as of 2026-08-04)
+## Status (as of 2026-09-01)
 
 | Milestone | Status |
 |---|---|
 | **M0** Foundations & access | ✅ Done |
 | **M1** Data model | ✅ Done — migrations 0000–0001 |
-| **M2** Ingestion / sync | ✅ Done — backfill + incremental (2 min) + reconcile + history |
+| **M2** Ingestion / sync | ✅ Done — backfill + incremental (2 min) + reconcile (5 entities) + history |
 | **M3** Semantic layer | ✅ Done — 15 canonical views, 0 security lints |
 | **M4** Dashboards | ✅ Done — JSON API + static page + session-start auto-render |
 | **M5** Claude query layer | ✅ Done — `get_dashboard`, `funnel_report` via `octagon-mcp` |
-| **M6** Claude action layer | ⚠️ Built but **gated off** — needs `OCTAGON_WRITE_KEY` + one live write test |
-| **M7** Hardening & rollout | ◻️ Partial — connector rollout + throwaway-function cleanup outstanding |
+| **M6** Claude action layer | ✅ Done — the `OCTAGON_WRITE_KEY` gate was replaced by per-token `can_write`; 36 audited writes between 12/08 and 20/08/2026 |
+| **M7** Hardening & rollout | ◻️ Partial — see below |
+
+**M7 as it actually stands (01/09/2026)**
+
+Done: sync watchdog with re-alerting and a daily heartbeat digest (0054); nightly reconcile for all
+five mirrored entities, candidates included (0055); covering indexes on every foreign key (0056);
+explicit RLS denial with documented intent on the six service-role-only tables (0057). Security
+advisors are down to a single WARN.
+
+Outstanding:
+- `pg_net` sits in the `public` schema (advisor WARN). Deliberately not moved — every cron job calls
+  `net.http_post`, so relocating the extension breaks the entire sync until each schedule is
+  rewritten. Worth doing as its own change, not as a drive-by.
+- Three pre-existing unused indexes (`candidates_skill_trgm`, `feedback_open_idx`, `deals_slug_idx`).
+  `candidates_skill_trgm` is the interesting one: `match_candidates` ought to be using it and
+  apparently is not.
+- Migration drift: `notes_offlimit_crons_and_health` is applied in the database but has no file in
+  `supabase/migrations/` (the repo stops at 0052, then jumps to 0054).
+- GDPR review, backups/DR and the phased rollout remain as originally scoped.
 
 See [`README.md`](README.md) for the as-built detail. The milestone descriptions below are the
 original plan, kept for reference.
