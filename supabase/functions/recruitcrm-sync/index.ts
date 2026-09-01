@@ -1,6 +1,6 @@
 // recruitcrm-sync — RecruitCRM → Supabase mirror. Locked (verify_jwt=true).
 // Entities: consultants, clients, jobs, candidates, calls (call_activity via /call-logs), deals.
-// Modes: backfill | incremental | reconcile | history (candidate_stage_events).
+// Modes: backfill | backfill_all | incremental | reconcile | history (candidate_stage_events).
 // deals feeds the billing report (Won deal_value); owner-attributed via deals.owner_recruitcrm_id.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -16,6 +16,18 @@ async function crm(path: string) {
   return { ok: res.ok, status: res.status, json, text };
 }
 const nm = (a: any, b: any) => ([a, b].filter(Boolean).join(" ").trim() || null);
+
+// RecruitCRM's paged lists can return the same record twice inside a single page - its ordering
+// shifts as records are updated mid-walk. Postgres rejects an INSERT ... ON CONFLICT whose batch
+// contains the same conflict key twice ("cannot affect row a second time") and fails the WHOLE
+// page, not just the duplicate. That killed the candidate backfill at page ~253 of 518 on
+// 01/09/2026. Keep the last occurrence of each key.
+function dedupeBy(rows: any[], keyOf: (r: any) => any) {
+  const m = new Map<any, any>();
+  for (const r of rows) { const k = keyOf(r); if (k != null) m.set(k, r); }
+  return [...m.values()];
+}
+const byRecruitcrmId = (r: any) => r?.recruitcrm_id;
 
 const mapConsultant = (u: any) => ({
   recruitcrm_id: u.id, name: nm(u.first_name, u.last_name), email: u.email ?? null,
@@ -177,15 +189,17 @@ async function jobMaps() {
 }
 
 async function backfillLoop(entity: string, startPage: number, maxPages: number, ep: string, mapRow: (x: any) => any, table: string) {
-  let page = startPage, more = true, done = 0, upserted = 0, stopped: any = null;
+  let page = startPage, more = true, done = 0, upserted = 0, stopped: any = null, dupes = 0;
   while (more && done < maxPages) {
     const r = await crm(`/${ep}?page=${page}&limit=100`);
     if (!r.ok) { stopped = r.status; break; }
-    const rows = (r.json?.data ?? []).map(mapRow);
+    const raw = (r.json?.data ?? []).map(mapRow);
+    const rows = dedupeBy(raw, byRecruitcrmId);
+    dupes += raw.length - rows.length;
     if (rows.length) await db.from(table).upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
     upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(100);
   }
-  return { entity, pages_processed: done, total_upserted: upserted, stopped, resume_next_page: (stopped || more) ? page : null };
+  return { entity, pages_processed: done, total_upserted: upserted, dupes_dropped: dupes, stopped, resume_next_page: (stopped || more) ? page : null };
 }
 
 async function incremental(entity: string, ep: string, mapRow: (x: any) => any, table: string) {
@@ -196,7 +210,7 @@ async function incremental(entity: string, ep: string, mapRow: (x: any) => any, 
   while (more && !caught && done < CAP) {
     const r = await crm(`/${ep}?page=${page}&sort_by=updatedon&sort_order=desc&limit=100`);
     if (!r.ok) { stopped = r.status; break; }
-    const rows: any[] = [];
+    const raw: any[] = [];
     for (const rec of (r.json?.data ?? [])) {
       const upd = Date.parse(rec.updated_on ?? rec.created_on ?? "");
       if (upd) { maxSeen = Math.max(maxSeen, upd); if (upd <= since) caught = true; }
@@ -206,8 +220,9 @@ async function incremental(entity: string, ep: string, mapRow: (x: any) => any, 
       // matched — and hit candidates_slug_key instead. One row froze jobs and calls for eleven
       // days. Skip what we cannot key rather than writing a placeholder id.
       if (rec?.id == null || rec.id === 0) { noId += 1; continue; }
-      rows.push(mapRow(rec));
+      raw.push(mapRow(rec));
     }
+    const rows = dedupeBy(raw, byRecruitcrmId);
     if (rows.length) await db.from(table).upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
     upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(100);
   }
@@ -220,14 +235,18 @@ async function syncConsultants() {
   const r = await crm(`/users`);
   if (!r.ok) return { entity: "consultants", stopped: r.status };
   const arr = Array.isArray(r.json) ? r.json : r.json?.data ?? [];
-  const rows = arr.map(mapConsultant);
+  const rows = dedupeBy(arr.map(mapConsultant), byRecruitcrmId);
   if (rows.length) await db.from("consultants").upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
   await db.from("sync_state").upsert({ entity: "consultants", last_synced_at: new Date().toISOString(), last_run_at: new Date().toISOString(), last_status: "ok" }, { onConflict: "entity" });
   return { entity: "consultants", upserted: rows.length };
 }
 
 async function reconcilePaged(entity: string, ep: string, table: string) {
-  let page = 1, more = true, done = 0, stopped: any = null; const ids: number[] = []; const CAP = 200;
+  // 200 pages = 20,000 records. RecruitCRM holds ~51,700 candidates, so the old cap meant the
+  // candidates reconcile could NEVER complete: it would fetch 20,000, see more remaining, and
+  // correctly refuse to act - but keep reporting a fresh last_run_at, so health showed green while
+  // it did nothing at all. 600 pages = 60,000, with headroom.
+  let page = 1, more = true, done = 0, stopped: any = null; const ids: number[] = []; const CAP = 600;
   while (more && done < CAP) {
     const r = await crm(`/${ep}?page=${page}&limit=100`);
     if (!r.ok) { stopped = r.status; break; }
@@ -277,6 +296,30 @@ async function runBg(entity: string, fn: () => Promise<any>) {
 // webhooks fire entity=candidates, which refreshes the candidate ROW; they never touched the event
 // stream. A full re-walk is 16,600 API calls, but only ~500 candidates change in a week, so the
 // recent walk is the right shape for keeping up.
+// Self-resuming full backfill for candidates.
+//
+// The candidate mirror held 17,346 of RecruitCRM's ~51,700 - the original backfill was never driven
+// to completion, and because backfillLoop defaults to ONE page (100 records) per call, finishing it
+// means ~518 chained invocations. Doing that by hand through pg_net does not work: a 90-page chunk
+// takes over 55s and the caller times out mid-flight, and pg_net then fails DNS under its own load.
+//
+// So: run in the background (the response returns immediately, so no caller timeout) and persist
+// resume_next_page in sync_state.cursor, so each invocation continues where the last one stopped.
+async function backfillCandidatesResumable(startPageParam: string | null, maxPages: number) {
+  const key = "backfill:candidates";
+  const { data: st } = await db.from("sync_state").select("cursor,last_status").eq("entity", key).maybeSingle();
+  if (st?.last_status === "complete" && !startPageParam) return { entity: "candidates", complete: true, note: "already complete" };
+  const from = parseInt(startPageParam ?? st?.cursor ?? "1", 10);
+  const res = await backfillLoop("candidates", from, maxPages, "candidates", mapCandidate, "candidates");
+  await db.from("sync_state").upsert({
+    entity: key,
+    cursor: res.resume_next_page ? String(res.resume_next_page) : null,
+    last_run_at: new Date().toISOString(),
+    last_status: res.resume_next_page ? `page=${res.resume_next_page} +${res.total_upserted}` : "complete",
+  }, { onConflict: "entity" });
+  return { ...res, started_at_page: from };
+}
+
 async function historyMaps() {
   const [{ data: sl }, cons] = await Promise.all([
     db.from("stage_lookup").select("recruitcrm_stage_id,stage_metric,stage_name"),
@@ -298,11 +341,11 @@ async function historyMaps() {
 async function historyForCandidate(cand: any, maps: any) {
   const r = await crm(`/candidates/${cand.slug}/history`);
   if (!r.ok) return { ok: false, status: r.status, events: 0 };
-  const rows: any[] = [];
+  const raw: any[] = [];
   for (const e of (Array.isArray(r.json) ? r.json : [])) {
     const s = maps.byId.get(e.candidate_status_id) ?? maps.byLabel.get(String(e.candidate_status ?? "").toLowerCase());
     if (!s || !e.updated_on || !e.job_slug) continue;
-    rows.push({
+    raw.push({
       candidate_id: cand.recruitcrm_id, candidate_slug: cand.slug, candidate_name: cand.name,
       job_slug: e.job_slug, job_id: maps.jobId.get(e.job_slug) ?? null, job_title: e.job_name ?? null,
       consultant_id: e.updated_by ?? null, consultant: maps.consName.get(e.updated_by) ?? null,
@@ -310,6 +353,8 @@ async function historyForCandidate(cand: any, maps: any) {
       event_timestamp: e.updated_on, event_date: String(e.updated_on).slice(0, 10),
     });
   }
+  // Same ON CONFLICT hazard on the composite natural key.
+  const rows = dedupeBy(raw, (x: any) => `${x.candidate_slug}|${x.job_slug}|${x.stage_metric}|${x.event_timestamp}`);
   if (rows.length) await db.from("candidate_stage_events").upsert(rows, { onConflict: "candidate_slug,job_slug,stage_metric,event_timestamp" }).throwOnError();
   return { ok: true, status: 200, events: rows.length };
 }
@@ -408,6 +453,16 @@ Deno.serve(async (req) => {
     }
 
     if (mode === "offlimit") return Response.json(await syncOffLimit());
+
+    if (mode === "backfill_all") {
+      if (entity !== "candidates") return Response.json({ error: "backfill_all currently supports entity=candidates only" }, { status: 400 });
+      const maxP = parseInt(url.searchParams.get("max_pages") ?? "150", 10);
+      const sp = url.searchParams.get("start_page");
+      const fn = () => backfillCandidatesResumable(sp, maxP);
+      try { (globalThis as any).EdgeRuntime?.waitUntil(runBg("backfill:candidates", fn)); }
+      catch { return Response.json(await fn()); }
+      return Response.json({ mode: "backfill_all", entity, status: "started (background)" }, { status: 202 });
+    }
 
     // Notes have no sort parameter, so there is no cursor to follow — but the list is newest-first,
     // so re-walking the first few pages keeps the mirror current. Records sync_state so the feed is
