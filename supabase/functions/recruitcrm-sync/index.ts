@@ -281,11 +281,15 @@ async function historyMaps() {
   const [{ data: sl }, cons] = await Promise.all([
     db.from("stage_lookup").select("recruitcrm_stage_id,stage_metric,stage_name"),
     allRows("consultants", "recruitcrm_id,name"),
+    allRows("jobs", "slug,recruitcrm_id"),
   ]);
   return {
     byId: new Map((sl ?? []).map((s: any) => [s.recruitcrm_stage_id, s])),
     byLabel: new Map((sl ?? []).map((s: any) => [String(s.stage_name).toLowerCase(), s])),
     consName: new Map(cons.map((c: any) => [c.recruitcrm_id, c.name])),
+    // job_id was never populated on candidate_stage_events — all 19,786 rows were null, so job
+    // identity survived only through job_slug and every report had to join back through it.
+    jobId: new Map(jobs.map((j: any) => [j.slug, j.recruitcrm_id])),
   };
 }
 
@@ -300,7 +304,7 @@ async function historyForCandidate(cand: any, maps: any) {
     if (!s || !e.updated_on || !e.job_slug) continue;
     rows.push({
       candidate_id: cand.recruitcrm_id, candidate_slug: cand.slug, candidate_name: cand.name,
-      job_slug: e.job_slug, job_title: e.job_name ?? null,
+      job_slug: e.job_slug, job_id: maps.jobId.get(e.job_slug) ?? null, job_title: e.job_name ?? null,
       consultant_id: e.updated_by ?? null, consultant: maps.consName.get(e.updated_by) ?? null,
       stage_name: s.stage_name, stage_metric: s.stage_metric,
       event_timestamp: e.updated_on, event_date: String(e.updated_on).slice(0, 10),
@@ -341,30 +345,54 @@ async function syncHistory(maxCandidates: number) {
 // without it every run would redo the same first N candidates and never reach the tail.
 // sleepMs paces against RecruitCRM's rate limit: 50ms (~4.6 req/s in practice) earns a 429, so the
 // default is deliberately slower. Ordinary runs are ~90 candidates and finish well inside it.
+async function markWalked(recruitcrmId: any) {
+  try { await db.from("candidates").update({ history_walked_at: new Date().toISOString() }).eq("recruitcrm_id", recruitcrmId); } catch {}
+}
+
+// A work queue, not a time window.
+//
+// This previously took the N most-recently-updated candidates inside a one-day window, with offset
+// pinned at 0. Two ways that lost events, both silent, and both one-directional — it could only
+// ever under-count, never over-count:
+//
+//   * The cap sat below daily churn. 27/08/2026 touched 170 candidates against max_candidates=50.
+//     Everything past the cap was never walked, and because the window only looked back one day it
+//     was never revisited either.
+//   * It read updated_date from OUR mirror, so it inherited the candidates poller's health. While
+//     that poller was down (21/08–01/09/2026) a candidate whose row never refreshed never entered
+//     the window at all, whatever they actually did in RecruitCRM.
+//
+// The funnel is the single source for every CV-send, interview and offer figure we publish, so both
+// surfaced as numbers that were quietly and permanently low. A candidate is now due when we have
+// never walked it, or when its record changed since our last walk. The backlog drains instead of
+// falling off the tail, and a poller outage delays the walk rather than erasing it.
 async function syncHistoryRecent(days: number, maxCandidates: number, offset = 0, sleepMs = 600) {
-  const since = new Date(Date.now() - days * 86400000).toISOString();
   const maps = await historyMaps();
-  const { data: cands } = await db.from("candidates")
-    .select("recruitcrm_id,slug,name,updated_date")
-    .gte("updated_date", since)
-    .order("updated_date", { ascending: false })
-    .range(offset, offset + maxCandidates - 1);
+  const { data: cands, error: qErr } = await db.rpc("candidates_due_for_history", { p_limit: maxCandidates });
+  if (qErr) throw qErr;
 
   let events = 0, processed = 0, skipped = 0, stopped: any = null;
   for (const cand of (cands ?? [])) {
     const res = await historyForCandidate(cand, maps);
     if (!res.ok) {
-      if (res.status === 429) { stopped = 429; break; }
-      skipped++; continue;
+      if (res.status === 429) { stopped = 429; break; }   // back off; leave it due for the next run
+      // 404 and friends: mark it walked anyway. Left due, a permanently-missing candidate sits at
+      // the head of the queue and burns a slot on every run, forever.
+      skipped++; await markWalked(cand.recruitcrm_id); continue;
     }
-    events += res.events; processed++; await sleep(sleepMs);
+    events += res.events; processed++;
+    await markWalked(cand.recruitcrm_id);
+    await sleep(sleepMs);
   }
-  const status = stopped ? `stopped:${stopped}@offset${offset + processed}` : `days=${days} cands=${processed} +${events}ev`;
-  // Only the routine (offset 0) run marks freshness — a chunked catch-up shouldn't reset the clock.
+
+  const { count: queued } = await db.from("candidates")
+    .select("recruitcrm_id", { count: "exact", head: true })
+    .is("history_walked_at", null);
+  const status = stopped ? `stopped:${stopped}@${processed}` : `cands=${processed} +${events}ev queue=${queued ?? 0}`;
   const row: any = { entity: "history_recent", last_run_at: new Date().toISOString(), last_status: status };
-  if (offset === 0 && !stopped) row.last_synced_at = new Date().toISOString();
+  if (!stopped) row.last_synced_at = new Date().toISOString();
   await db.from("sync_state").upsert(row, { onConflict: "entity" });
-  return { entity: "history_recent", days, offset, candidates_seen: (cands ?? []).length, processed, skipped, events, stopped, next_offset: offset + processed };
+  return { entity: "history_recent", candidates_seen: (cands ?? []).length, processed, skipped, events, stopped, never_walked_remaining: queued ?? 0 };
 }
 
 Deno.serve(async (req) => {
