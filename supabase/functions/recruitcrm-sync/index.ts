@@ -66,6 +66,9 @@ const mapCandidate = (c: any) => ({
   city: c.city ?? null, country: c.country ?? null, source: c.source ?? null,
   skill: Array.isArray(c.skill) ? c.skill.join(", ") : (c.skill ?? null),
   created_date: c.created_on ?? null, updated_date: c.updated_on ?? null,
+  // Stamped on every list sync. A row not stamped during a completed backfill pass no longer
+  // exists in RecruitCRM - see retire_unseen_candidates().
+  last_seen_at: new Date().toISOString(),
 });
 function mapCallFactory(consName: Map<any, any>) {
   return (x: any) => ({
@@ -307,17 +310,35 @@ async function runBg(entity: string, fn: () => Promise<any>) {
 // resume_next_page in sync_state.cursor, so each invocation continues where the last one stopped.
 async function backfillCandidatesResumable(startPageParam: string | null, maxPages: number) {
   const key = "backfill:candidates";
-  const { data: st } = await db.from("sync_state").select("cursor,last_status").eq("entity", key).maybeSingle();
-  if (st?.last_status === "complete" && !startPageParam) return { entity: "candidates", complete: true, note: "already complete" };
+  const { data: st } = await db.from("sync_state").select("cursor,last_status,last_synced_at").eq("entity", key).maybeSingle();
+  const done = st?.last_status?.startsWith("complete") || st?.last_status?.includes('"complete":true');
+  if (done && !startPageParam) return { entity: "candidates", complete: true, note: "already complete" };
+
+  // A pass starts when we are handed an explicit start_page, or when there is no cursor to resume.
+  // last_synced_at carries that pass's start time across the several invocations a full pass takes.
+  const fresh = !!startPageParam || !st?.cursor;
   const from = parseInt(startPageParam ?? st?.cursor ?? "1", 10);
+  const passStart = (!fresh && st?.last_synced_at) ? st.last_synced_at : new Date().toISOString();
+
   const res = await backfillLoop("candidates", from, maxPages, "candidates", mapCandidate, "candidates");
+  const complete = !res.resume_next_page;
+
+  // Only a COMPLETE pass can retire anything: a partial pass has not seen the whole live list, so
+  // every unstamped row would look deleted. Same reasoning as reconcilePaged's partial-fetch guard.
+  let retired: any = null;
+  if (complete) {
+    const { data, error } = await db.rpc("retire_unseen_candidates", { p_pass_start: passStart });
+    retired = error ? `error:${error.message}` : data;
+  }
+
   await db.from("sync_state").upsert({
     entity: key,
     cursor: res.resume_next_page ? String(res.resume_next_page) : null,
+    last_synced_at: complete ? new Date().toISOString() : passStart,
     last_run_at: new Date().toISOString(),
-    last_status: res.resume_next_page ? `page=${res.resume_next_page} +${res.total_upserted}` : "complete",
+    last_status: complete ? `complete retired=${retired}` : `page=${res.resume_next_page} +${res.total_upserted}`,
   }, { onConflict: "entity" });
-  return { ...res, started_at_page: from };
+  return { ...res, started_at_page: from, pass_start: passStart, complete, retired };
 }
 
 async function historyMaps() {
@@ -459,7 +480,17 @@ Deno.serve(async (req) => {
       const maxP = parseInt(url.searchParams.get("max_pages") ?? "150", 10);
       const sp = url.searchParams.get("start_page");
       const fn = () => backfillCandidatesResumable(sp, maxP);
-      try { (globalThis as any).EdgeRuntime?.waitUntil(runBg("backfill:candidates", fn)); }
+      // Deliberately NOT runBg. backfillCandidatesResumable maintains its own sync_state row, and
+      // runBg would overwrite last_status with a JSON dump of the result - which breaks the
+      // "already complete" check and makes the drain restart a full 518-page pass every few
+      // minutes instead of stopping. Keep runBg's error handling, drop its success write.
+      const guarded = async () => {
+        try { await fn(); }
+        catch (e) {
+          try { await db.from("sync_state").update({ last_status: "error:" + String(e).slice(0, 200) }).eq("entity", "backfill:candidates"); } catch {}
+        }
+      };
+      try { (globalThis as any).EdgeRuntime?.waitUntil(guarded()); }
       catch { return Response.json(await fn()); }
       return Response.json({ mode: "backfill_all", entity, status: "started (background)" }, { status: 202 });
     }
