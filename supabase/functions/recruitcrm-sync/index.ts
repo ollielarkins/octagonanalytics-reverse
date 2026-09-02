@@ -377,7 +377,23 @@ async function historyForCandidate(cand: any, maps: any) {
   // Same ON CONFLICT hazard on the composite natural key.
   const rows = dedupeBy(raw, (x: any) => `${x.candidate_slug}|${x.job_slug}|${x.stage_metric}|${x.event_timestamp}`);
   if (rows.length) await db.from("candidate_stage_events").upsert(rows, { onConflict: "candidate_slug,job_slug,stage_metric,event_timestamp" }).throwOnError();
-  return { ok: true, status: 200, events: rows.length };
+
+  // This endpoint returns the candidate's COMPLETE current history, so anything we hold for them
+  // that is not in the response no longer exists upstream - an assignment removed, a stage move
+  // undone, records merged. Without this the table is append-only and drifts permanently high: we
+  // end up holding everything the API has ever said rather than what it says now. Measured against
+  // RecruitCRM's own report before this landed: Jan +16, Jul +15, Aug +7, current week 0.
+  //
+  // Deleting rather than soft-deleting is safe here because every row is re-derivable from the API,
+  // so a wrong prune self-heals on the next walk.
+  let pruned = 0;
+  try {
+    const keep = rows.map((r: any) => ({ job_slug: r.job_slug, stage_metric: r.stage_metric, event_timestamp: r.event_timestamp }));
+    const { data: pr } = await db.rpc("prune_candidate_events", { p_candidate_slug: cand.slug, p_keep: keep });
+    pruned = pr ?? 0;
+  } catch { /* leave the row set as-is; the next walk retries */ }
+
+  return { ok: true, status: 200, events: rows.length, pruned };
 }
 
 async function syncHistory(maxCandidates: number) {
@@ -437,7 +453,7 @@ async function syncHistoryRecent(days: number, maxCandidates: number, offset = 0
   const { data: cands, error: qErr } = await db.rpc("candidates_due_for_history", { p_limit: maxCandidates });
   if (qErr) throw qErr;
 
-  let events = 0, processed = 0, skipped = 0, stopped: any = null;
+  let events = 0, processed = 0, skipped = 0, pruned = 0, stopped: any = null;
   for (const cand of (cands ?? [])) {
     const res = await historyForCandidate(cand, maps);
     if (!res.ok) {
@@ -446,7 +462,7 @@ async function syncHistoryRecent(days: number, maxCandidates: number, offset = 0
       // the head of the queue and burns a slot on every run, forever.
       skipped++; await markWalked(cand.recruitcrm_id); continue;
     }
-    events += res.events; processed++;
+    events += res.events; processed++; pruned += (res as any).pruned ?? 0;
     await markWalked(cand.recruitcrm_id);
     await sleep(sleepMs);
   }
@@ -454,11 +470,11 @@ async function syncHistoryRecent(days: number, maxCandidates: number, offset = 0
   const { count: queued } = await db.from("candidates")
     .select("recruitcrm_id", { count: "exact", head: true })
     .is("history_walked_at", null);
-  const status = stopped ? `stopped:${stopped}@${processed}` : `cands=${processed} +${events}ev queue=${queued ?? 0}`;
+  const status = stopped ? `stopped:${stopped}@${processed}` : `cands=${processed} +${events}ev -${pruned}ev queue=${queued ?? 0}`;
   const row: any = { entity: "history_recent", last_run_at: new Date().toISOString(), last_status: status };
   if (!stopped) row.last_synced_at = new Date().toISOString();
   await db.from("sync_state").upsert(row, { onConflict: "entity" });
-  return { entity: "history_recent", candidates_seen: (cands ?? []).length, processed, skipped, events, stopped, never_walked_remaining: queued ?? 0 };
+  return { entity: "history_recent", candidates_seen: (cands ?? []).length, processed, skipped, events, pruned, stopped, never_walked_remaining: queued ?? 0 };
 }
 
 Deno.serve(async (req) => {
