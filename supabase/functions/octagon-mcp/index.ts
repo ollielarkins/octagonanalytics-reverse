@@ -96,7 +96,12 @@ async function resolveDeal(q: string) {
 // rather than dig out a slug.
 async function resolveCandidate(q: string) {
   const s = q.trim();
+  // Soft-deleted candidates must never resolve. Until 02/09/2026 nothing had ever been written to
+  // candidates.deleted_at (the reconcile had never completed), so the missing filter was harmless.
+  // With the retire pass working, an unfiltered read surfaces people who no longer exist in
+  // RecruitCRM - and acting on one 404s at the API.
   const { data } = await db.from("candidates").select("slug,name,recruitcrm_id")
+    .is("deleted_at", null)
     .or(`slug.eq.${s},name.ilike.%${s}%`).limit(5);
   return data ?? [];
 }
@@ -175,7 +180,7 @@ async function currentStage(candidate: string, job: string) {
 }
 async function refreshCandidate(candidate: string) {
   const [{ data: cand }, byId, { data: cons }] = await Promise.all([
-    db.from("candidates").select("recruitcrm_id,name").eq("slug", candidate).maybeSingle(),
+    db.from("candidates").select("recruitcrm_id,name").is("deleted_at", null).eq("slug", candidate).maybeSingle(),
     stageLookup(),
     db.from("consultants").select("recruitcrm_id,name"),
   ]);
@@ -1082,7 +1087,7 @@ async function callTool(name: string, args: any, req: Request) {
     // Duplicate candidates are the classic CRM mess, and an API makes them easy to create by
     // accident. Check before writing, not after.
     const full = [args.first_name, args.last_name].filter(Boolean).join(" ");
-    let dupQ = db.from("candidates").select("slug,name,email").limit(5);
+    let dupQ = db.from("candidates").select("slug,name,email").is("deleted_at", null).limit(5);
     dupQ = args.email ? dupQ.or(`email.eq.${args.email},name.ilike.${full}`) : dupQ.ilike("name", full);
     const { data: dups } = await dupQ;
     if (dups?.length) {
@@ -1437,14 +1442,31 @@ async function callTool(name: string, args: any, req: Request) {
     const body = await res.text();
     if (!res.ok) return toolText({ error: "recruitcrm_error", status: res.status, detail: body.slice(0, 300) });
     await audit({ actor: String(actor.id), action: "delete_record", entity: ent, entity_id: ident, before: { label: spec.label(rec), record: rec }, after: null, via: "claude" });
-    // The mirror still holds the row; the nightly reconcile soft-deletes it. Nudge the relevant sync.
-    const syncEntity = ent === "job" ? "jobs" : ent === "candidate" ? "candidates" : ent === "company" ? "clients" : ent === "deal" ? "deals" : null;
-    if (syncEntity) {
-      await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=${syncEntity}`,
-        { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    // Clear the mirror row here, directly. The old code fired an incremental sync and claimed the
+    // mirror would catch up - but incremental only walks records that still EXIST, so a just-deleted
+    // record is never in the list and the call did nothing at all. The row then survived until the
+    // reconcile, which for candidates had itself never completed. Deleting upstream and leaving the
+    // row here means the next person to search still finds them.
+    const mirror: Record<string, { table: string; col: string; soft: boolean }> = {
+      candidate: { table: "candidates", col: "slug",         soft: true  },
+      job:       { table: "jobs",       col: "slug",         soft: true  },
+      company:   { table: "clients",    col: "company_slug", soft: true  },
+      deal:      { table: "deals",      col: "slug",         soft: false },  // deals has no deleted_at
+    };
+    const m = mirror[ent];
+    let mirror_cleared: any = null;
+    if (m) {
+      try {
+        const q = m.soft
+          ? db.from(m.table).update({ deleted_at: new Date().toISOString() }).eq(m.col, ident)
+          : db.from(m.table).delete().eq(m.col, ident);
+        const { data: hit, error } = await q.select(m.col);
+        mirror_cleared = error ? `error:${error.message}` : (hit?.length ?? 0);
+      } catch (e) { mirror_cleared = "error:" + String(e).slice(0, 120); }
     }
     return toolText({ mode: "applied", deleted: { entity: ent, identifier: ident, was: spec.label(rec) },
-      note: syncEntity ? "Deleted in RecruitCRM. The mirror clears on the next reconcile." : "Deleted in RecruitCRM." });
+      mirror_cleared,
+      note: m ? "Deleted in RecruitCRM and cleared from the mirror immediately." : "Deleted in RecruitCRM." });
   }
 
   if (name === "reference_list") {
