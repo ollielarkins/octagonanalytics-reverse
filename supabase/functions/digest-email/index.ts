@@ -273,11 +273,22 @@ function renderWeekly(d: any) {
     ["right", "right", "right", "right"]),
     "Missing means the note was never logged, not that the qualifying call never happened.");
 
+  // cold_jobs returns job_title (not title), and days_since_activity is NULL for a role that has
+  // had NO activity ever rather than for a missing figure. Those sort first and are labelled — an
+  // open role nobody has touched since it was raised matters more than one that has gone quiet.
+  const coldSorted = [...cold].sort((a: any, b: any) =>
+    (b.days_since_activity ?? Infinity) - (a.days_since_activity ?? Infinity));
   inner += section("Cold open roles", table(
-    ["Role", "Client", "Owner", "Days quiet"],
-    cold.slice(0, 12).map((j: any) => [esc(j.title ?? j.job ?? "—"), esc(j.client ?? "—"),
-      esc(j.consultant ?? j.owner ?? "—"), `<b>${esc(j.days_since_activity ?? j.days ?? "—")}</b>`]),
-    ["left", "left", "left", "right"]));
+    ["Role", "Client", "Owner", "Quiet for"],
+    coldSorted.slice(0, 12).map((j: any) => [
+      esc(j.job_title ?? "—"),
+      esc(j.client || "no client on record"),
+      esc(j.consultant ?? "—"),
+      j.days_since_activity == null
+        ? `<span style="color:${C.warn};"><b>never active</b></span>`
+        : `<b>${esc(j.days_since_activity)}d</b>`]),
+    ["left", "left", "left", "right"]),
+    "Roles with no activity at all since they were raised are listed first.");
 
   if (kpis.length) {
     inner += section("This week vs target", table(
