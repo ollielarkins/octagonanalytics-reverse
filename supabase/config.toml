@@ -53,3 +53,8 @@ verify_jwt = true
 
 [functions.storage-upload]
 verify_jwt = true
+
+[functions.digest-email]
+# Renders and sends Ollie's scheduled digests. Driven by pg_cron via send_digest_if_due(), which
+# presents the bearer from app_settings.cron_bearer. Holds RESEND_API_KEY, so it stays locked.
+verify_jwt = true
