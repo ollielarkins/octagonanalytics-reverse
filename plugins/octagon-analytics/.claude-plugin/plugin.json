@@ -2,7 +2,7 @@
   "name": "octagon-analytics",
   "displayName": "Octagon Analytics",
   "version": "1.0.0",
-  "description": "Live RecruitCRM recruitment analytics for Octagon recruiters, through a vetted metrics layer that matches the dashboards exactly. Bundles the Octagon connector plus /kpi and /dashboard commands.",
+  "description": "Live RecruitCRM recruitment analytics for Octagon recruiters, through a vetted metrics layer that matches the dashboards exactly. Bundles the Octagon connector plus 56 commands covering reporting, pipeline actions, content and admin.",
   "author": {
     "name": "Octagon Group",
     "email": "Olarkins@octagongroup.co.uk"
