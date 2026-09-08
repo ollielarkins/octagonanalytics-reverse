@@ -9,7 +9,7 @@
     {
       "name": "octagon-analytics",
       "source": "./plugins/octagon-analytics",
-      "description": "Live recruitment analytics through the vetted metrics layer: dashboards, funnel/client reports, /kpi and /dashboard, and the gated write actions. Bundles the Octagon connector."
+      "description": "Live recruitment analytics through the vetted metrics layer, plus 56 commands: reporting (/funnel /billing /chase /week), pipeline actions (/move /assign /pitch), records (/newcandidate /newjob /delete), and writing (/advert /boolean /email). Every write previews first and applies only on explicit confirmation. Bundles the Octagon connector."
     }
   ]
 }
