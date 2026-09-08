@@ -11,7 +11,7 @@ warn that the figures below may be stale. If it is `"ok"`, a one-line "sync heal
 Then present the full dashboard as compact markdown tables — no heavy styling:
 - the KPI cards,
 - the 2026 funnel,
-- per-consultant performance (attributed by job owner),
+- per-consultant performance (attributed to whoever MOVED the stage, not the job owner),
 - the deal pipeline.
 
 If the tool returns an authentication error, tell the user their `OCTAGON_MCP_TOKEN` is missing or
