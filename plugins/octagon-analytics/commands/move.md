@@ -13,16 +13,28 @@ the job is ambiguous, STOP and list the matches — never guess which person is 
 
 | Stage | status_id |
 |---|---|
+| Shortlist | 511685 |
 | CV Sent | 390955 |
 | Interview Request | 381800 |
 | 1st Interview | 381799 |
 | 2nd Interview | 381801 |
+| 3rd Interview | 394846 |
 | Offered | 381805 |
 | Placed | 8 |
+| Rejected — Client | 381802 |
+| Rejected — Consultant | 481042 |
 
-If the recruiter asks for a stage not in that table (3rd Interview, Shortlist, a rejection), say you
-do not have a verified status_id for it and stop. Do not guess an id — a wrong one moves the
-candidate to the wrong stage in live RecruitCRM.
+These ten are verified against `stage_lookup` and are the full mapped set. RecruitCRM also has
+Assigned (1) and Applied (10), but they carry no funnel metric — moving someone there records
+nothing in any report. Say so rather than doing it silently.
+
+If a stage is asked for that is not in that table, say you do not have a verified status_id and
+stop. Never guess an id: a wrong one moves the candidate to the wrong stage in live RecruitCRM and
+nobody notices until the numbers are wrong.
+
+**Rejections.** "Rejected — Client" means the client turned them down; "Rejected — Consultant"
+means we screened them out. They are not interchangeable and they drive `rejection_report`. If the
+recruiter just says "reject them", ask which.
 
 **Step 3 — show and ask.** Show the preview verbatim: candidate, job, current stage, proposed
 stage. Ask for explicit confirmation.
