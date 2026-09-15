@@ -127,3 +127,7 @@ Admins see the whole team. Identity comes from the token server-side.
 Everything else — `funnel_report`, `client_report`, `rejection_report`, `fee_analysis`,
 `consultant_leaderboard` — is unscoped for everyone, matching the firm's documented "all recruiters
 see all data" position.
+
+---
+
+**See also:** [Metrics and Definitions](Metrics-and-Definitions) for what each tool's numbers mean · [Data Caveats](Data-Caveats) for where they are soft · [Onboarding](Onboarding) for how to ask

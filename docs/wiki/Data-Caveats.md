@@ -7,29 +7,52 @@ Everything here is measured, not estimated. Figures as at 10/08/2026.
 
 ---
 
-## Call categorisation — 26.6%
+## Call categorisation
 
-**The big one.** BD and client call KPIs key off `custom_call_type`, and only 1,327 of 4,995 Devyce
-calls are tagged.
+> [!CAUTION]
+> **This is the biggest soft spot in the platform, and it is getting worse.** BD and client call
+> KPIs count only *categorised* Devyce calls. Categorisation has fallen from 26% to 9% since May.
 
-| Consultant | Calls since 01/07 | Tagged | Rate |
+Only 1,850 of 10,331 calls carry a `custom_call_type` — 17.9% overall, and the trend is the story:
+
+| Month | Calls | Tagged | Rate |
 |---|---|---|---|
-| Steve Bernat | 55 | 26 | 47.3% |
-| Tarah Williams | 158 | 67 | 42.4% |
-| Scott Newcomen | 209 | 83 | 39.7% |
-| Bhavesh Patel | 145 | 46 | 31.7% |
-| Keelan Riley | 303 | 91 | 30.0% |
-| Adam Barnett | 240 | 72 | 30.0% |
-| Jennifer Seress | 345 | 80 | 23.2% |
-| Georgia Cook | 397 | 71 | 17.9% |
-| Chloe Edwards | 273 | 44 | 16.1% |
+| May 2026 | 727 | 189 | 26.0% |
+| June | 2,029 | 530 | 26.1% |
+| July | 2,066 | 484 | 23.4% |
+| August | 3,625 | 476 | 13.1% |
+| September (to 15th) | 1,882 | 169 | **9.0%** |
 
-Note the shape: **the busiest desks tag least**. Georgia and Chloe make the most calls and record
-the least about them, so their BD and client KPIs look worst precisely because they're busiest.
-Never coach off those two numbers without checking the tagging rate first.
+Call volume nearly doubled from July to August while tagging halved. Weekly targets are 5 BD and 5
+client calls; at a 9% tag rate a recruiter making ten real BD calls records about one. **The KPI is
+now roughly a tenth of reality, and falling.**
 
-The recruiter dashboard now shows each person their own rate beside the KPI. The fix is behavioural,
-not technical.
+Per consultant since 01/08/2026:
+
+| Consultant | Calls | Tagged | Rate |
+|---|---|---|---|
+| Bhavesh Patel | 128 | 53 | 41.4% |
+| Adam Barnett | 388 | 72 | 18.6% |
+| Scott Newcomen | 605 | 112 | 18.5% |
+| Tarah Williams | 385 | 67 | 17.4% |
+| Keelan Riley | 633 | 101 | 16.0% |
+| Will Drake | 403 | 62 | 15.4% |
+| Steve Bernat | 145 | 18 | 12.4% |
+| Jennifer Seress | 822 | 73 | 8.9% |
+| Dale Barnett | 129 | 10 | 7.8% |
+| Georgia Cook | 1,449 | 75 | 5.2% |
+| Chloe Edwards | 361 | 2 | **0.6%** |
+| Lewis Hay | 59 | 0 | **0%** |
+
+The shape from the original analysis still holds — **the busiest desks tag least**. Georgia makes the
+most calls of anyone and tags one in twenty. Chloe has tagged twice since August. Never coach off a
+BD or client call number without checking the tagging rate beside it.
+
+Only four categories carry real volume: Contact – Prospect (BD) 800, Contact – Client 540,
+Candidate – Job Pitch/Qualifying 238, Interview Feedback 160. Everything else is negligible.
+
+The recruiter dashboard shows each person their own rate beside the KPI. The fix is behavioural, not
+technical — but at 9% the metric is arguably not worth reporting until tagging recovers.
 
 ---
 
@@ -170,3 +193,7 @@ is the only route to a per-placement fee.
 been used. `audit_log` is empty — no write has ever been made.
 
 Any conclusion drawn from usage data is drawn from almost no usage.
+
+---
+
+**See also:** [Metrics and Definitions](Metrics-and-Definitions) for the intended definition · [Operations Runbook](Operations-Runbook) for fixing a feed · [Architecture](Architecture) for how data arrives

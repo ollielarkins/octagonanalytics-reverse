@@ -148,3 +148,7 @@ Two caveats that matter when quoting these:
   tagging.
 - **There is also a `Job Lead` deal stage** with zero deals in it. If anyone starts using it, leads
   will exist in two places and will need reconciling before either figure is quoted.
+
+---
+
+**See also:** [Data Caveats](Data-Caveats) for where these definitions meet messy data · [Tools Reference](Tools-Reference) for which tool reports what · [Architecture](Architecture) for where the numbers come from

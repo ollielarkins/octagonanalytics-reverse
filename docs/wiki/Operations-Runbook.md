@@ -180,3 +180,7 @@ version endpoint and one real tool call would have caught the first two within s
 Confirm whether PITR is enabled. `daily_activity` (1,839 rows) was dropped on 10/08/2026 and, if it
 isn't, that data is unrecoverable. It was a partial, superseded copy — but the general point stands
 for anything dropped in future.
+
+---
+
+**See also:** [Architecture](Architecture) for how the pieces fit · [Data Caveats](Data-Caveats) for known soft spots · [Metrics and Definitions](Metrics-and-Definitions) for what you might break

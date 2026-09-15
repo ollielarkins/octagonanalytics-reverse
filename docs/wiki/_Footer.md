@@ -1,0 +1,1 @@
+**Source of truth for these pages is [`docs/wiki/`](https://github.com/ollielarkins/octagonanalytics-reverse/tree/main/docs/wiki) in the repo — edit there, then sync.** Editing a page in the GitHub UI will be overwritten on the next sync. · Last reviewed 15/09/2026

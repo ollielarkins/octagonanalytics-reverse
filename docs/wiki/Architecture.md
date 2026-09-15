@@ -75,13 +75,18 @@ Three things are worth knowing:
 Webhooks are the fast path; the polling sync stays as the guarantee. Deliveries get missed, and the
 poll is what makes the mirror converge anyway.
 
-> ### `dashboard-data` is unauthenticated
->
+## `dashboard-data` is unauthenticated
+
+> [!WARNING]
 > `GET /functions/v1/dashboard-data` returns firm Won revenue, the full funnel, the deal pipeline and
-> **every consultant by name with their individual figures** — with no token, key or header. The URL
-> appears in `README.md`, this wiki and `web/dashboard.html`, in a repo that is public on GitHub.
-> Treat this as an open exposure until it is either authenticated or reduced to fields that are
-> genuinely safe to publish.
+> **every consultant by name with their individual figures** — with no token, key or header.
+
+The URL appears in `README.md`, this wiki and `web/dashboard.html`, in a repo that is public on
+GitHub. Anyone who finds it can read Octagon's revenue and every consultant's performance.
+
+Open as of 15/09/2026. It stays open until the endpoint is either authenticated or reduced to fields
+that are genuinely safe to publish — and `web/dashboard.html` is the thing to check first, since it
+is what currently depends on the endpoint being open.
 
 **Twelve entities are health-monitored**: candidates, clients, consultants, jobs, calls, deals, plus
 the three nightly reconciles. Live entities warn at 10 minutes stale and go critical at 30;
@@ -162,3 +167,7 @@ web/                   OAuth login handoff page
 - **Unbounded selects** remain on `stage_lookup` and `consultants`. Both are far under the 1,000-row
   cap so they're safe today, but they should use the `allRows` helper — an unbounded select on
   `clients` is what caused the 40% orphaned-jobs bug.
+
+---
+
+**See also:** [Operations Runbook](Operations-Runbook) for running and fixing it · [Data Caveats](Data-Caveats) for what the pipeline cannot tell you · [Metrics and Definitions](Metrics-and-Definitions) for the layer on top

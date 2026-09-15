@@ -7,7 +7,26 @@ RecruitCRM stays the system of record. This platform mirrors it into Supabase, d
 exactly once, and serves those definitions to both the dashboards and Claude — so the two can never
 disagree.
 
-## Start here
+> [!WARNING]
+> **`dashboard-data` is unauthenticated and this repo is public.** Firm revenue and every
+> consultant's individual figures are readable by anyone with the URL. See
+> [Architecture](Architecture#dashboard-data-is-unauthenticated). Open as of 15/09/2026.
+
+---
+
+## I want to…
+
+| | Go to |
+|---|---|
+| Get set up and connected | [Onboarding](Onboarding) → Part 1 |
+| Know what I can ask it | [Tools Reference](Tools-Reference) |
+| Understand what a number counts | [Metrics and Definitions](Metrics-and-Definitions) |
+| Check whether a number can be trusted | [Data Caveats](Data-Caveats) |
+| Work out why something looks wrong | [Data Caveats](Data-Caveats), then [Runbook → Incidents](Operations-Runbook#incidents--10082026) |
+| Deploy, backfill, or mint a token | [Operations Runbook](Operations-Runbook) |
+| Understand how the data flows | [Architecture](Architecture) |
+
+## The pages
 
 | Page | For |
 |---|---|
@@ -18,6 +37,8 @@ disagree.
 | **[Architecture](Architecture)** | How data gets from RecruitCRM to your screen. |
 | **[Operations Runbook](Operations-Runbook)** | Deploys, backfills, tokens, incidents. Admins only. |
 
+---
+
 ## Current state — 15/09/2026
 
 Live and in use. The write path is broad — jobs, deals, candidates, companies, contacts, pitches,
@@ -25,19 +46,32 @@ meetings, tasks, hotlists, email and deletions — and **has now been used**: `a
 entries, the first real writes landing 12–20/08/2026 (21 hiring-stage moves, 9 candidates, 6
 contacts). Every write stays two-step: preview, then an explicit confirm.
 
+### The platform
+
 | | |
 |---|---|
-| Connector version | octagon-mcp 3.44.0 |
+| Connector | octagon-mcp 3.44.0 — 50 tools, 26 prompts |
+| Commands | 57 slash commands, all exercised 15/09/2026 |
 | Sync | 13 feeds, health-monitored, plus a cron manifest watchdog |
-| Candidates mirrored | 52,158 (19,500+ with pipeline activity) |
+| Webhooks | 15 subscriptions, including the four `*.deleted` events |
+| Active tokens | 5 — four people plus one OAuth session |
+
+### The data
+
+| | |
+|---|---|
+| Candidates | 52,158 (19,500+ with pipeline activity) |
 | Jobs | 6,025 (142 open) |
 | Clients | 4,703 |
 | Deals | 1,642 |
-| Notes | 100,271 mirrored, 2018 onward |
-| Devyce calls | 10,323 |
+| Notes | 100,271, 2018 onward |
+| Devyce calls | 10,331 — but only from 13/03/2026, and see the warning below |
 | Off limit | 87 in RecruitCRM, all flagged here — excluded from shortlists |
-| Webhook subscriptions | 15, including the four `*.deleted` events |
-| Active tokens | 5 — four people plus one OAuth session |
+
+> [!CAUTION]
+> **Call categorisation is falling and the BD/client call KPIs depend on it.** 26% in May, 9% in
+> September. Those targets are measured only from *categorised* Devyce calls, so they now understate
+> reality by roughly ten to one. See [Data Caveats](Data-Caveats#call-categorisation).
 
 ### What changed on 15/09/2026
 
@@ -56,6 +90,8 @@ Restored, and hardened against the same class of failure:
   to a job. Now hidden from operational surfaces, deliberately left in history.
 - Webhook payloads were being routed to the wrong entity — 68 job and 16 company payloads were
   spent refreshing candidates. Fixed, and deletions now tombstone on arrival.
+
+---
 
 ## Ground rules
 
