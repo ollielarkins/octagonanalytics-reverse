@@ -32,15 +32,18 @@ Two things are set on your token when it's created:
 
 If the connector has already been pushed out org-wide, you may only need to enable it and sign in.
 
-**Claude Code:** set your token as an environment variable and restart, then install the plugin:
+Use it in **Cowork** or an ordinary **chat** — both work the same way and both read the same data.
+There is nothing extra to install.
 
-```powershell
-[Environment]::SetEnvironmentVariable('OCTAGON_MCP_TOKEN','<your token>','User')
-```
+### Step 2b. Turn auto mode on
 
-If the connector's tools are missing or every call returns an authentication error, that variable is
-unset or holds a revoked token. Tokens were rotated on 15/09/2026 — anything issued before that date
-is dead.
+In Cowork, switch **auto mode** on before you start. Without it you are asked to approve each step
+individually, which turns a ten-second answer into a dozen clicks and is the single most common
+reason people give up on it in the first week.
+
+If the connector's tools are missing, or everything returns an authentication error, your token is
+wrong or revoked. Tokens were rotated on 15/09/2026 — anything issued before that date is dead, so
+ask Ollie for a new one rather than trying to fix it.
 
 ### Step 3. Check it worked
 
