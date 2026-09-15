@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.41.0" };
+const SERVER = { name: "octagon-analytics", version: "3.42.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -197,6 +197,43 @@ async function refreshCandidate(candidate: string) {
   return rows.length;
 }
 async function audit(entry: any) { try { await db.from("audit_log").insert(entry); } catch (_e) {} }
+
+// ---- Closure reasons -------------------------------------------------------
+// RecruitCRM keeps a reason slot on job status changes (job_status_comment[].remark) and on deal
+// stage changes (deal_stage_remarks[].reason) - every sample we hold has it blank. Whether its
+// UPDATE endpoints ACCEPT one is unconfirmed, so the reason is deliberately NOT added to the update
+// payload: an unknown field risking a 400 would break job closure itself. It is written as a note on
+// the record and logged structurally in closure_reason_log, which is what closure_reasons_report
+// reads. If the native field is confirmed later, sending it too is purely additive.
+async function closureReasonList(kind: string): Promise<string[]> {
+  const { data } = await db.from("closure_reasons").select("label").eq("kind", kind).eq("active", true).order("sort");
+  return (data ?? []).map((r: any) => r.label);
+}
+async function resolveClosureReason(kind: string, given: any): Promise<{ reason: string } | { valid: string[] }> {
+  const valid = await closureReasonList(kind);
+  const want = String(given ?? "").trim().toLowerCase();
+  const hit = valid.find((v) => v.toLowerCase() === want);
+  return hit ? { reason: hit } : { valid };
+}
+async function recordClosureReason(kind: "job" | "deal", slug: string, recordName: string | null,
+                                   newStatus: string | null, reason: string, detail: string | null, actorId: any) {
+  const text = (kind === "job" ? "Job closed" : "Deal lost") + " - reason: " + reason + (detail ? ". " + detail : "");
+  let noteOk = false;
+  try {
+    const body: any = { description: text, related_to: slug, related_to_type: kind, updated_by: actorId };
+    if (kind === "job") body.associated_jobs = [slug]; else body.associated_deals = [slug];
+    const r = await crm("POST", "/notes", body);
+    noteOk = !!r.ok;
+  } catch (_e) { noteOk = false; }
+  // The log must never fail the write it describes.
+  try {
+    await db.from("closure_reason_log").insert({ kind, record_slug: slug, record_name: recordName,
+      new_status: newStatus, reason, detail: detail ?? null, actor_recruitcrm_id: actorId ?? null, note_written: noteOk });
+  } catch (_e) { /* ignore */ }
+  return noteOk;
+}
+const JOB_CLOSING = ["closed", "cancelled", "canceled", "on hold", "on-hold", "onhold"];
+const DEAL_LOSING = ["lost", "declined"];
 // Fire-and-forget usage telemetry (no PII args) — feeds admin_digest()/the Slack bot.
 function logCall(actorId: any, tool: string, ok = true) {
   db.from("mcp_call_log").insert({ consultant_recruitcrm_id: actorId ?? null, tool, ok }).then(() => {}, () => {});
@@ -397,14 +434,14 @@ const TOOLS = [
   { name: "activity_report", description: "Meetings or tasks logged in RecruitCRM for a date window, optionally for one consultant. Meetings are where CLIENT VISITS live — the activity the business asks about that no other tool here reports. Tasks are the to-do layer. Defaults to the last 30 days and to YOU; pass consultant to see someone else, or all=true for the firm. kind: meetings | tasks. Read-only.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meetings or tasks" }, from: { type: "string", description: "YYYY-MM-DD, default 30 days ago" }, to: { type: "string", description: "YYYY-MM-DD, default today" }, consultant: { type: "string", description: "consultant name; omit for yourself" }, all: { type: "boolean", description: "true = whole firm" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "post_digest", description: "Post one of the Octagon digests to Slack on demand: 'morning' (what needs chasing today, plus the previous working day), 'evening' (a complete day: stage activity, calls, placements, new jobs) or 'weekly' (last week's funnel, cold roles, job order forms). These normally post on a schedule — 07:30 and 17:30 weekdays, 08:00 Monday — so use this only when someone explicitly asks for one NOW, e.g. before a meeting. WRITE, two-step, EXPLICIT-ONLY and OUTWARD-FACING: it posts into a Slack channel other people read and cannot be unsent. Call without confirm for a preview of the headline, then confirm=true. The posts name candidates, so the channel must be internal.", inputSchema: { type: "object", properties: { kind: { description: "morning | evening | weekly", type: "string" }, confirm: { description: "false/omitted = preview only; true = actually post", type: "boolean" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "log_activity", description: "Log a meeting (e.g. a client visit) or a task in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Link it to a client, job or candidate so it shows against that record. Meetings need a start and end; tasks need only a start. Times are 'YYYY-MM-DD HH:MM'. Created by and owned by you. Use for 'log my visit to X yesterday', 'remind me to chase Y on Friday'.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meeting or task" }, title: { type: "string" }, start: { type: "string", description: "YYYY-MM-DD HH:MM" }, end: { type: "string", description: "YYYY-MM-DD HH:MM — meetings only" }, description: { type: "string" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, candidate: { type: "string", description: "candidate name to link" }, type_id: { type: "integer", description: "meeting/task type id — see reference_list" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind", "title", "start"], additionalProperties: false } },
-  { name: "update_deal", description: "Change a deal in RecruitCRM — most importantly moving it to Won and entering the value, which IS how billing is recorded at Octagon. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the deal by its numeric ID, slug, or part of its name. stage accepts a stage name (Won, Lost, Open, CV Sent, Interview Request, 1st/2nd/3rd Interview, Offered, Declined, Job Lead) resolved against the live pipeline. Note RecruitCRM requires name, value, stage and close_date on every edit, so the tool reads the deal first and preserves anything you don't change.", inputSchema: { type: "object", properties: { deal: { type: "string", description: "deal ID, slug, or part of the name" }, stage: { type: "string", description: "target stage name" }, value: { type: "number", description: "deal value (the fee)" }, name: { type: "string", description: "rename the deal" }, close_date: { type: "string", description: "YYYY-MM-DD" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["deal"], additionalProperties: false } },
+  { name: "update_deal", description: "Change a deal in RecruitCRM — most importantly moving it to Won and entering the value, which IS how billing is recorded at Octagon. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the deal by its numeric ID, slug, or part of its name. stage accepts a stage name (Won, Lost, Open, CV Sent, Interview Request, 1st/2nd/3rd Interview, Offered, Declined, Job Lead) resolved against the live pipeline. Note RecruitCRM requires name, value, stage and close_date on every edit, so the tool reads the deal first and preserves anything you don't change.", inputSchema: { type: "object", properties: { deal: { type: "string", description: "deal ID, slug, or part of the name" }, stage: { type: "string", description: "target stage name" }, value: { type: "number", description: "deal value (the fee)" }, name: { type: "string", description: "rename the deal" }, close_date: { type: "string", description: "YYYY-MM-DD" }, reason: { type: "string", description: "why the deal was lost - only for stage Lost/Declined. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["deal"], additionalProperties: false } },
   { name: "create_deal", description: "Create a deal in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Requires a name, a value, a stage and a close date. Optionally link it to a job, client or candidate. Billing is Won deal value, so a deal is how revenue enters the system — created owned by and attributed to you.", inputSchema: { type: "object", properties: { name: { type: "string", description: "deal name" }, value: { type: "number", description: "deal value (the fee)" }, stage: { type: "string", description: "stage name, e.g. Open or Job Lead" }, close_date: { type: "string", description: "YYYY-MM-DD" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["name", "value", "stage", "close_date"], additionalProperties: false } },
   { name: "pitch_history", description: "Speculative pitches recorded in RecruitCRM — who has been pitched to whom, and when. This is the 'pitched candidates' activity the business asks about; it lives in RecruitCRM's pitch feature, which nothing else in this platform reads. Give a candidate (name or slug) to see everywhere they've been pitched, or a contact slug to see everyone pitched to them, or both for that pair's history. Returns candidate and contact names (PII). Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string", description: "contact slug" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "pitch_candidate", description: "Record a speculative pitch in RecruitCRM: candidate X pitched to contact Y. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview naming both people, get approval, then confirm=true. Identify the contact by contact_slug, or by client (company name) plus optionally contact_name. Optionally pass stage_id to move an existing pitch to a different pitch stage instead (see reference_list kind=pitch_stages). Attributed to you.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string" }, client: { type: "string", description: "company name, to find the contact" }, contact_name: { type: "string", description: "narrows the contacts at that client" }, stage_id: { type: "integer", description: "move an existing pitch to this stage instead of creating one" }, remark: { type: "string", description: "note against a stage change" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "delete_record", description: "PERMANENTLY DELETE a record in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY and IRREVERSIBLE — there is no undo and no restore. Call without confirm to get a preview naming the exact record; show that to the recruiter verbatim and get explicit approval; only then call again with confirm=true. entity: job, candidate, company, contact, deal, note, task, meeting, invoice, placement, hotlist, call_log. Jobs/candidates/companies/contacts/deals are identified by slug (a job also accepts its numeric ID); the rest by numeric ID. Never call this speculatively, never to 'clean up', and never on a record the recruiter has not explicitly named.", inputSchema: { type: "object", properties: { entity: { type: "string", description: "what kind of record" }, id: { type: "string", description: "slug, or numeric ID depending on entity" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = permanently delete" }, ...AUTH_ARG }, required: ["entity", "id"], additionalProperties: false } },
   { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
-  { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
+  { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
   { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
 ];
@@ -1333,6 +1370,16 @@ async function callTool(name: string, args: any, req: Request) {
     };
     if (body.deal_stage == null) return toolText({ error: "Could not determine the deal's current stage, so an edit would clear it. Pass stage explicitly." });
 
+    const dealLosing = !!stage && DEAL_LOSING.includes(String(stage.label).toLowerCase());
+    let dealReason: string | null = null;
+    const dealDetail: string | null = args.reason_detail != null ? String(args.reason_detail) : null;
+    if (dealLosing && args.reason != null && String(args.reason).trim() !== "") {
+      const res: any = await resolveClosureReason("deal", args.reason);
+      if (res.valid) return toolText({ error: "unknown_reason", given: args.reason, valid_reasons: res.valid,
+        instruction: "Pick one of valid_reasons. For anything else use reason='Other' with reason_detail." });
+      dealReason = res.reason;
+    }
+
     if (!args.confirm) {
       const before = { name: c.name ?? deal.deal_name, value: c.deal_value ?? deal.deal_value, stage: curStageLabel, close_date: curClose };
       const after = { name: body.name, value: body.deal_value, stage: stage ? stage.label : curStageLabel, close_date: body.close_date };
@@ -1340,6 +1387,10 @@ async function callTool(name: string, args: any, req: Request) {
       return toolText({ mode: "preview", action: "update_deal", deal_id: deal.recruitcrm_id, before, after, changing: changed,
         billing_note: (stage && String(stage.label).toLowerCase() === "won") ? "Moving a deal to Won records it as BILLED revenue." : undefined,
         carried_forward: "RecruitCRM requires all four fields on an edit; unchanged ones are re-sent as-is.",
+        ...(dealLosing ? (dealReason
+          ? { lost_reason: dealReason, lost_reason_detail: dealDetail }
+          : { lost_reason: null, reason_options: await closureReasonList("deal"),
+              reason_prompt: "Optional: ask why the deal was lost, then call again with reason=<one of reason_options> and optional reason_detail. Losing without a reason is allowed." }) : {}),
         instruction: "Show before/after to the recruiter. To apply, call again with confirm=true." });
     }
 
@@ -1349,7 +1400,14 @@ async function callTool(name: string, args: any, req: Request) {
       before: { name: deal.deal_name, stage: deal.deal_stage, value: deal.deal_value }, after: body, via: "claude" });
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=deals`,
       { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
-    return toolText({ mode: "applied", deal_id: deal.recruitcrm_id, name: body.name, stage: stage ? stage.label : curStageLabel, value: body.deal_value, note: "Deal updated in RecruitCRM and the mirror refreshed." });
+    let dealReasonResult: any = undefined;
+    if (dealLosing && dealReason) {
+      const noteOk = await recordClosureReason("deal", deal.slug, body.name, stage ? String(stage.label) : null, dealReason, dealDetail, actor.id);
+      dealReasonResult = { reason: dealReason, detail: dealDetail, note_written: noteOk,
+        note: noteOk ? "Reason saved as a note on the deal and logged for reporting."
+                     : "Reason logged for reporting, but the note could not be written to RecruitCRM." };
+    }
+    return toolText({ mode: "applied", deal_id: deal.recruitcrm_id, name: body.name, stage: stage ? stage.label : curStageLabel, value: body.deal_value, lost_reason: dealReasonResult, note: "Deal updated in RecruitCRM and the mirror refreshed." });
   }
 
   if (name === "create_deal") {
@@ -1645,11 +1703,25 @@ async function callTool(name: string, args: any, req: Request) {
     const changing = Object.entries(fields).filter(([k, v]) => k !== "updated_by" && v !== undefined && v !== null);
     if (!changing.length) return toolText({ error: "Nothing to change — pass at least one field (status, title, description, openings, salary_min/max, city, country)." });
 
+    const jobClosing = args.status != null && JOB_CLOSING.includes(String(args.status).toLowerCase());
+    let jobReason: string | null = null;
+    const jobDetail: string | null = args.reason_detail != null ? String(args.reason_detail) : null;
+    if (jobClosing && args.reason != null && String(args.reason).trim() !== "") {
+      const res: any = await resolveClosureReason("job", args.reason);
+      if (res.valid) return toolText({ error: "unknown_reason", given: args.reason, valid_reasons: res.valid,
+        instruction: "Pick one of valid_reasons. For anything else use reason='Other' with reason_detail." });
+      jobReason = res.reason;
+    }
+
     if (!args.confirm) {
       return toolText({ mode: "preview", action: "update_job",
         job: { job_id: job.recruitcrm_id, title: job.title, current_status: job.status },
         changes: Object.fromEntries(changing.map(([k, v]) => [k === "job_status" ? "status" : k, k === "job_status" ? JOB_STATUS_NAME[v as number] : v])),
         untouched: "every other field is left exactly as it is",
+        ...(jobClosing ? (jobReason
+          ? { closure_reason: jobReason, closure_reason_detail: jobDetail }
+          : { closure_reason: null, reason_options: await closureReasonList("job"),
+              reason_prompt: "Optional: ask why the role is closing, then call again with reason=<one of reason_options> and optional reason_detail. Closing without a reason is allowed." }) : {}),
         instruction: "Show this to the recruiter. To apply, call again with confirm=true." });
     }
 
@@ -1658,7 +1730,14 @@ async function callTool(name: string, args: any, req: Request) {
     await audit({ actor: String(actor.id), action: "update_job", entity: "job", entity_id: job.slug, before: { title: job.title, status: job.status }, after: fields, via: "claude" });
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=jobs`,
       { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
-    return toolText({ mode: "applied", job_id: job.recruitcrm_id, job_title: job.title, changed: Object.keys(Object.fromEntries(changing)), note: "Job updated in RecruitCRM and the mirror refreshed." });
+    let jobReasonResult: any = undefined;
+    if (jobClosing && jobReason) {
+      const noteOk = await recordClosureReason("job", job.slug, job.title, String(args.status), jobReason, jobDetail, actor.id);
+      jobReasonResult = { reason: jobReason, detail: jobDetail, note_written: noteOk,
+        note: noteOk ? "Reason saved as a note on the job and logged for reporting."
+                     : "Reason logged for reporting, but the note could not be written to RecruitCRM." };
+    }
+    return toolText({ mode: "applied", job_id: job.recruitcrm_id, job_title: job.title, changed: Object.keys(Object.fromEntries(changing)), closure_reason: jobReasonResult, note: "Job updated in RecruitCRM and the mirror refreshed." });
   }
 
   if (name === "assign_candidate") {
