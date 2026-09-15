@@ -50,6 +50,24 @@ These are data-entry errors in RecruitCRM and should be corrected at source.
 
 ---
 
+## Deleted records are hidden from operations, not from history
+
+Ratified 15/09/2026. A deleted candidate, job, client or deal is tombstoned with `deleted_at` and
+disappears from **operational** surfaces — search, matching, the live deal pipeline, chase lists. It
+stays in **historical** counts: the funnel, activity, rankings and revenue.
+
+The reason is that deleting a candidate must not silently drop their CV sends out of last quarter's
+numbers. The work happened. Retroactively rewriting history would also move parity against
+RecruitCRM's own report, which is measured against fixed periods. The same principle already applies
+to leavers: credited to whoever did the work, never reattributed.
+
+Before 15/09/2026 the tombstone hid nothing at all — `delete_record` set `deleted_at`, but no read
+path checked it, so a deleted candidate still came back in search and could still be matched to a job
+and pitched to a client.
+
+Deletion is detected two ways: instantly via the `*.deleted` webhooks, and by reconcile page-walks as
+the backstop. A deletion made while a webhook delivery fails is caught within the hour.
+
 ## 64 ghost deals
 
 64 rows carry a null `recruitcrm_id`. The reconcile skips nulls and the backfill matches on that

@@ -15,11 +15,11 @@ immediately so the mirror doesn't lag behind a change you just made.
 
 | Component | What it is | Auth |
 |---|---|---|
-| `octagon-mcp` | Remote MCP server. 69 tools plus the prompt library; returns data, not presentation | Open — per-user Octagon tokens + OAuth 2.1 bridge |
+| `octagon-mcp` | Remote MCP server. 50 tools plus 26 prompts; returns data, not presentation | Open — per-user Octagon tokens + OAuth 2.1 bridge |
 | `recruitcrm-sync` | The mirror. Modes: backfill, incremental, reconcile, history_recent, notes_recent, offlimit | Locked — Supabase JWT |
 | `recruitcrm-webhook` | Near-real-time change trigger from RecruitCRM | Open — external caller |
 | `feedback` | Issue/feedback box on the connect page | Open — validated, rate-limited |
-| `dashboard` / `dashboard-data` | Static dashboard page and its JSON | Open — public, no PII |
+| `dashboard` / `dashboard-data` | Static dashboard page and its JSON | **Open — genuinely unauthenticated. See the warning below** |
 | `slack-command` | Slack entry point | Open — external caller |
 | `recruitcrm-probe` / `recruitcrm-discover` | Read-only API shape probes. Temporary | Locked |
 
@@ -32,16 +32,56 @@ Page size 100, 100ms between pages.
 
 | Job | Schedule |
 |---|---|
-| Incremental sync (all entities) | Every 2 minutes |
-| History resync | Every minute |
-| Sync health watchdog | Every 5 minutes |
-| Reconcile — consultants | 03:00 daily |
-| Reconcile — clients | 03:10 |
-| Reconcile — jobs | 03:20 |
-| Reconcile — deals | 03:30 |
+| Incremental sync (all entities) | Every 15 minutes |
+| Candidate stage history (recent) | Every minute |
 | Notes (re-walk newest pages) | Every 15 minutes |
-| Candidate stage history (recent) | Every 10 minutes |
+| Candidates deletion pass — starts | Hourly at :40 |
+| Candidates deletion pass — drains | Every 3 minutes |
+| Reconcile — clients | Hourly at :05 |
+| Reconcile — jobs | Hourly at :12 |
+| Reconcile — deals | Hourly at :18 |
+| Reconcile — consultants | 03:00 daily |
 | Off-limit refresh | 03:25 daily |
+| Sync health watchdog | Every 5 minutes |
+| Cron manifest watchdog | Every 10 minutes |
+
+The reconciles are staggered at :05, :12 and :18 so they never contend with each other or with the
+candidates pass on the half hour. They are full page-walks — 47 pages for clients, 61 for jobs, 16
+for deals, ~520 for candidates — because that is the only way to detect a deletion by polling.
+
+The candidates pass and its drain are a **pair**: the pass (`start_page=1`) resets the cursor and
+begins a walk, the drain resumes it across the ~13 chunks a full pass needs. Neither works alone.
+Restoring one without the other, as happened on 15/09/2026, means the pass restarts forever and
+never completes, so `retire_unseen_candidates` never runs at all.
+
+## Webhooks
+
+RecruitCRM pushes changes to `recruitcrm-webhook`. 15 subscriptions are registered, including
+`candidate.deleted`, `job.deleted`, `company.deleted`, `deal.deleted`,
+`candidate.hiringstage.updated`, `deal.stage.updated` and `job.status.updated`.
+
+Three things are worth knowing:
+
+1. **RecruitCRM never names the event in the body.** Every payload is a full record with no
+   `event`/`type` field. Since we choose the `target_url` per subscription, the name rides on the URL
+   (`?event=job.deleted`) and the handler reads it from there.
+2. **Routing is by record shape, not keywords.** The original router keyword-scanned the whole body
+   in a fixed order, and a job payload contains `note_for_candidates`, so it matched the candidate
+   rule first — 68 job and 16 company payloads were routed to "candidates" and spent refreshing the
+   wrong entity. It now trusts the event name, falling back to distinctive top-level keys.
+3. **Deletions are handled, not synced.** The incremental sync only walks records that still exist,
+   so firing it for a delete does nothing at all. The row is tombstoned directly instead.
+
+Webhooks are the fast path; the polling sync stays as the guarantee. Deliveries get missed, and the
+poll is what makes the mirror converge anyway.
+
+> ### `dashboard-data` is unauthenticated
+>
+> `GET /functions/v1/dashboard-data` returns firm Won revenue, the full funnel, the deal pipeline and
+> **every consultant by name with their individual figures** — with no token, key or header. The URL
+> appears in `README.md`, this wiki and `web/dashboard.html`, in a repo that is public on GitHub.
+> Treat this as an open exposure until it is either authenticated or reduced to fields that are
+> genuinely safe to publish.
 
 **Twelve entities are health-monitored**: candidates, clients, consultants, jobs, calls, deals, plus
 the three nightly reconciles. Live entities warn at 10 minutes stale and go critical at 30;

@@ -98,6 +98,24 @@ Used by `my_day` and `stalled_report`, on **open roles only**:
 The 60-day ceiling is deliberate. Beyond that a candidate is abandoned, not stalled, and including
 them produced a list of 1,517 items that nobody could act on.
 
+## Closure reasons
+
+Recorded when a job is closed (closed, cancelled, on hold) or a deal is moved to Lost or Declined.
+Optional, picked from a configured list in `closure_reasons`, with free text alongside. Any other
+deal stage move takes free text only.
+
+`closure_reasons_report` counts them by reason over a window. Two limits on reading it:
+
+- It counts **only what was recorded through Claude**. A job closed directly in RecruitCRM with a
+  reason typed into their UI is not in `closure_reason_log`.
+- Because it is optional, a reason's absence means "nobody said", not "no reason". Do not compute a
+  percentage over closures that have no reason recorded.
+
+## Deleted records
+
+Hidden from operational surfaces, kept in historical counts — see
+[Data Caveats](Data-Caveats). Deleting a candidate does not change last quarter's CV sends.
+
 ## Conventions
 
 - Money: £ with thousands separators — £45,000. Pence only when exact.

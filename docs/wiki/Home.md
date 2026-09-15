@@ -18,26 +18,44 @@ disagree.
 | **[Architecture](Architecture)** | How data gets from RecruitCRM to your screen. |
 | **[Operations Runbook](Operations-Runbook)** | Deploys, backfills, tokens, incidents. Admins only. |
 
-## Current state — 10/08/2026
+## Current state — 15/09/2026
 
-Live and in use for reads. The write path exists and is broad — jobs, deals, candidates, companies,
-contacts, pitches, meetings, tasks, hotlists, email and deletions — but **no write has ever been
-executed**: `audit_log` is empty. Every preview works; no confirm has been run.
+Live and in use. The write path is broad — jobs, deals, candidates, companies, contacts, pitches,
+meetings, tasks, hotlists, email and deletions — and **has now been used**: `audit_log` holds 44
+entries, the first real writes landing 12–20/08/2026 (21 hiring-stage moves, 9 candidates, 6
+contacts). Every write stays two-step: preview, then an explicit confirm.
 
 | | |
 |---|---|
-| Connector version | octagon-mcp 3.40.1 |
-| Sync | 12 feeds, health-monitored |
-| Candidates mirrored | 16,600+ (6,100+ with pipeline activity) |
-| Jobs | ~5,980 (130+ open, 99.8% linked to a client) |
-| Clients | ~4,600 |
-| Deals | 1,600 |
-| Notes | 60,000+ mirrored, 2018 onward |
-| Devyce calls | ~5,000 since 13/03/2026 |
-| Off limit | 88 in RecruitCRM, 61 flagged here — excluded from shortlists |
-| Adoption | 2 people have ever used it |
+| Connector version | octagon-mcp 3.44.0 |
+| Sync | 13 feeds, health-monitored, plus a cron manifest watchdog |
+| Candidates mirrored | 52,158 (19,500+ with pipeline activity) |
+| Jobs | 6,025 (142 open) |
+| Clients | 4,703 |
+| Deals | 1,642 |
+| Notes | 100,271 mirrored, 2018 onward |
+| Devyce calls | 10,323 |
+| Off limit | 87 in RecruitCRM, all flagged here — excluded from shortlists |
+| Webhook subscriptions | 15, including the four `*.deleted` events |
+| Active tokens | 5 — four people plus one OAuth session |
 
-That last row is still the honest headline. The platform is built, broad, and barely used.
+### What changed on 15/09/2026
+
+The live sync had not run since 10/09. The cause was not a failing job: the `pg_cron` entries were
+gone from the database entirely, including the watchdog that would have reported it. Because each
+entity kept its last good `sync_state` row, health showed "stale" rather than "dead" for five days.
+
+Restored, and hardened against the same class of failure:
+
+- All eight missing cron jobs are back, and `cron_manifest` now declares the expected 18 so a missing
+  or drifted job is alerted rather than silently absent.
+- `reconcile_deals` hard-deleted rows — a plain `DELETE` against the table holding billing. It now
+  tombstones like every other entity.
+- Deleted records were never actually hidden: `delete_record` tombstoned them but no read path
+  checked `deleted_at`, so a deleted candidate still came back in search and could still be matched
+  to a job. Now hidden from operational surfaces, deliberately left in history.
+- Webhook payloads were being routed to the wrong entity — 68 job and 16 company payloads were
+  spent refreshing candidates. Fixed, and deletions now tombstone on arrival.
 
 ## Ground rules
 

@@ -78,9 +78,29 @@ running a large one.
 select sync_health();
 ```
 
-Twelve entities. Live ones warn at 10 minutes stale, critical at 30; `notes` at 45/180 (it runs
-every 15 min); reconciles and the off-limit refresh at 26h and 50h. The watchdog runs every 5
-minutes and the dashboard shows a red banner naming the failing feed.
+Thirteen entities. Live ones warn at **20** minutes stale, critical at 30; `history_recent` and
+`notes` at 25/60; reconciles and the candidates pass at 2h/4h; the off-limit refresh at 26h/50h. The
+watchdog runs every 5 minutes, alerts only on transitions, and re-alerts a still-critical feed once
+every 6 hours rather than every cycle.
+
+Live warn was 10 minutes until 15/09/2026, while the incremental sync runs every 15 — so four
+entities warned for 5 minutes in every 15, permanently, with nothing wrong. A health panel that
+cries wolf on a schedule teaches people to stop reading it.
+
+### Do the jobs still exist?
+
+```sql
+select public.check_cron_manifest();
+```
+
+`sync_health` watches whether feeds *ran*. This watches whether the jobs that run them **exist**, are
+active, and are on the cadence they were declared at — because staleness cannot tell a job that
+failed from a job that was deleted. `cron_manifest` declares the expected 18; drift counts as
+critical, and undeclared jobs are reported but never alerted.
+
+This exists because on 10/09/2026 the cron entries vanished and nothing noticed for five days: the
+watchdog that should have caught it had been deleted too. If you add a permanent job, add it to
+`cron_manifest` in the same migration or the watchdog will correctly flag it as undeclared.
 
 ## Tokens and access
 
@@ -94,6 +114,16 @@ minutes and the dashboard shows a red banner naming the failing feed.
 
 To grant write access, set `can_write = true`. To make someone an admin — whole-team visibility —
 set `is_admin = true`.
+
+**Rotated 15/09/2026.** All 17 tokens then active were revoked and four minted: Ollie (admin),
+Bhavesh Patel, Steve Bernat, Dale Barnett — all write-enabled, only Ollie an admin. Eight people lost
+access in that sweep, including three of the top billers; reinstating anyone is a fresh mint, since
+the plaintext of a revoked token is unrecoverable by design.
+
+A fifth row usually appears shortly afterwards, labelled `oauth-session`. That is the claude.ai token
+exchange creating a session row that inherits `can_write` and `is_admin` from the token pasted into
+the connector. It is expected, not a leak — but it does mean revoking a person's token does not kill
+a session already issued from it. Revoke both.
 
 ## Incidents — 10/08/2026
 
@@ -134,6 +164,9 @@ version endpoint and one real tool call would have caught the first two within s
 
 | Item | Status |
 |---|---|
+| `dashboard-data` is unauthenticated on a public repo | **Open. Highest priority.** Exposes firm revenue and per-consultant figures to anyone with the URL |
+| Three `octagongroup.co.uk` job subscriptions disappeared 15/09/2026 | Open. Ids 37785/37786/37788 vanished during a subscription change; cause not established. Restorable |
+| `/myday` and `/dayplan` fail for admin tokens | Open. `my_day` scopes to the caller's desk and an admin has no consultant record |
 | 64 ghost deals with null `recruitcrm_id` | Pending deletion. £0, none Won, inflate pipeline counts |
 | 27 off-limit candidates not in the mirror | Flagged 61 of 88; the rest were never synced |
 | No write has ever executed | `audit_log` empty across 14 write tools |

@@ -34,6 +34,7 @@ This page is for knowing what's possible, and for debugging when an answer looks
 | `off_limit` | Who must not be approached, and why | Yes |
 | `invoices_report` | Invoices raised — currently none exist in RecruitCRM | No |
 | `reference_list` | Any RecruitCRM dropdown list: currencies, stages, note/task/meeting types, teams | No |
+| `webhook_subscriptions` | **Admin only.** Which events RecruitCRM pushes to us; create and delete them | No |
 
 Windows default to 2026 year to date, end exclusive. Dates are ISO on the way in, DD/MM/YYYY on the
 way out.
@@ -52,6 +53,21 @@ lands in `audit_log` with before and after.
 | `add_note` | Adds a note to a candidate or job |
 | `create_job` / `update_job` | Raise a new vacancy, or change one (status, salary, title) |
 | `create_deal` / `update_deal` | Raise a deal, or move it — **moving to Won is how billing is recorded** |
+
+### Closing a job, losing a deal
+
+Added 15/09/2026. Closing a job (closed, cancelled, on hold) or moving a deal to Lost or Declined
+offers a reason from a configured list, with optional free text. Any other deal stage move takes free
+text — the list is loss vocabulary and would be nonsense on a move to 2nd Interview. It is an option,
+never mandatory.
+
+The reason is written as a note on the record and logged in `closure_reason_log`, which is what
+`closure_reasons_report` counts. It is deliberately **not** added to the RecruitCRM update payload:
+RecruitCRM does keep a reason slot on both (`job_status_comment[].remark`, `deal_stage_remarks[].reason`,
+both blank in every sample we hold), but whether its update endpoints accept one is unconfirmed, and
+sending an unverified field risks a 400 that would break job closure itself.
+
+Edit the list in the `closure_reasons` table — no deploy needed.
 | `create_candidate` / `update_candidate` | Add or edit a person. Refuses obvious duplicates |
 | `manage_client` | Create or edit a company or a contact |
 | `pitch_candidate` | Record a speculative pitch to a contact |
