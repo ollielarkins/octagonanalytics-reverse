@@ -16,8 +16,8 @@ Treat it like a password. Don't paste it into chats, tickets or shared docs.
 
 Two things are set on your token when it's created:
 
-- **Write access** — whether you can move hiring stages, assign candidates and add notes. Off for
-  new users by default during the pilot.
+- **Write access** — whether you can change anything in RecruitCRM at all. Everyone currently holding
+  a token has it.
 - **Admin** — whether you see the whole team or just your own desk. Recruiters see their own.
 
 ### Step 2. Add the connector
@@ -32,7 +32,15 @@ Two things are set on your token when it's created:
 
 If the connector has already been pushed out org-wide, you may only need to enable it and sign in.
 
-**Claude Code:** the connector is configured at the project level. Ask Ollie.
+**Claude Code:** set your token as an environment variable and restart, then install the plugin:
+
+```powershell
+[Environment]::SetEnvironmentVariable('OCTAGON_MCP_TOKEN','<your token>','User')
+```
+
+If the connector's tools are missing or every call returns an authentication error, that variable is
+unset or holds a revoked token. Tokens were rotated on 15/09/2026 — anything issued before that date
+is dead.
 
 ### Step 3. Check it worked
 
@@ -135,11 +143,21 @@ then does it touch RecruitCRM. Nothing is written on the strength of the model's
 You'll get a preview: current stage, proposed stage, which job. Say yes and it applies, writes an
 audit record, and refreshes the mirror immediately so your dashboard is right straight away.
 
-Three things you can change: hiring stage, assigning a candidate to a job, and adding a note. All
-are attributed to you.
+Far more than three things: hiring stages, assigning and unassigning candidates, notes, jobs, deals,
+candidates, companies, contacts, pitches, meetings, tasks, hotlists, off-limit flags, email and
+deletions. All attributed to you.
 
-> **Status:** no write has yet been made through this system by anyone. If you're in the pilot,
-> expect to be the first, and tell Ollie what happens.
+**Closing a job or losing a deal asks you why.** Pick from the list it offers — "Filled by client
+directly", "Counter-offer accepted", "Budget pulled" and so on — or add your own detail. It is
+optional and you can skip it, but it is the only way "why do we lose" ever becomes answerable. Any
+other deal stage move takes a free-text note instead.
+
+Two writes are different and are guarded harder. **Deletion is permanent** — there is no undo and no
+restore, and it asks twice. **Email cannot be recalled**, so drafting is the default and it will
+never send to someone who has opted out.
+
+> **Status:** 44 writes have been made through this system, the first on 12/08/2026 — mostly hiring
+> stage moves. Every one is in `audit_log` with who did it and what changed.
 
 ---
 
@@ -147,8 +165,12 @@ are attributed to you.
 
 **Ask in plain English.** "How did I do in Q2 compared to Q1" works. You don't need command syntax.
 
-**Slash commands exist for the common things** — type `/` to see them. `/my_day`, `/day_plan`,
-`/weekly_kpis`, `/billing`, `/job_kickoff`, `/client_update`.
+**Slash commands exist for the common things** — type `/` to see all 57. The ones worth learning
+first: `/myday`, `/dayplan`, `/week`, `/billing`, `/chase`, `/pipeline`, `/coldjobs`, `/funnel`.
+
+`/myday` and `/dayplan` scope to your own desk, so they need your token to map to a consultant
+record. Admin tokens have no desk and will get "consultant not found" — that is expected, not a
+fault.
 
 **It will tell you when it can't answer.** If a number genuinely isn't in the data you'll get "that
 isn't tracked" rather than a made-up figure. That's the system working.
