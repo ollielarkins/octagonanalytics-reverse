@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.42.0" };
+const SERVER = { name: "octagon-analytics", version: "3.43.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -1370,14 +1370,25 @@ async function callTool(name: string, args: any, req: Request) {
     };
     if (body.deal_stage == null) return toolText({ error: "Could not determine the deal's current stage, so an edit would clear it. Pass stage explicitly." });
 
-    const dealLosing = !!stage && DEAL_LOSING.includes(String(stage.label).toLowerCase());
+    // A stage change is worth a reason wherever it goes, not only on a loss - RecruitCRM keeps a
+    // reason slot on every deal stage change. But the fixed list is loss vocabulary ("Candidate
+    // withdrew", "Fee not agreed") and would be nonsense on a move to 2nd Interview, so the list
+    // applies to Lost/Declined and every other stage move takes free text instead.
+    const dealStageMoving = !!stage && String(stage.label).toLowerCase() !== String(curStageLabel ?? "").toLowerCase();
+    const dealLosing = dealStageMoving && DEAL_LOSING.includes(String(stage.label).toLowerCase());
     let dealReason: string | null = null;
-    const dealDetail: string | null = args.reason_detail != null ? String(args.reason_detail) : null;
+    let dealDetail: string | null = args.reason_detail != null ? String(args.reason_detail) : null;
     if (dealLosing && args.reason != null && String(args.reason).trim() !== "") {
       const res: any = await resolveClosureReason("deal", args.reason);
       if (res.valid) return toolText({ error: "unknown_reason", given: args.reason, valid_reasons: res.valid,
         instruction: "Pick one of valid_reasons. For anything else use reason='Other' with reason_detail." });
       dealReason = res.reason;
+    } else if (dealStageMoving && !dealLosing) {
+      // Free text on a non-loss move. Either argument carries it, so the recruiter is never told off
+      // for putting the note in the "wrong" one.
+      const free = [args.reason, args.reason_detail].filter((x) => x != null && String(x).trim() !== "").map(String).join(" - ");
+      dealDetail = free !== "" ? free : null;
+      if (dealDetail) dealReason = "Stage change";
     }
 
     if (!args.confirm) {
@@ -1390,7 +1401,11 @@ async function callTool(name: string, args: any, req: Request) {
         ...(dealLosing ? (dealReason
           ? { lost_reason: dealReason, lost_reason_detail: dealDetail }
           : { lost_reason: null, reason_options: await closureReasonList("deal"),
-              reason_prompt: "Optional: ask why the deal was lost, then call again with reason=<one of reason_options> and optional reason_detail. Losing without a reason is allowed." }) : {}),
+              reason_prompt: "Optional: ask why the deal was lost, then call again with reason=<one of reason_options> and optional reason_detail. Losing without a reason is allowed." })
+          : dealStageMoving ? (dealDetail
+            ? { stage_change_note: dealDetail }
+            : { stage_change_note: null,
+                reason_prompt: "Optional: ask why the deal is moving stage and call again with reason_detail=<free text>. Moving without a note is allowed." }) : {}),
         instruction: "Show before/after to the recruiter. To apply, call again with confirm=true." });
     }
 
@@ -1401,7 +1416,7 @@ async function callTool(name: string, args: any, req: Request) {
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=deals`,
       { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
     let dealReasonResult: any = undefined;
-    if (dealLosing && dealReason) {
+    if (dealStageMoving && dealReason) {
       const noteOk = await recordClosureReason("deal", deal.slug, body.name, stage ? String(stage.label) : null, dealReason, dealDetail, actor.id);
       dealReasonResult = { reason: dealReason, detail: dealDetail, note_written: noteOk,
         note: noteOk ? "Reason saved as a note on the deal and logged for reporting."
