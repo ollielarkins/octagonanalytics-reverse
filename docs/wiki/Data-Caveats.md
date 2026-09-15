@@ -196,4 +196,4 @@ Any conclusion drawn from usage data is drawn from almost no usage.
 
 ---
 
-**See also:** [Metrics and Definitions](Metrics-and-Definitions) for the intended definition · [Operations Runbook](Operations-Runbook) for fixing a feed · [Architecture](Architecture) for how data arrives
+**See also:** [Metrics and Definitions](Metrics-and-Definitions) for the intended definition · [Operations Runbook](Operations-Runbook) for fixing a feed · [Architecture](Architecture) for how data arrives · [Commands](Commands)

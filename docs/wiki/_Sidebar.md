@@ -4,6 +4,7 @@
 
 **Using it**
 - [Onboarding](Onboarding)
+- [Commands](Commands)
 - [Tools Reference](Tools-Reference)
 
 **Trusting it**

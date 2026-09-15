@@ -130,4 +130,8 @@ see all data" position.
 
 ---
 
+> [!TIP]
+> Most of these are reachable as a slash command — see [Commands](Commands) for the 57 of them
+> grouped by task. This page is the layer underneath.
+
 **See also:** [Metrics and Definitions](Metrics-and-Definitions) for what each tool's numbers mean · [Data Caveats](Data-Caveats) for where they are soft · [Onboarding](Onboarding) for how to ask

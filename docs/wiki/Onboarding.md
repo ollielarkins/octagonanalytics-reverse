@@ -193,4 +193,4 @@ Ping Ollie on Slack with what you asked, what you expected and what you got. Scr
 
 ---
 
-**See also:** [Tools Reference](Tools-Reference) for everything you can ask · [Data Caveats](Data-Caveats) before you quote a number · [Metrics and Definitions](Metrics-and-Definitions) for what each figure counts
+**See also:** [Tools Reference](Tools-Reference) for everything you can ask · [Data Caveats](Data-Caveats) before you quote a number · [Metrics and Definitions](Metrics-and-Definitions) for what each figure counts · [Commands](Commands)

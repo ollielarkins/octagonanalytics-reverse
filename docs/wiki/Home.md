@@ -19,6 +19,7 @@ disagree.
 | | Go to |
 |---|---|
 | Get set up and connected | [Onboarding](Onboarding) → Part 1 |
+| See every slash command | [Commands](Commands) |
 | Know what I can ask it | [Tools Reference](Tools-Reference) |
 | Understand what a number counts | [Metrics and Definitions](Metrics-and-Definitions) |
 | Check whether a number can be trusted | [Data Caveats](Data-Caveats) |
@@ -31,6 +32,7 @@ disagree.
 | Page | For |
 |---|---|
 | **[Onboarding](Onboarding)** | Getting set up and productive. Start here if you're a recruiter. |
+| **[Commands](Commands)** | All 57 slash commands, grouped by what you are trying to do. |
 | **[Tools Reference](Tools-Reference)** | Every question the system can answer, and how to ask it. |
 | **[Metrics and Definitions](Metrics-and-Definitions)** | What each number actually means. Read before quoting anything. |
 | **[Data Caveats](Data-Caveats)** | Where the numbers are soft, and why. Read this second. |

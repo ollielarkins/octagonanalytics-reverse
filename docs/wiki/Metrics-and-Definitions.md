@@ -151,4 +151,4 @@ Two caveats that matter when quoting these:
 
 ---
 
-**See also:** [Data Caveats](Data-Caveats) for where these definitions meet messy data · [Tools Reference](Tools-Reference) for which tool reports what · [Architecture](Architecture) for where the numbers come from
+**See also:** [Data Caveats](Data-Caveats) for where these definitions meet messy data · [Tools Reference](Tools-Reference) for which tool reports what · [Architecture](Architecture) for where the numbers come from · [Commands](Commands)
