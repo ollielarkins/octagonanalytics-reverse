@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.40.1" };
+const SERVER = { name: "octagon-analytics", version: "3.41.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -1516,7 +1516,7 @@ async function callTool(name: string, args: any, req: Request) {
       candidate: { table: "candidates", col: "slug",         soft: true  },
       job:       { table: "jobs",       col: "slug",         soft: true  },
       company:   { table: "clients",    col: "company_slug", soft: true  },
-      deal:      { table: "deals",      col: "slug",         soft: false },  // deals has no deleted_at
+      deal:      { table: "deals",      col: "slug",         soft: true  },  // tombstoned since 0075 added deals.deleted_at
     };
     const m = mirror[ent];
     let mirror_cleared: any = null;
