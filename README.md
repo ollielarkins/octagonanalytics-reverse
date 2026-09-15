@@ -1,55 +1,76 @@
-# Octagon Recruitment Analytics Platform v3.40.1
+# Octagon Recruitment Analytics Platform
 
-A live analytics platform on top of **RecruitCRM**. It replaces manual spreadsheet
-reporting with an always-current mirror of the firm's recruitment data, exposed two
-ways: **dashboards** for viewing, and **Claude** as a direct interface that answers
-questions and performs a small set of defined, audited write-back actions.
+Live analytics on top of **RecruitCRM**, replacing manual spreadsheet reporting with an
+always-current mirror of the firm's recruitment data — exposed as **dashboards** for viewing and
+**Claude** as a direct interface that answers questions and performs audited write-back actions.
 
-> **Guiding principle:** *trustworthy reads before writes.* Get the data model right →
-> sync RecruitCRM into it reliably → define every metric once → show it (dashboards) and
-> let Claude answer from it → then, carefully, let Claude act back into RecruitCRM.
+> **Guiding principle:** *trustworthy reads before writes.* Get the data model right → sync
+> RecruitCRM into it reliably → define every metric once → show it and let Claude answer from it →
+> then, carefully, let Claude act back into RecruitCRM.
 
-See [`PROJBRIEF.MD`](PROJBRIEF.MD) for the full brief, [`ROADMAP.MD`](ROADMAP.MD) for the
-milestone plan, and [`docs/DECISIONS.md`](docs/DECISIONS.md) for the design-decision log.
+> [!WARNING]
+> **`dashboard-data` is unauthenticated and this repository is public.** It returns firm revenue,
+> the full funnel and every consultant by name with their individual figures, to anyone with the
+> URL. Open as of 15/09/2026 — see [Data exposure](#data-exposure).
 
----
+| | |
+|---|---|
+| Connector | `octagon-mcp` **3.44.0** — 50 tools, 26 prompts |
+| Commands | 57 slash commands, in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) |
+| Migrations | 0000–0081 |
+| Writes | Live — 44 in `audit_log`, first on 12/08/2026 |
+| Tool calls logged | 495 |
 
-## Architecture
+**Documentation lives in the [wiki](https://github.com/ollielarkins/octagonanalytics-reverse/wiki).**
+Start there. This README covers the repository and how to operate it.
 
-```
-   RecruitCRM  ──sync──▶  Supabase (Postgres mirror)  ──▶  Semantic layer (SQL views)
-  (system of              incremental every 2 min           one canonical definition
-   record)                nightly soft-delete reconcile      per metric
-       ▲                                                          │
-       │                                            ┌─────────────┴─────────────┐
-       │                                            │                           │
-       └────────── write-back ──────────────  Claude (MCP connector)      Dashboard
-                   (preview→confirm→audit)     read + gated write         (JSON API + static page)
-```
-
-- **RecruitCRM is the single source of truth** ([D8](docs/DECISIONS.md)). Supabase is a
-  live mirror; everything downstream reads the mirror. Writes go **back to RecruitCRM**,
-  never to the mirror — the mirror catches up via sync (plus an immediate write-through).
-- **One semantic layer.** Dashboards and Claude read the *same* canonical views/functions,
-  so their numbers can never disagree.
-- **Owner attribution.** Per-consultant figures credit the **owning consultant of the job**,
-  not whoever logged the event ([D9](docs/DECISIONS.md)).
+| I want to… | Go to |
+|---|---|
+| Use the platform as a recruiter | [Wiki → Onboarding](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Onboarding) |
+| Know what a number means | [Wiki → Metrics](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Metrics-and-Definitions) |
+| Know where numbers are soft | [Wiki → Data Caveats](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Data-Caveats) |
+| Deploy, backfill, mint a token | [Wiki → Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook) |
+| Understand the design decisions | [`docs/DECISIONS.md`](docs/DECISIONS.md) |
 
 ---
 
-## Live scale (as-built)
+## How it fits together
+
+```
+   RecruitCRM  ──sync──▶  Supabase (Postgres mirror)  ──▶  Semantic layer (SQL views + RPCs)
+  (system of              incremental every 15 min          one canonical definition
+   record)                webhooks for near-live change      per metric
+       ▲                  hourly page-walks for deletes            │
+       │                                            ┌──────────────┴──────────────┐
+       │                                            │                             │
+       └────────── write-back ──────────────  Claude (MCP connector)         Dashboard
+                   (preview→confirm→audit)     read + gated write          (JSON API + page)
+```
+
+- **RecruitCRM is the single source of truth** ([D8](docs/DECISIONS.md)). Supabase is a live
+  mirror; everything downstream reads the mirror. Writes go **back to RecruitCRM**, never to the
+  mirror — which then catches up via sync, plus an immediate write-through.
+- **One semantic layer.** Dashboards and Claude read the *same* canonical views and functions, so
+  their numbers cannot disagree.
+- **Activity is credited to the actor** — whoever moved the stage — not reassigned when someone
+  leaves. Roughly 16% of 2026 activity belongs to people who have since left, and it stays theirs.
+
+## Live scale
 
 | Entity | Rows |
 |---|---|
-| consultants | 21 |
-| clients | 4,582 |
-| jobs | 5,968 |
-| candidates | ~9,515 |
-| candidate_stage_events | 16,536 |
+| candidates | 52,158 |
+| candidate_stage_events | 44,440 |
+| notes | 100,271 |
+| call_activity | 10,331 |
+| jobs | 6,025 (142 open) |
+| clients | 4,703 |
+| deals | 1,642 |
+| consultants | 22 |
 
-**2026 is the reliable reporting window** — hiring-stage logging before 2026 is sparse, so
-firm figures default to a 2026-onward window. This is a data-entry reality in RecruitCRM,
-not a platform limitation (see [D8](docs/DECISIONS.md) and the leg-A finding below).
+**2026 is the reliable reporting window.** Hiring-stage logging before 2026 is sparse, so firm
+figures default to a 2026-onward window. That is a data-entry reality in RecruitCRM, not a platform
+limitation.
 
 ---
 
@@ -57,267 +78,199 @@ not a platform limitation (see [D8](docs/DECISIONS.md) and the leg-A finding bel
 
 ```
 supabase/
-  migrations/       0000–0052, version-controlled schema + semantic layer + functions
+  migrations/           0000–0081 — schema, semantic layer, functions, cron
   functions/
-    recruitcrm-sync/    the sync engine (backfill | incremental | reconcile | history)
-    dashboard-data/     public JSON API returning dashboard_json() (aggregates, no PII)
-    octagon-mcp/        the MCP connector: 69 tools, prompts, OAuth bridge
-web/
-  dashboard.html      static page that renders dashboard-data (host anywhere static)
+    recruitcrm-sync/      the mirror: backfill | incremental | reconcile | history | notes | offlimit
+    recruitcrm-webhook/   near-live change trigger; tombstones on *.deleted events
+    octagon-mcp/          the MCP connector: 50 tools, 26 prompts, OAuth bridge
+    dashboard-data/       JSON API behind web/dashboard.html
+    slack-command/        Slack /dashboard entry point
+    digest-email/         scheduled digests
+    feedback/             issue capture from the connect page
+    dashboard/            defunct — Supabase cannot serve HTML
+    recruitcrm-probe/     throwaway API probe, locked and gutted
+    recruitcrm-discover/  throwaway discovery probe, locked and gutted
+web/dashboard.html      static page rendering dashboard-data
 docs/
-  DECISIONS.md        the design-decision log (D1–D9)
-.claude/
-  hooks/session-start-dashboard.sh   makes each new chat open with the live dashboard
-  settings.local.json
-PROJBRIEF.MD, ROADMAP.MD
+  wiki/                 SOURCE OF TRUTH for the published wiki — edit here, then sync
+  DECISIONS.md          design-decision log
+plugins/                pointer only; the 57 commands live in octagon-plugins
+rollout/, scripts/      rollout material and repo checks
 ```
+
+> [!IMPORTANT]
+> `docs/wiki/` is the source for the GitHub wiki, which is a **separate git repository**. Editing a
+> page in the GitHub UI does not update this repo, and pushing here does not update the wiki. They
+> drifted for a month before anyone noticed. Sync deliberately:
+> ```bash
+> git clone https://github.com/ollielarkins/octagonanalytics-reverse.wiki.git /tmp/wiki
+> cp docs/wiki/*.md /tmp/wiki/ && cd /tmp/wiki && git add -A && git commit && git push
+> ```
 
 ---
 
 ## Supabase project
 
-- **Project ref:** `kzcmssldvtjnbwwunuwm` · region `eu-west-1` (GDPR — candidate PII stays in-region)
-- **Name:** "Reporting for CRM" · Postgres 17
-
-### Edge functions
+**Ref** `kzcmssldvtjnbwwunuwm` · region `eu-west-1` (GDPR — candidate PII stays in-region) ·
+Postgres 17 · project name "Reporting for CRM"
 
 | Function | `verify_jwt` | Purpose |
 |---|---|---|
-| `recruitcrm-sync` | true | Sync engine. Entities: consultants, clients, jobs, candidates, **calls** (Devyce call-logs). Modes: `backfill`, `incremental`, `reconcile`, `history`. Cron / server-side. |
-| `dashboard-data` | false | Public JSON API — `dashboard_json()` aggregates only, no PII. Feeds `web/dashboard.html`. |
-| `octagon-mcp` | false | Remote MCP server (Streamable HTTP / JSON-RPC 2.0). Tools below. |
-| `slack-command` | false | Slack slash-command endpoint (`/dashboard`). Verifies the Slack signing secret; returns the live dashboard. |
-| `recruitcrm-webhook` | false | Near-real-time freshness. RecruitCRM POSTs on change; verifies `?key=` secret, logs to `webhook_events`, and fires the incremental sync for the changed entity (~1-3s). Backstopped by the 2-min cron. |
-| `recruitcrm-probe` | true | **Throwaway** diagnostic, locked + gutted. Safe to delete. |
-| `recruitcrm-discover` | true | **Throwaway** discovery probe (pipelines / BD fields), locked + gutted. Safe to delete. |
-| `dashboard` | false | **Defunct** early attempt (Supabase can't serve HTML — see below). Safe to delete. |
-| `storage-upload` | true | **Throwaway**, locked. Safe to delete. |
+| `recruitcrm-sync` | true | The mirror. Modes: `backfill`, `incremental`, `reconcile`, `history_recent`, `notes_recent`, `offlimit`, `backfill_all` |
+| `octagon-mcp` | false | Remote MCP server. Authenticates its own callers via `mcp_tokens` |
+| `recruitcrm-webhook` | false | RecruitCRM POSTs on change. Verifies `?key=`; routes by record shape; tombstones on `*.deleted` |
+| `dashboard-data` | false | **Unauthenticated JSON API.** See the warning above |
+| `slack-command` | false | Slack `/dashboard`; verifies the signing secret |
+| `digest-email`, `feedback` | mixed | Scheduled digests; connect-page issue capture |
+| `dashboard`, `recruitcrm-probe`, `recruitcrm-discover`, `storage-upload` | — | Defunct or throwaway. Safe to delete |
 
-**Public URLs**
-- Data API: `https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/dashboard-data`
-- MCP connector: `https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp`
+`verify_jwt` is declared per function in `supabase/config.toml` so it travels with the repo and
+can't be flipped by a stray CLI flag.
 
-### MCP tools (`octagon-mcp`, v3)
-
-| Tool | Kind | What it does |
-|---|---|---|
-| `get_dashboard` | read | `dashboard_json()` — KPIs, funnel, monthly, per-consultant, pipeline, **sync health**. |
-| `funnel_report` | read | Owner-attributed funnel + conversion ratios; filter by date/consultant/team. |
-| `client_report` | read | Per-client (account) activity, open/total jobs, CV→placed rate, ranked. |
-| `time_to_fill` | read | Days from job open → first placement: firm avg/median + per-consultant. |
-| `cold_jobs` | read | Open roles with no candidate activity in N days (default 14). No PII. |
-| `placements_report` | read | Placed count (event-stream) + Won revenue, by consultant/client. |
-| `consultant_leaderboard` | read | Consultants ranked by placed / cv_sent / first_interview. |
-| `bd_report` | read | Client/BD funnel — companies by "Company Status" (Prospect / Client / …). |
-| `find_candidate` | read | Name → candidate_slug + current stage per job (PII; resolves who to act on). |
-| `job_pipeline` | read | A job's candidates in play + current stage + in-play count (PII). |
-| `stalled_report` | read | Firm-wide attention list: aging offers + stalled candidates on open roles (PII). |
-| `my_day` | read | One consultant's attention list; auto-scopes to the caller's token (PII). |
-| `match_candidates` | read | JD→candidate: rank candidates by skill match, with matched skills + roles (PII). |
-| `call_activity` | read | Telephony activity (Devyce→RecruitCRM): calls, connect rate, talk-time, by consultant/category. |
-| `weekly_kpis` | read | This-week actuals vs each recruiter's weekly targets (`kpis_report()`): cv_sent, interview_request, first_interview, bd/client calls, placed. |
-| `update_hiring_stage` | **write** | Moves a candidate's hiring stage in RecruitCRM (`create_placement` on Placed). |
-| `assign_candidate` | **write** | Assigns a candidate to a job in RecruitCRM. |
-| `add_note` | **write** | Adds a note to a candidate or job (POST /v1/notes), attributed to the actor. |
-
-**MCP prompts** (one-click inline Claude-chat commands via `prompts/list`, 19 total):
-- *Reporting:* `dashboard`, `kpi` (firm headline totals), `weekly_kpis` (per-recruiter
-  actuals vs weekly targets), `weekly_team_review`, `my_day`, `my_cold_roles` (arg:
-  consultant), `client_health` (arg: client), `month_in_review` (arg: month `YYYY-MM`).
-- *New-job admin pack:* `job_kickoff`, `job_advert`, `job_boolean`, `job_inmail`,
-  `client_pitch`, `job_shortlist` (arg: job; pull context via `job_pipeline` + `match_candidates`).
-- *Candidate lifecycle:* `candidate_intake` (call/Devyce notes → intake template + gap-flag),
-  `candidate_summary`, `candidate_thankyou`, `interview_prep` (arg: candidate), plus `match_jd`.
-
-Each expands into an instruction that drives the read tools above. (There is no Slack `/kpis`
-command — the weekly KPI scorecard is the inline `weekly_kpis` prompt.)
-
-**Authentication (per-user bearer tokens).** *Every* tool call must present a valid token
-(`Authorization: Bearer <t>`, `x-octagon-token` header, or `auth_token` arg). Tokens map to a
-consultant via `mcp_tokens` and are stored only as SHA-256 hashes. This closes read access to
-the public and — crucially — the **acting identity is derived from the token server-side**, so
-it can't be spoofed by a tool argument (protecting the audit trail). `can_write` is per token,
-so write access is granted/revoked per person.
-
-**Write safety.** A write requires a token with `can_write=true`. Every write is: two-phase
-**preview → confirm**; **optimistic concurrency** (`expected_status_id` — refuses if the live
-stage changed since preview); an **audit_log** insert (who/what/when/before→after); then a
-**write-through** re-pull of `/history` so the mirror updates within seconds. `updated_by` is
-the token's consultant id, so the action is attributed in RecruitCRM's own activity log.
-
----
-
-## Secrets (set in Supabase, never in the repo)
-
-| Secret | Used by | Notes |
-|---|---|---|
-| `RECRUIT_CRM_API_TOKEN` | `recruitcrm-sync`, `octagon-mcp` | Account-level RecruitCRM Open API token (Business+ plan, Account-Owner-only). ~120 chars. **Never paste into chat.** |
-
-Access to the connector is by **per-user token** (table `mcp_tokens`), not a server secret —
-see *Access tokens* below. (The old `OCTAGON_WRITE_KEY` shared-secret gate was replaced by
-per-user tokens in v3 and is no longer used.)
-
-`.gitignore` excludes `.env`, `*.key`, and `secrets/`.
-
----
-
-## Migrations
-
-Applied in order (`supabase/migrations/`):
-
-| # | Name | What it does |
-|---|---|---|
-| 0000 | baseline_tables | Reconstruction of the hand-built 8-table schema |
-| 0001 | structural_fixes | `jobs.slug` + unique index; `stage_lookup`; `reporting_exclusions`; `audit_log`; RLS + `authenticated` read policies on all tables (fixes the `deal_stage_events` gap) |
-| 0002 | canonical_semantic_layer | Moves 19 legacy views → `legacy` schema; builds 15 canonical `security_invoker` views over `v_candidate_events` |
-| 0003 | review_fixes | Fixes `client_funnel` fan-out (`distinct on (job_slug)`); revokes `legacy` from anon/authenticated |
-| 0004 | sync_state_and_extensions | `pg_cron`, `pg_net`, `sync_state` table |
-| 0005 | schedule_incremental_sync | Incremental-sync cron (now `*/2 * * * *`) |
-| 0006 | soft_delete_reconcile | `deleted_at` columns + `reconcile_entity()` RPC (refuses empty id sets) |
-| 0007 | schedule_reconcile | Nightly reconcile crons (03:00 / 03:10 / 03:20) |
-| 0008 | candidates_and_stage_lookup | `candidates` table + confirmed stage-id mappings |
-| 0009 | views_exclude_soft_deleted | Views filter `deleted_at is null` |
-| 0010 | lock_down_reconcile_rpc | Revoke `reconcile_entity` from public/anon/authenticated; grant service_role |
-| 0011 | history_backfill_prep | Cursor column; truncate + unique natural key on `candidate_stage_events` |
-| 0012 | schedule_history_backfill | (temporary backfill cron — since unscheduled) |
-| 0013 | dashboard_json_function | `dashboard_json()` — all dashboard aggregates as one jsonb |
-| 0014 | funnel_report | `funnel_report()` — owner-attributed funnel behind the MCP read tool |
-| 0015 | sync_watchdog | `sync_health()` classifier; `check_sync_health()` watchdog + `sync_alerts`/`app_settings`; embeds health in `dashboard_json()`; 5-min cron |
-| 0016 | mcp_read_functions | `client_report`, `time_to_fill`, `cold_jobs`, `placements_report`, `consultant_leaderboard` |
-| 0017 | mcp_auth | `mcp_tokens` (hashed per-user tokens) + `mint_mcp_token()` admin helper |
-| 0018 | stage_lookup_additions | Map the two real-but-dropped stages `3rd Interview` (394846) + `Shortlist` (511685) |
-| 0019 | admin_telemetry | `mcp_call_log` + `admin_digest()` + `post_admin_digest()` (Slack) + daily cron |
-| 0020 | fix_cold_jobs_count | Bugfix: `cold_jobs.cold_count` counted the limited set, not the true total |
-| 0021 | third_interview_in_funnel | Surface `3rd Interview` (= "Internal Interview") in `funnel_report` + `dashboard_json` |
-| 0022 | bd_funnel | `clients.company_status` + `bd_report()` (client/BD funnel from the company "Company Status" field) |
-| 0023 | lookup_functions | `find_candidate()` + `job_pipeline()` — name/job → slug + current stage (precursors to the write tools) |
-| 0024 | attention_alerts | `stalled_report()` + `my_day()` + `post_standup()` (weekday Slack standup) |
-| 0025 | refine_attention | Bound "needs attention" to open roles + a recent window (kills 1000-day-old noise) |
-| 0026 | candidate_matching | `candidates.skill` + `match_candidates()` (JD→candidate skill matching, pg_trgm) |
-| 0027 | call_activity | `call_activity` table + `call_activity_report()` (Devyce calls via RecruitCRM `/call-logs`) |
-| 0028 | weekly_kpis | `weekly_targets` table + `kpis_report()` (this-week actuals vs targets, for the inline `weekly_kpis` prompt) |
-| 0029 | kpis_expand | Expand `kpis_report()` to the full weekly KPI set (interview_request, BD/client call split) + load firm-wide targets |
-| 0030 | billing_targets | `billing_targets` table + `billing_report()` (quarter-to-date Won vs target, owner-attributed) |
-| 0031 | billing_report_definition | Corrected `billing_report()` wording after the deals sync landed (Won is the real billing figure) |
-| 0032 | webhook_events | Audit log for the `recruitcrm-webhook` receiver (raw payload + routed entity) |
-
-### Cron schedule
+### Sync schedule
 
 | When | Job |
 |---|---|
-| every 2 min | incremental sync (RecruitCRM → mirror) |
-| every 5 min | sync-health watchdog (`check_sync_health`) |
-| every 1 min | **temporary** history resync (`history-resync`) — backfills 3rd Interview + Shortlist; self-completes then can be unscheduled |
-| 08:00 daily | admin digest to Slack (`post_admin_digest`) |
-| 08:00 Mon–Fri | daily standup to Slack (`post_standup`) — aging offers + stalled candidates |
-| 03:00 / 03:10 / 03:20 nightly | soft-delete reconcile (consultants / clients / jobs) |
+| every 15 min | incremental sync, all entities |
+| every 1 min | candidate stage history — the funnel's live feed |
+| every 15 min | notes re-walk |
+| hourly :40, draining every 3 min | candidates deletion pass (~520 pages, ~13 chunks) |
+| hourly :05 / :12 / :18 | reconcile clients / jobs / deals |
+| 03:00, 03:25 daily | reconcile consultants, off-limit refresh |
+| every 5 min | sync health watchdog |
+| every 10 min | **cron manifest watchdog** — are the jobs themselves still there? |
 
-Freshness: edits show in the mirror within ~2 min (or seconds after a Claude write-through).
-Hard deletes propagate at the nightly reconcile.
+Plus **15 webhook subscriptions** for near-live change, including the four `*.deleted` events.
 
----
+> [!NOTE]
+> The cron manifest watchdog exists because on 10/09/2026 the cron entries were deleted from the
+> database and nothing noticed for five days — the watchdog that would have reported it had been
+> deleted too, and staleness cannot distinguish a job that failed from one that no longer exists.
+> `cron_manifest` declares the expected 18; add new permanent jobs to it in the same migration.
 
-## Key findings (why the numbers are what they are)
+### Authentication and write safety
 
-1. **The spreadsheet is a validation reference, not a source of truth** ([D8](docs/DECISIONS.md)).
-   The "Ratios 2025-26" sheet is a *manual tally* the CRM never contained. Diagnostic over
-   120 candidates found only 11 distinct statuses; unmapped ones (Assigned, Shortlist, Applied)
-   are not funnel stages. **Ratios match** the sheet (~0.21–0.36 both); **absolute counts don't**
-   (e.g. Jan 2025: mirror 107 vs sheet 223) because the pre-2026 activity was never logged in
-   RecruitCRM. Closing that gap is a data-entry/process fix — the platform reports the CRM figure.
-2. **Owner attribution, not `updated_by`** ([D9](docs/DECISIONS.md)). Crediting whoever logged
-   an event produced impossible funnels (one consultant credited with 62 CVs / 289 first
-   interviews). Per-consultant figures credit the owning consultant of the job.
-3. **Supabase cannot serve HTML.** Both edge functions and public storage are forced to
-   `Content-Type: text/plain` + `CSP: default-src 'none'; sandbox`, so a browser shows raw
-   source. The dashboard is therefore a **JSON API** (`dashboard-data`) plus a **separately-hosted
-   static page** (`web/dashboard.html`) — not an HTML edge function.
-4. **~39% of jobs have an unresolved `client_id`** — they reference companies absent from the
-   `/companies` listing (likely archived). Known gap, low impact on funnel metrics.
-5. **Three hiring pipelines, and no "Internal Interview" stage** (discovered 2026-08-04). RecruitCRM
-   has `Master`, `Calnex`, and `Executive` pipelines. The real stage set is Assigned, Applied,
-   Shortlist, CV Sent, Interview Request, 1st/2nd/**3rd** Interview, Rejected-Client/Consultant,
-   Offered, Placed. "Internal Interview" is **not** a stage. `3rd Interview` (394846) and `Shortlist`
-   (511685) were unmapped and being dropped — now mapped (0018); a history resync is needed to
-   backfill their past events.
-6. **The client/BD funnel lives in the company "Company Status" custom field**, not the contact
-   pipeline (only 15 contacts exist). 3,072 / 4,584 companies are classified: Prospect 2,806,
-   Client 170, Passive 60, Blocklisted 26, Engaged 6, Do-not-contact 4. There is **no "Lead"**
-   status, and "Pitched candidates" / "Job order form complete" aren't captured there — building
-   a BD funnel means syncing this custom field and deciding how to represent those three.
+Every tool call must present a valid token — `Authorization: Bearer`, `x-octagon-token`, or an
+`auth_token` argument. Tokens map to a consultant via `mcp_tokens` and are stored **only as SHA-256
+hashes**, so a lost token is reissued, never recovered. The acting identity is derived from the
+token server-side and cannot be spoofed by a tool argument, which is what protects the audit trail.
+`can_write` and `is_admin` are per token.
+
+Every write is two-phase **preview → confirm**, with optimistic concurrency where a stage could move
+under it, an `audit_log` insert recording who/what/before→after, and a write-through refresh so the
+mirror is correct within seconds. `updated_by` carries the actor's RecruitCRM id, so the action is
+attributed in RecruitCRM's own activity log. Deletion is irreversible and guarded twice; email
+cannot be recalled and will not send to an opted-out recipient.
 
 ---
 
-## Setup / operations
+## Secrets
 
-**Run a sync manually** (server-side / service role):
+Set in Supabase, never in the repo. `.gitignore` excludes `.env`, `*.key` and `secrets/`.
+
+| Secret | Used by |
+|---|---|
+| `RECRUIT_CRM_API_TOKEN` | `recruitcrm-sync`, `octagon-mcp` — account-level RecruitCRM API token |
+| `WEBHOOK_SECRET` | `recruitcrm-webhook` — the `?key=` on every subscription callback |
+| `SLACK_SIGNING_SECRET` | `slack-command` |
+
+Connector access is by per-user token in `mcp_tokens`, not a server secret. The old
+`OCTAGON_WRITE_KEY` shared gate was replaced in v3 and is unused.
+
+---
+
+## Data exposure
+
+`GET /functions/v1/dashboard-data` requires no token, key or header, and returns firm Won revenue,
+the funnel, the deal pipeline and every consultant by name with their figures. The URL appears in
+this README, the wiki and `web/dashboard.html`, in a repository GitHub reports as public.
+
+It stays open until the endpoint is authenticated or reduced to genuinely publishable fields.
+`web/dashboard.html` is what currently depends on it being open, so check that first.
+
+The repository itself is clean of credentials: no personal access tokens or service-role keys are
+committed. The only credentials in tracked files are Supabase **anon** JWTs in cron definitions,
+which are public by design.
+
+---
+
+## Operating it
+
+Full detail in the
+[Operations Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook).
+The essentials:
+
 ```bash
-# incremental (what the cron runs)
-curl -X POST "https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/recruitcrm-sync?mode=incremental"
+# type-check before deploying - always
+node --experimental-strip-types --check supabase/functions/octagon-mcp/index.ts
+
+# deploy with the CLI, never the MCP tool, and never pass --no-verify-jwt
+npx supabase functions deploy octagon-mcp --project-ref kzcmssldvtjnbwwunuwm --use-api
+
+# confirm which build is live
+curl -s https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp
 ```
 
-**Access tokens** (admin, per user). Mint in the Supabase SQL editor — the plaintext is
-returned once and only its hash is stored:
 ```sql
--- read-only token for a recruiter (find the id via GET /v1/users or the consultants table)
-select public.mint_mcp_token(<recruitcrm_user_id>, 'Keelan – read', false);
--- write-enabled token
-select public.mint_mcp_token(<recruitcrm_user_id>, 'Keelan – write', true);
+-- is anything stale?
+select public.sync_health();
+
+-- do the scheduled jobs still exist?
+select public.check_cron_manifest();
+
+-- mint a token (plaintext returned once; only the hash is stored)
+insert into mcp_tokens (token_hash, consultant_recruitcrm_id, label, can_write, is_admin, active)
+values (encode(digest('<plaintext>','sha256'),'hex'), <recruitcrm_id>, 'Name (Recruiter)', true, false, true);
+
+-- revoke
+update mcp_tokens set active = false where label = '…';
 ```
-Give each recruiter their token to paste into the connector's auth field. Revoke with
-`update mcp_tokens set active=false where label='…';`.
 
-**Enable write-back** (admin): mint a token with `can_write=true` (above) and test one real
-write on a **safe** candidate/job first. There is no longer a global write switch — write
-access is per token.
-
-**Sync alerts** (admin, optional): to get pinged on a sync stall, set a Slack/Discord webhook:
-```sql
-update app_settings set value='https://hooks.slack.com/…' where key='alert_webhook_url';
-```
-The 5-min watchdog posts on critical/recovery. Without a webhook it still logs to `sync_alerts`
-and the dashboard shows a staleness banner.
-
-**Admin digest** (admin, optional): a daily 08:00 Slack summary of connector usage
-(who's using it, top tools, calls/errors), write actions, active tokens, sync health, and a
-business pulse (CVs / placements / cold roles). Set the webhook:
-```sql
-update app_settings set value='https://hooks.slack.com/…' where key='admin_webhook_url';
-```
-Usage comes from `mcp_call_log` (every tool call is logged — no PII). Claude *plan* usage
-(seats/spend) is Anthropic-side and not wired in yet — see the note in `0019_admin_telemetry.sql`.
-
-**Daily standup** (admin, optional): a weekday 08:00 Slack post of aging offers + stalled
-candidates on open roles (what to chase). Set the webhook:
-```sql
-update app_settings set value='https://hooks.slack.com/…' where key='standup_webhook_url';
-```
-Recruiters can also pull their own list any time via the `my_day` prompt/tool in Claude.
-
-**Slack `/dashboard` command** (admin, optional): a slash command that returns the live
-dashboard in Slack. (1) Set the Supabase secret `SLACK_SIGNING_SECRET` to your Slack app's
-Signing Secret. (2) In the Slack app → **Slash Commands** → add `/dashboard` with Request URL
-`https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/slack-command`. The endpoint verifies
-the Slack signature, so it stays fail-safe (refuses) until the secret is set. Replies are
-ephemeral (only the person who runs it sees the result).
-
-**Roll the connector out to the team** (admin, in claude.ai):
-1. Add the `octagon-mcp` URL as an **org connector** (Settings → Connectors); each member
-   authorizes it with their own token.
-2. Create a **shared Project** whose instructions say *"at the start of each chat call
-   `get_dashboard` and present it."*
+Optional Slack webhooks live in `app_settings`: `alert_webhook_url` (sync alerts),
+`admin_webhook_url` (daily digest), `standup_webhook_url` (weekday standup).
 
 ---
 
-## Status vs the roadmap
+## Key findings
+
+Why the numbers are what they are. Fuller treatment in
+[Data Caveats](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Data-Caveats).
+
+1. **Funnel parity with RecruitCRM's own report is capped at ~0.4%, and the cause is theirs.**
+   Chased to row level across five periods: 34 of 50 stage-months exact, total variance 30 rows in
+   7,935. The residual is an event the API returns and their report omits, with no distinguishing
+   property. Decision: match the API, which is reproducible, and never fudge the last 0.4%.
+2. **Call categorisation has collapsed from 26% to 9% since May**, while call volume nearly doubled.
+   BD and client call KPIs count only categorised calls, so they now understate reality roughly ten
+   to one. Behavioural, not technical — but the metric is barely worth reporting until it recovers.
+3. **The spreadsheet is a validation reference, not a source of truth** ([D8](docs/DECISIONS.md)).
+   Ratios match; absolute pre-2026 counts do not, because that activity was never logged in
+   RecruitCRM.
+4. **Supabase cannot serve HTML.** Edge functions and public storage force `text/plain` with a
+   restrictive CSP, so the dashboard is a JSON API plus a separately hosted static page.
+5. **Three hiring pipelines, and no "Internal Interview" stage.** The real set is Assigned, Applied,
+   Shortlist, CV Sent, Interview Request, 1st/2nd/3rd Interview, Rejected-Client/Consultant,
+   Offered, Placed. "Internal Interview" means 3rd Interview.
+6. **The client/BD funnel lives in the company "Company Status" custom field**, not the contact
+   pipeline — only 15 contacts exist. There is no "Lead" status.
+7. **RecruitCRM does emit delete events.** Long assumed otherwise, on the evidence that no delete
+   webhook had ever arrived. The real reason was that nobody had subscribed to one; the hourly
+   page-walks were compensating for a missing subscription.
+
+---
+
+## Status
 
 | Milestone | Status |
 |---|---|
-| M0 Foundations & access | ✅ Done (Business plan, EU region, token, migrations) |
-| M1 Data model | ✅ Done (0000–0001) |
-| M2 Ingestion / sync | ✅ Done (backfill + incremental + reconcile + history) |
-| M3 Semantic layer | ✅ Done (15 canonical views, 0 security lints) |
-| M4 Dashboards | ✅ Done (JSON API + static page + session-start auto-render) |
-| M5 Claude query layer | ✅ Done — 7 read tools + 4 prompts, per-user auth |
-| M6 Claude action layer | ⚠️ Built + auth'd (per-user write tokens) — one live write test still not run |
-| M7 Hardening & rollout | ◻️ Partial — ✅ per-user auth, ✅ sync monitoring/alerts; connector rollout + throwaway-function cleanup outstanding |
+| M0 Foundations & access | ✅ Done |
+| M1 Data model | ✅ Done |
+| M2 Ingestion / sync | ✅ Done — plus webhooks, delete events and a cron manifest watchdog |
+| M3 Semantic layer | ✅ Done |
+| M4 Dashboards | ✅ Done |
+| M5 Claude query layer | ✅ Done — 50 tools, 26 prompts, 57 commands, per-user auth |
+| M6 Claude action layer | ✅ Done — live, 44 audited writes since 12/08/2026 |
+| M7 Hardening & rollout | ⚠️ Partial — auth, monitoring and a full command test done; `dashboard-data` exposure open, no CI, throwaway functions still deployed |
+
+**The honest headline is still adoption.** The platform is broad, tested and in use by a handful of
+people. Four tokens are in circulation. That, not capability, is what limits its value.
