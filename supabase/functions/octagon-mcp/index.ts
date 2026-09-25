@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.44.0" };
+const SERVER = { name: "octagon-analytics", version: "3.45.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -196,6 +196,24 @@ async function refreshCandidate(candidate: string) {
   if (rows.length) await db.from("candidate_stage_events").upsert(rows, { onConflict: "candidate_slug,job_slug,stage_metric,event_timestamp" });
   return rows.length;
 }
+// Off-limit is checked LIVE against RecruitCRM, never the mirror. The mirror's off_limit flag is
+// refreshed on a schedule, so a candidate marked off limit this morning can still look available
+// there. Every write that puts a candidate in front of a client goes through this. It fails CLOSED:
+// if RecruitCRM cannot be reached we cannot prove the candidate is clear, so the write is refused.
+async function liveOffLimit(slug: string) {
+  const r = await crm("GET", `/candidates/${encodeURIComponent(slug)}`);
+  if (!r.ok) return { verified: false as const, status: r.status };
+  const c = r.json?.data ?? r.json ?? {};
+  return { verified: true as const, off: !!(c.off_limit_status_id || c.off_limit_end_date),
+    until: c.off_limit_end_date ?? null, reason: c.off_limit_reason ?? null };
+}
+function offLimitRefusal(name: string, chk: any) {
+  if (!chk.verified) return toolText({ error: "off_limit_unverified", candidate: name, status: chk.status,
+    message: "Could not confirm this candidate's off-limit status with RecruitCRM, so nothing was written. Try again in a moment." });
+  return toolText({ error: "off_limit", candidate: name, until: chk.until, reason: chk.reason,
+    message: `${name} is OFF LIMIT in RecruitCRM and must not be put forward to a client. Nothing was written.` });
+}
+
 async function audit(entry: any) { try { await db.from("audit_log").insert(entry); } catch (_e) {} }
 
 // ---- Closure reasons -------------------------------------------------------
@@ -582,7 +600,7 @@ function getPrompt(name: string, args: any): any | null {
     return { description: "BD targets", ...msg("Identify and prioritise key BD targets. Call bd_report for the company/BD funnel (Prospect / Engaged / Client / Passive / etc.). Highlight the best opportunities to pursue — e.g. warm prospects with no recent engagement, or sectors where we are candidate-rich (cross-reference match_candidates if useful). Produce a prioritised BD call list with a one-line reason for each, and suggest the single best target to start with today.") };
   }
   if (name === "spec_pitch") {
-    return { description: "Speculative candidate pitch", ...msg(candCtx + "Create a speculative pitch to place a strong candidate. If a candidate is named, use find_candidate for context; otherwise help the consultant pick a strong, placeable candidate (e.g. someone recently interviewed well or a hot skill set). Produce: (1) an ANONYMISED candidate teaser to send to target clients — sellable highlights (skills, achievements, availability, salary ballpark) with NO name or current employer, and (2) a short email pitch to a prospective client offering a confidential introduction. Then name the types of companies / specific accounts to target. The goal is to get clients interested enough to engage before any identity is revealed.") };
+    return { description: "Speculative candidate pitch", ...msg(candCtx + "Create a speculative pitch to place a strong candidate. FIRST call off_limit with action=check for the candidate; if they are off limit, stop and do not write the pitch. If a candidate is named, use find_candidate for context; otherwise help the consultant pick a strong, placeable candidate (e.g. someone recently interviewed well or a hot skill set). Produce: (1) an ANONYMISED candidate teaser to send to target clients — sellable highlights (skills, achievements, availability, salary ballpark) with NO name or current employer, and (2) a short email pitch to a prospective client offering a confidential introduction. Then name the types of companies / specific accounts to target. The goal is to get clients interested enough to engage before any identity is revealed.") };
   }
   return null;
 }
@@ -754,6 +772,13 @@ async function callTool(name: string, args: any, req: Request) {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Hiring-stage changes require a write-enabled token (an admin sets can_write)." });
     const byId = await stageLookup();
     const proposed = byId.get(args.status_id);
+    // CV Sent is the submission to the client, the same exposure as a pitch. Later stages are left
+    // alone on purpose: off-limit candidates are usually recently placed, and their own placement
+    // still has to be progressed.
+    if (proposed?.stage_metric === "cv_sent") {
+      const chk = await liveOffLimit(String(args.candidate_slug));
+      if (!chk.verified || chk.off) return offLimitRefusal(String(args.candidate_slug), chk);
+    }
     const cur = await currentStage(args.candidate_slug, args.job_slug);
     if (!args.confirm) return toolText({ mode: "preview", candidate_slug: args.candidate_slug, job_slug: args.job_slug, current_stage: cur, proposed_stage: { status_id: args.status_id, name: proposed?.stage_name ?? "(unknown id)" }, create_placement: !!args.create_placement, acting_as: actor.id, instruction: "Show this to the recruiter. To apply, call again with confirm=true and expected_status_id=" + (cur?.status_id ?? "null") + "." });
     if (args.expected_status_id != null && cur && cur.status_id !== args.expected_status_id) return toolText({ error: "conflict", message: "The candidate's stage changed to '" + cur.label + "' (id " + cur.status_id + ") since the preview. Re-preview before applying." });
@@ -973,6 +998,8 @@ async function callTool(name: string, args: any, req: Request) {
       const r = await crm("POST", "/candidates/mark-off-limit", body);
       if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
       await audit({ actor: String(actor.id), action: "mark_off_limit", entity: "candidate", entity_id: cand.slug, before: null, after: body, via: "claude" });
+      // Mirror now, rather than waiting for the scheduled refresh - match_candidates reads this flag.
+      try { await db.from("candidates").update({ off_limit: true, off_limit_until: args.until, off_limit_reason: args.reason ?? null }).eq("slug", cand.slug); } catch (_e) {}
       return toolText({ mode: "applied", candidate: cand.name, off_limit_until: args.until });
     }
     if (action === "release") {
@@ -980,6 +1007,7 @@ async function callTool(name: string, args: any, req: Request) {
       const r = await crm("POST", "/candidates/mark-as-available", { candidate_slugs: cand.slug });
       if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
       await audit({ actor: String(actor.id), action: "mark_as_available", entity: "candidate", entity_id: cand.slug, before: null, after: { candidate_slugs: cand.slug }, via: "claude" });
+      try { await db.from("candidates").update({ off_limit: false, off_limit_until: null, off_limit_reason: null }).eq("slug", cand.slug); } catch (_e) {}
       return toolText({ mode: "applied", candidate: cand.name, off_limit: false });
     }
     return toolText({ error: "action must be list, check, mark or release" });
@@ -1524,6 +1552,13 @@ async function callTool(name: string, args: any, req: Request) {
     const ct = contacts[0];
     const ctName = [ct.first_name, ct.last_name].filter(Boolean).join(" ") || ct.slug;
     const movingStage = args.stage_id != null;
+
+    // Enforced here, not only in the /pitch skill, so a pitch recorded any other way is still guarded.
+    // Checked at preview AND at confirm: the status can change in between.
+    if (!movingStage) {
+      const chk = await liveOffLimit(cand.slug);
+      if (!chk.verified || chk.off) return offLimitRefusal(cand.name, chk);
+    }
 
     if (!args.confirm) {
       return toolText({ mode: "preview", action: movingStage ? "update_pitch_stage" : "pitch_candidate",
