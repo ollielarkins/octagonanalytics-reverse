@@ -352,7 +352,20 @@ async function backfillCandidatesResumable(startPageParam: string | null, maxPag
   return { ...res, started_at_page: from, pass_start: passStart, complete, retired };
 }
 
+// history_recent runs every minute and used to rebuild these maps on every run - 7 pages of jobs
+// plus consultants and stage_lookup, ~13,000 requests a day, a third of all API traffic and most
+// of the log ingestion that put the project over its free-plan quota on 25/09/2026. They change
+// rarely, so cache them per isolate. A job created in the last few minutes can miss its job_id on
+// one walk; the next walk of that candidate fills it in.
+const MAPS_TTL_MS = 10 * 60 * 1000;
+let mapsCache: { at: number; maps: Awaited<ReturnType<typeof loadHistoryMaps>> } | null = null;
 async function historyMaps() {
+  if (mapsCache && Date.now() - mapsCache.at < MAPS_TTL_MS) return mapsCache.maps;
+  const maps = await loadHistoryMaps();
+  mapsCache = { at: Date.now(), maps };
+  return maps;
+}
+async function loadHistoryMaps() {
   const [{ data: sl }, cons, jobs] = await Promise.all([
     db.from("stage_lookup").select("recruitcrm_stage_id,stage_metric,stage_name"),
     allRows("consultants", "recruitcrm_id,name"),
@@ -460,9 +473,19 @@ async function markWalked(recruitcrmId: any) {
 // never walked it, or when its record changed since our last walk. The backlog drains instead of
 // falling off the tail, and a poller outage delays the walk rather than erasing it.
 async function syncHistoryRecent(days: number, maxCandidates: number, offset = 0, sleepMs = 600) {
-  const maps = await historyMaps();
   const { data: cands, error: qErr } = await db.rpc("candidates_due_for_history", { p_limit: maxCandidates });
   if (qErr) throw qErr;
+
+  // Nothing due: skip the maps and the queue count. Never-walked candidates (with a slug) are always
+  // due, so an empty result also means the never-walked queue is empty. Still stamp sync_state, or
+  // sync_health would read an idle minute as a stalled feed.
+  if (!cands?.length) {
+    const now = new Date().toISOString();
+    await db.from("sync_state").upsert({ entity: "history_recent", last_run_at: now, last_synced_at: now,
+      last_status: "cands=0 +0ev -0ev queue=0" }, { onConflict: "entity" });
+    return { entity: "history_recent", candidates_seen: 0, processed: 0, skipped: 0, events: 0, pruned: 0, stopped: null, never_walked_remaining: 0 };
+  }
+  const maps = await historyMaps();
 
   let events = 0, processed = 0, skipped = 0, pruned = 0, stopped: any = null;
   for (const cand of (cands ?? [])) {
