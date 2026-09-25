@@ -137,34 +137,45 @@ const mapNote = (n: any) => ({
   updated_on: n.updated_on ?? null,
 });
 
-// Off-limit is a small, separate list (~88 rows) rather than a field on the candidate list, so it
-// gets its own pass: clear the flags, then set them from the live list. Guarded — an empty or failed
-// fetch leaves the existing flags alone rather than marking everyone approachable.
+// Off-limit list -> mirror flags. Pages through the whole list (the old single call stopped at 100
+// with no paging), and applies it in ONE transaction via apply_off_limit(), so a reader never sees
+// the moment where nobody is flagged. A partial fetch applies nothing: releasing people because a
+// page failed would be far worse than a stale flag. Failures deliberately do not touch
+// sync_state.last_run_at, so a broken refresh still goes stale in sync_health and alerts.
 async function syncOffLimit() {
-  const r = await crm(`/candidates/off-limit?limit=100`);
-  if (!r.ok) return { entity: "offlimit", error: r.status };
-  const inner = r.json?.data ?? r.json;
-  const rows = Array.isArray(inner) ? inner : (inner?.records ?? []);
-  if (!rows.length) return { entity: "offlimit", skipped: true, reason: "empty list — flags left untouched" };
-  const slugs = rows.map((c: any) => c.slug).filter(Boolean);
-  await db.from("candidates").update({ off_limit: false, off_limit_until: null, off_limit_reason: null })
-    .eq("off_limit", true).throwOnError();
-  // Count how many actually matched a mirrored candidate. RecruitCRM can hold off-limit people we
-  // have never synced; those cannot be flagged — but they also cannot appear in match_candidates,
-  // which reads the same mirror, so the filter stays complete for anything we can surface.
-  let matched = 0;
-  for (const c of rows) {
-    if (!c.slug) continue;
-    const { data: upd } = await db.from("candidates").update({
-      off_limit: true,
-      off_limit_until: c.off_limit_end_date ? String(c.off_limit_end_date).slice(0, 10) : null,
-      off_limit_reason: c.off_limit_reason ?? null,
-    }).eq("slug", c.slug).select("slug");
-    if (upd?.length) matched++;
+  const bySlug = new Map<string, any>();
+  let page = 1, more = true, stopped: any = null, lastLen = 0; const CAP = 20;
+  while (more && page <= CAP) {
+    const r = await crm(`/candidates/off-limit?page=${page}&limit=100`);
+    if (!r.ok) { stopped = r.status; break; }
+    const inner = r.json?.data ?? r.json;
+    const rows = Array.isArray(inner) ? inner : (inner?.records ?? []);
+    const before = bySlug.size;
+    for (const c of rows) if (c?.slug) bySlug.set(c.slug, c);
+    lastLen = rows.length;
+    // Stop when there is no next page, or when a "next" page adds nobody (an endpoint that ignores
+    // ?page= would otherwise loop to the cap on the same 100 records).
+    more = !!(r.json?.next_page_url ?? inner?.next_page_url) && bySlug.size > before;
+    page += 1; await sleep(100);
   }
+  if (stopped) return { entity: "offlimit", error: stopped, note: "fetch failed - flags left untouched" };
+  if (more) return { entity: "offlimit", error: "page_cap", note: "list longer than cap - flags left untouched" };
+  if (!bySlug.size) return { entity: "offlimit", skipped: true, reason: "empty list — flags left untouched" };
+
+  const payload = [...bySlug.values()].map((c: any) => ({
+    slug: c.slug,
+    until: c.off_limit_end_date ? String(c.off_limit_end_date).slice(0, 10) : null,
+    reason: c.off_limit_reason ?? null,
+  }));
+  const { data, error } = await db.rpc("apply_off_limit", { p_rows: payload });
+  if (error) throw error;
+  const matched = data?.set ?? 0;
+  // A full final page with no next link may mean the endpoint does not paginate at all. Say so.
+  const warn = lastLen === 100 ? " possibly_truncated" : "";
   await db.from("sync_state").upsert({ entity: "offlimit", last_run_at: new Date().toISOString(),
-    last_status: `off_limit=${slugs.length} matched=${matched}`, last_synced_at: new Date().toISOString() }, { onConflict: "entity" });
-  return { entity: "offlimit", off_limit_in_crm: slugs.length, flagged_in_mirror: matched, not_mirrored: slugs.length - matched };
+    last_status: `off_limit=${payload.length} matched=${matched}${warn}`, last_synced_at: new Date().toISOString() }, { onConflict: "entity" });
+  return { entity: "offlimit", off_limit_in_crm: payload.length, flagged_in_mirror: matched,
+    cleared: data?.cleared ?? 0, not_mirrored: payload.length - matched, possibly_truncated: !!warn };
 }
 
 // PostgREST caps an unbounded select at 1,000 rows. `clients` holds ~4,600, so the lookup map was
@@ -342,7 +353,7 @@ async function backfillCandidatesResumable(startPageParam: string | null, maxPag
 }
 
 async function historyMaps() {
-  const [{ data: sl }, cons] = await Promise.all([
+  const [{ data: sl }, cons, jobs] = await Promise.all([
     db.from("stage_lookup").select("recruitcrm_stage_id,stage_metric,stage_name"),
     allRows("consultants", "recruitcrm_id,name"),
     allRows("jobs", "slug,recruitcrm_id"),
