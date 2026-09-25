@@ -273,9 +273,38 @@ We concluded the placement record carries no money, which is true of its top-lev
 (2,060 in 2025, 824 in 2026) before that table was dropped. Tasks are real, they are in the API,
 and they are a genuine activity signal we currently ignore.
 
+### Call logs — see individual calls, and categorise them from Claude
+
+*Added 25/09/2026.* Recruiters can't ask "what was my last call?": `call_activity` and
+`call_hours_report` return aggregates only. Worse, BD and client calls only count toward weekly
+targets once the call is categorised in RecruitCRM, and the newest calls are consistently
+uncategorised — so the call KPIs undercount by construction.
+
+- **`recent_calls`** (read-only, from the `call_activity` mirror): a recruiter's last N calls with
+  logged time, duration, connected, direction, category and who it was with (linked
+  candidate/contact). Scoped to the caller's own calls unless admin.
+- **`set_call_type`** (write, preview → confirm → audit): set a call's category, e.g. "tag my last
+  three calls as BD". Uses `POST /v1/call-logs/{call_log}` (Edit a call log) with an id from
+  `GET /v1/custom-call-types`. **Confirm first** with the probe that the edit endpoint accepts a
+  category change.
+
+Limits to state in the tool descriptions: calls reach RecruitCRM from Devyce in 15-minute batches
+and the sync polls every 15 minutes, so a call appears 15–30 minutes after hang-up (occasionally
+hours, when Devyce posts late). Logged times are Devyce's batch time, not the real call start.
+Cheap related fix: run the incremental sync at :02/:17/:32/:47 so it lands just after each Devyce
+batch.
+
 ---
 
 ## Tier 3 — new capability, not currently part of the product
+
+- **Direct Devyce feed** — *added 25/09/2026, blocked on Devyce.* Calls seconds after hang-up, with
+  real start times, and potentially notes/recordings that never reach RecruitCRM. Needs Devyce to
+  offer webhooks or an API (unconfirmed — ask their support). Build it into this platform
+  (Devyce → Supabase, exposed through `octagon-mcp`), **not** as a separate MCP server: one set of
+  call numbers that matches the dashboards, one token per recruiter, and calls matched to
+  RecruitCRM records. Recordings/transcripts are special-care personal data — see
+  `docs/GDPR-REVIEW.md` before storing any.
 
 - **Invoicing** (`/v1/invoices`, `/v1/invoice-status`, `/v1/invoice-templates`) — a finance layer
   we have never touched. Would connect placements to actual cash rather than deal value.
@@ -317,7 +346,9 @@ are not something to drive from a chat interface.
 3. **Deal write** — makes the billing number actionable instead of only observable.
 4. **Meetings and sales-pipeline** — settle whether client visits and leads are trackable, and
    correct the documentation either way.
-5. Everything else on demand.
+5. **Call logs: `recent_calls`, then `set_call_type`** — the call KPIs undercount until calls can
+   be categorised without leaving Claude.
+6. Everything else on demand.
 
 Before any of it: no write has yet succeeded through this platform. `audit_log` is empty. The
 first successful `update_job` matters more than any item on this list, because every write tool
