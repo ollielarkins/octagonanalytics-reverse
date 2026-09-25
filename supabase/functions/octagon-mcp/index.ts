@@ -23,7 +23,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.45.0" };
+const SERVER = { name: "octagon-analytics", version: "3.45.1" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -235,11 +235,15 @@ async function resolveClosureReason(kind: string, given: any): Promise<{ reason:
 }
 async function recordClosureReason(kind: "job" | "deal", slug: string, recordName: string | null,
                                    newStatus: string | null, reason: string, detail: string | null, actorId: any) {
-  const text = (kind === "job" ? "Job closed" : "Deal lost") + " - reason: " + reason + (detail ? ". " + detail : "");
+  // JOB_CLOSING includes On Hold, so name the actual status rather than always saying "closed".
+  const text = (kind === "job" ? `Job ${newStatus ? "set to " + newStatus : "closed"}` : `Deal ${newStatus ? "moved to " + newStatus : "lost"}`)
+    + " - reason: " + reason + (detail ? ". " + detail : "");
   let noteOk = false;
   try {
+    // associated_* must be a comma-separated STRING. An array gets a 422 ("associated candidates
+    // must be a string") - which is why no note written through this server ever landed.
     const body: any = { description: text, related_to: slug, related_to_type: kind, updated_by: actorId };
-    if (kind === "job") body.associated_jobs = [slug]; else body.associated_deals = [slug];
+    if (kind === "job") body.associated_jobs = slug; else body.associated_deals = slug;
     const r = await crm("POST", "/notes", body);
     noteOk = !!r.ok;
   } catch (_e) { noteOk = false; }
@@ -1850,7 +1854,8 @@ async function callTool(name: string, args: any, req: Request) {
     const rt = args.target_type === "job" ? "job" : "candidate";
     if (!args.confirm) return toolText({ mode: "preview", action: "add_note", target_type: rt, target_slug: args.target_slug, note_preview: String(args.note ?? "").slice(0, 300), acting_as: actor.id, instruction: "Show this to the recruiter. To apply, call again with confirm=true." });
     const body: any = { description: args.note, related_to: args.target_slug, related_to_type: rt, updated_by: actor.id };
-    if (rt === "candidate") body.associated_candidates = [args.target_slug]; else body.associated_jobs = [args.target_slug];
+    // String, not array - see recordClosureReason. Until 3.45.1 this 422'd on every call.
+    if (rt === "candidate") body.associated_candidates = String(args.target_slug); else body.associated_jobs = String(args.target_slug);
     const r = await crm("POST", `/notes`, body);
     if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
     await audit({ actor: String(actor.id), action: "add_note", entity: rt, entity_id: args.target_slug, before: null, after: { note: String(args.note ?? "").slice(0, 500) }, via: "claude" });
