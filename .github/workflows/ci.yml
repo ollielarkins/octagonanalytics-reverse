@@ -1,0 +1,50 @@
+name: CI
+
+# Checks only - nothing here deploys. Every job maps to a rule in CONTRIBUTING.md.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: Type-check edge functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # `dashboard` is excluded: it is browser code (document.*) inside a function, due for removal
+      # with the dashboard-data endpoint. Everything else must type-check - this is the check that
+      # would have caught historyMaps using an undefined `jobs` on 25/09/2026.
+      - name: deno check
+        run: |
+          status=0
+          for f in supabase/functions/*/index.ts; do
+            case "$f" in supabase/functions/dashboard/*) echo "skip $f"; continue;; esac
+            echo "::group::$f"
+            deno check "$f" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
+  repo-rules:
+    name: Migrations, function config, widgets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Migration hygiene
+        run: node scripts/check-migrations.js
+      - name: verify_jwt declared for every function
+        run: node scripts/check-function-config.js
+      - name: MCP widgets emit valid JS
+        run: node scripts/check-widgets.js supabase/functions/octagon-mcp/index.ts
+      - name: Connect page survives wpautop
+        run: node scripts/check-connect-page.js
