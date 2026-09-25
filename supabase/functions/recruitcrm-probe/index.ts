@@ -85,9 +85,37 @@ async function peek(token: string, path: string) {
   } catch (e) { return { error: String(e) }; }
 }
 
+// RecruitCRM's own target report, with values. The one exception to "never return values": target
+// configuration is not candidate data (names, dates, KPI names, numbers, assignee user ids), and the
+// point is to compare it against weekly_targets / billing_targets (ROADMAP Tier 1, "Targets").
+// Assignees are reduced to id and name - staff, not candidates - and nothing else is passed through.
+async function targetReport(token: string) {
+  const res = await fetch(`${BASE}/target-report/get`, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
+  const text = await res.text();
+  let json: any = null; try { json = JSON.parse(text); } catch {}
+  if (!res.ok || !json) return { status: res.status, error: text.slice(0, 200) };
+  const rows = Array.isArray(json?.data) ? json.data : [];
+  const person = (a: any) => (a && typeof a === "object")
+    ? { id: a.id ?? a.Id ?? a.user_id ?? a.UserId ?? null, name: a.name ?? a.Name ?? ([a.first_name, a.last_name].filter(Boolean).join(" ") || null) }
+    : { id: a, name: null };
+  return {
+    status: res.status, total: json.total ?? rows.length,
+    targets: rows.map((t: any) => ({
+      id: t.TargetId, name: t.TargetName, created_on: t.CreatedOn, created_by: t.CreatedBy,
+      start: t.StartDate, end: t.EndDate, frequency: t.Frequency, assignee_type: t.TypeOfAssignees,
+      assignees: Array.isArray(t.Assignees) ? t.Assignees.map(person) : t.Assignees,
+      kpis: t.TargetKPIs,
+    })),
+  };
+}
+
 Deno.serve(async (req) => {
   {
     const probeUrl = new URL(req.url);
+    if (probeUrl.searchParams.get("target_report")) {
+      const tk = Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "";
+      return Response.json(await targetReport(tk));
+    }
     const getPath = probeUrl.searchParams.get("get_for");
     if (getPath) {
       const tk = Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "";
