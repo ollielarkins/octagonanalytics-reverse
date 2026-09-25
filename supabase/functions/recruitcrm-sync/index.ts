@@ -353,7 +353,7 @@ async function backfillCandidatesResumable(startPageParam: string | null, maxPag
 }
 
 async function historyMaps() {
-  const [{ data: sl }, cons] = await Promise.all([
+  const [{ data: sl }, cons, jobs] = await Promise.all([
     db.from("stage_lookup").select("recruitcrm_stage_id,stage_metric,stage_name"),
     allRows("consultants", "recruitcrm_id,name"),
     allRows("jobs", "slug,recruitcrm_id"),
