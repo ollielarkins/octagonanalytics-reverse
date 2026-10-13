@@ -6,6 +6,7 @@
 - [Onboarding](Onboarding)
 - [Commands](Commands)
 - [Tools Reference](Tools-Reference)
+- [Inbox](Inbox)
 
 **Trusting it**
 - [Metrics and Definitions](Metrics-and-Definitions)

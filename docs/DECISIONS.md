@@ -135,3 +135,25 @@ is the stable "whose desk is this" key and matches how the firm thinks about per
 activity log attributes the acting consultant), but it is never the reporting attribution key.
 
 **Status:** **Decided & as-built 2026-08-04.**
+
+---
+
+## Recruiter inboxes: metadata only, drafts only, opt-in
+
+**Decision.** Recruiters can connect their own Outlook inbox (0085, `inbox-sync`, `inbox` and
+`draft_reply` tools). The platform stores envelope metadata only (sender, subject, time, thread, a
+rule-based category), purges it after 30 days, fetches a body only when its owner asks, and can save
+reply drafts but cannot send. Each recruiter opts in; nobody's mailbox is read because they hold a token.
+
+**Why.** Requested 13/10/2026 to cut time on routine email. Bodies carry candidate and client personal
+data, so holding only what the "what's new" summary needs keeps the GDPR footprint small. The Graph
+permission is Mail.ReadWrite without Mail.Send, so a bug cannot send mail. Categories are rules rather
+than a model so they are predictable and explainable; offers, pay, fees, complaints and legal are
+"never" and are checked before "routine".
+
+**Consequence.** No server-side AI call: drafting happens in the recruiter's Claude chat, so email
+content goes to Anthropic only when the recruiter asks for a draft, under the same terms as the rest
+of their chat. Before more recruiters connect, a short DPIA entry should record the processing.
+
+**Status:** **Decided & built 13/10/2026** (octagon-mcp 3.46.0). Not live until the Microsoft 365 app
+registration and secrets are in place; see docs/wiki/Inbox.md.
