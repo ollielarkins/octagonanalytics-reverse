@@ -74,6 +74,7 @@ Drafting. It never invents a salary or a fact - you get a [placeholder] instead.
 |---|---|
 | `/advert` | Write a job advert from a role in RecruitCRM or from a brief you paste |
 | `/boolean` | Build a Boolean search string for a role, for LinkedIn or the job boards |
+| `/inmail` | Draft a personalised LinkedIn Recruiter InMail from a job and a candidate. You review and send it; it never sends |
 | `/specpitch` | Write a speculative pitch putting a candidate to a client — anonymised by default |
 | `/interviewprep` | Prep a candidate for an interview — the role, the client, and what to expect |
 
