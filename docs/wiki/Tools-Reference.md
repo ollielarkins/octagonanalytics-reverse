@@ -21,7 +21,7 @@ This page is for knowing what's possible, and for debugging when an answer looks
 | `cold_jobs` | Open roles with no activity for N days (default 14) | No |
 | `stalled_report` | Firm-wide aging offers and stalled candidates | Yes |
 | `job_pipeline` | Who's in play on a role and at what stage | Yes |
-| `find_candidate` | Resolve a person and see their stage on each job | Yes |
+| `find_candidate` | Resolve a person (by name or RecruitCRM candidate ID) and see their stage on each job | Yes |
 | `match_candidates` | Skill-matched candidates for a spec, ranked with reasons | Yes |
 | `call_activity` | Calls, connect rate, talk time, by consultant and category | No |
 | `bd_report` | Companies by status — Prospect, Engaged, Client, Passive | No |
