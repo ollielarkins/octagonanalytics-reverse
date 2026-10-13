@@ -21,6 +21,10 @@ Each recruiter can connect their own @octagongroup.co.uk Outlook inbox. The plat
   deliberately broad, because a false "never" costs one manual reply and a false "routine" on an offer
   costs far more.
 - **"Read the one from X"** fetches that email in full, live from Outlook.
+- **Attachments** are listed when an email is read. "Read the attachment" opens one: PDFs and Word
+  documents come back as text, images as images Claude can see, text and CSV files as text, up to
+  10 MB. Other types (Excel, zip, attached emails) are listed but have to be opened in Outlook. Like
+  bodies, attachments are fetched only on request and never stored.
 - **"Draft a reply"** shows the reply in chat first. Only on confirmation is it saved to Outlook
   Drafts, in the same thread with the original quoted. The recruiter sends it from Outlook.
 
