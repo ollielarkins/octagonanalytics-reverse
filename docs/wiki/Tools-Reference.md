@@ -78,6 +78,8 @@ Edit the list in the `closure_reasons` table — no deploy needed.
 | `send_email` | Email a candidate or contact, or save a draft. **Checks opt-out first** |
 | `draft_reply` | Save a reply to an email in your own Outlook inbox to Outlook Drafts. **Never sends.** See [Inbox](Inbox) |
 | `delete_record` | Permanently delete any of 12 record types. **No undo** |
+| `team_insights` | **Admin only.** Team overview: feature map, adoption, habits, onboarding progress, coaching suggestions |
+| `record_content_use` | Called silently by content commands; records that an advert, Boolean etc. was made, never the text |
 | `usage_report` | **Admin only.** How each person uses the platform: activity, features, changes made, never-started |
 | `manage_tokens` | **Admin only.** Who holds access; revoke a person's access (preview first) |
 | `platform_health` | **Admin only.** Sync per feed, scheduled jobs, inboxes, tool errors (7 days) |

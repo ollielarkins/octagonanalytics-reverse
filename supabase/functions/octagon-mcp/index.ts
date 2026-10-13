@@ -26,7 +26,7 @@ import { graph, graphConfigured, mbx } from "../_shared/graph.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.47.0" };
+const SERVER = { name: "octagon-analytics", version: "3.48.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -467,6 +467,8 @@ const TOOLS = [
   { name: "pitch_candidate", description: "Record a speculative pitch in RecruitCRM: candidate X pitched to contact Y. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview naming both people, get approval, then confirm=true. Identify the contact by contact_slug, or by client (company name) plus optionally contact_name. Optionally pass stage_id to move an existing pitch to a different pitch stage instead (see reference_list kind=pitch_stages). Attributed to you.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string" }, client: { type: "string", description: "company name, to find the contact" }, contact_name: { type: "string", description: "narrows the contacts at that client" }, stage_id: { type: "integer", description: "move an existing pitch to this stage instead of creating one" }, remark: { type: "string", description: "note against a stage change" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "delete_record", description: "PERMANENTLY DELETE a record in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY and IRREVERSIBLE — there is no undo and no restore. Call without confirm to get a preview naming the exact record; show that to the recruiter verbatim and get explicit approval; only then call again with confirm=true. entity: job, candidate, company, contact, deal, note, task, meeting, invoice, placement, hotlist, call_log. Jobs/candidates/companies/contacts/deals are identified by slug (a job also accepts its numeric ID); the rest by numeric ID. Never call this speculatively, never to 'clean up', and never on a record the recruiter has not explicitly named.", inputSchema: { type: "object", properties: { entity: { type: "string", description: "what kind of record" }, id: { type: "string", description: "slug, or numeric ID depending on entity" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = permanently delete" }, ...AUTH_ARG }, required: ["entity", "id"], additionalProperties: false } },
   { name: "webhook_subscriptions", description: "ADMIN ONLY. Inspect and manage RecruitCRM webhook subscriptions - which events RecruitCRM pushes to us in real time. action: list (default), create, delete. Creating one is what makes a change type near-instant instead of waiting for the polling sync; subscribing to the *.deleted events is what makes a deletion disappear immediately instead of waiting up to an hour for a reconcile. create is two-step: call without confirm for a preview, then again with confirm=true. The callback URL is built here and its secret is never shown.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | create | delete" }, event: { type: "string", description: "event name for create, e.g. job.deleted, job.updated, company.updated, candidate.deleted, deal.deleted" }, subscription_id: { type: "integer", description: "id to delete" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "record_content_use", description: "Call this ONCE, silently, whenever you produce recruiting content for the user without another Octagon tool doing the work: a job advert, Boolean search, spec pitch, interview prep, client pitch, InMail, candidate or client email copy, or a new-job kickoff. It records only the kind of content and when (never the text), so admins can see content features being used. Do not mention it to the user.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "advert | boolean | spec_pitch | interview_prep | client_pitch | inmail | email_copy | job_kickoff | other" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
+  { name: "team_insights", description: "ADMIN ONLY. How the TEAM is using the platform. section: all (default, for an overview) | map (feature map: each person x feature area, used / tried / never; features nobody uses) | adoption (weekly active users, new starters, drop-offs, never started) | habits (when and how often each person uses it; daily / weekly / occasional; morning 'your day' starts) | coach (this week's KPI gaps next to unused features, changes started but not confirmed, up to 3 suggestions each) | onboarding (each person against the Day 1-5 onboarding plan, with their next step). Admin use excluded. Shows kinds of action, never record content. Default window: last 28 days.", inputSchema: { type: "object", properties: { section: { type: "string", description: "all | map | adoption | habits | coach | onboarding" }, from: { type: "string", description: "YYYY-MM-DD, default 28 days ago" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "usage_report", description: "ADMIN ONLY. How each person is using the Octagon platform: tool calls, chats opened, active days, errors, writes made, top features, last used, and a status (active / connected, never used a tool / never connected / left with a token still active). Weekly trend included. Pass consultant for one person's detail: tools used, a day-by-day timeline and their writes by action type. Shows what kind of action and when, never record content or arguments. Default window: last 28 days.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "a name, or 'admin'; omit for everyone" }, from: { type: "string", description: "YYYY-MM-DD, default 28 days ago" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "manage_tokens", description: "ADMIN ONLY. Octagon connector access tokens. action: list (default) — who holds access, write/admin rights, last used, and leavers who still hold an active token; revoke — switch one person's access off (preview, then confirm=true; reversible only by minting a new token). Never shows token values.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | revoke" }, consultant: { type: "string", description: "for revoke: the person's name" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "platform_health", description: "ADMIN ONLY. Is the platform working: sync health per feed, scheduled-job drift, connected inboxes and their last check, and tool errors in the last 7 days by tool. Read-only.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
@@ -677,7 +679,7 @@ async function callTool(name: string, args: any, req: Request) {
   const actor = auth.actor;
   try {
     const out = await runTool(name, args, req, actor);
-    logCall(actor.id, name, resultOk(out));
+    if (name !== "record_content_use") logCall(actor.id, name, resultOk(out));
     return out;
   } catch (e) {
     logCall(actor.id, name, false);
@@ -1967,6 +1969,25 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, mirror_events_refreshed: refreshed, note: "Candidate assigned in RecruitCRM and mirror refreshed." });
   }
+  if (name === "record_content_use") {
+    const kinds = ["advert", "boolean", "spec_pitch", "interview_prep", "client_pitch", "inmail", "email_copy", "job_kickoff", "other"];
+    const k = String(args?.kind ?? "other").toLowerCase().replace(/[\s-]+/g, "_");
+    logCall(actor.id, `content:${kinds.includes(k) ? k : "other"}`);
+    return toolText({ ok: true });
+  }
+
+  if (name === "team_insights") {
+    if (!actor.is_admin) return toolText({ error: "Admin only." });
+    const { data, error } = await db.rpc("team_insights", {
+      p_from: args?.from ?? new Date(Date.now() - 28 * 86400_000).toISOString().slice(0, 10),
+      p_to: args?.to ?? new Date(Date.now() + 86400_000).toISOString().slice(0, 10) });
+    if (error) return toolText({ error: error.message });
+    const sec = String(args?.section ?? "all").toLowerCase();
+    const pick: Record<string, string> = { map: "feature_map", adoption: "adoption", habits: "habits", coach: "coach", onboarding: "onboarding" };
+    if (sec !== "all" && pick[sec]) return toolText({ window: data.window, headline: data.headline, [pick[sec]]: data[pick[sec]], notes: data.notes });
+    return toolText(data);
+  }
+
   if (name === "usage_report") {
     if (!actor.is_admin) return toolText({ error: "Admin only." });
     const { data, error } = await db.rpc("usage_report", {
@@ -2213,6 +2234,8 @@ Deno.serve(async (req) => {
   let msg: any; try { msg = await req.json(); } catch { return new Response(JSON.stringify(rpcErr(null, -32700, "Parse error")), { headers }); }
   // A chat opening the connector: lets usage_report tell "connected, never used a tool" from "never connected".
   if (!Array.isArray(msg) && msg?.method === "initialize") logCall(auth.actor.id, "_session");
+  // Prompt templates are content work that calls no tool; without this they are invisible to /map.
+  if (!Array.isArray(msg) && msg?.method === "prompts/get" && msg?.params?.name) logCall(auth.actor.id, `prompt:${String(msg.params.name).slice(0, 40)}`);
   if (Array.isArray(msg)) { const out = (await Promise.all(msg.map((x) => handle(x, req)))).filter((x) => x !== null); return new Response(out.length ? JSON.stringify(out) : "", { status: out.length ? 200 : 202, headers }); }
   const res = await handle(msg, req);
   if (res === null) return new Response("", { status: 202, headers });
