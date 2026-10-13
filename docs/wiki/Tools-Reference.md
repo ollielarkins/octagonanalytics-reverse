@@ -31,6 +31,7 @@ This page is for knowing what's possible, and for debugging when an answer looks
 | `candidate_profile` | Work history, education, every job they're in play on | Yes |
 | `activity_report` | Meetings (client visits) or tasks for a window | Yes |
 | `files_list` | CVs and documents attached to a candidate, job or client | Yes |
+| `inbox` | Your own Outlook inbox: what's new, read one, connect or disconnect. See [Inbox](Inbox) | Yes |
 | `off_limit` | Who must not be approached, and why | Yes |
 | `invoices_report` | Invoices raised — currently none exist in RecruitCRM | No |
 | `reference_list` | Any RecruitCRM dropdown list: currencies, stages, note/task/meeting types, teams | No |
@@ -75,6 +76,7 @@ Edit the list in the `closure_reasons` table — no deploy needed.
 | `hotlist` | Create a talent pool, add or remove people |
 | `off_limit` (mark/release) | Bar a candidate from being approached, or lift it |
 | `send_email` | Email a candidate or contact, or save a draft. **Checks opt-out first** |
+| `draft_reply` | Save a reply to an email in your own Outlook inbox to Outlook Drafts. **Never sends.** See [Inbox](Inbox) |
 | `delete_record` | Permanently delete any of 12 record types. **No undo** |
 
 Three carry extra weight:

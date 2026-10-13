@@ -58,3 +58,9 @@ verify_jwt = true
 # Renders and sends Ollie's scheduled digests. Driven by pg_cron via send_digest_if_due(), which
 # presents the bearer from app_settings.cron_bearer. Holds RESEND_API_KEY, so it stays locked.
 verify_jwt = true
+
+[functions.inbox-sync]
+# Polls connected Outlook inboxes via Microsoft Graph. Driven by pg_cron (0085, inbox-poll), which
+# presents the bearer from app_settings.cron_bearer. Holds the Graph app secret, so it stays locked.
+# Its response carries counts only, never mail data.
+verify_jwt = true
