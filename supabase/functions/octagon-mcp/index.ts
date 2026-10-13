@@ -26,7 +26,7 @@ import { graph, graphConfigured, mbx } from "../_shared/graph.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.48.0" };
+const SERVER = { name: "octagon-analytics", version: "3.49.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -275,10 +275,12 @@ async function authenticate(req: Request, args: any): Promise<{ ok: boolean; act
   const token = (bearer || req.headers.get("x-octagon-token") || args?.auth_token || "").trim();
   if (!token) return { ok: false, reason: "Authentication required. Configure this connector with your Octagon access token (an admin mints one via mint_mcp_token)." };
   const hash = await sha256hex(token);
-  const { data } = await db.from("mcp_tokens").select("consultant_recruitcrm_id,label,can_write,is_admin").eq("token_hash", hash).eq("active", true).maybeSingle();
+  const { data } = await db.from("mcp_tokens").select("consultant_recruitcrm_id,label,can_write,is_admin,can_view_usage").eq("token_hash", hash).eq("active", true).maybeSingle();
   if (!data) return { ok: false, reason: "Invalid or revoked token." };
   db.from("mcp_tokens").update({ last_used_at: new Date().toISOString() }).eq("token_hash", hash).then(() => {}, () => {});
-  return { ok: true, actor: { id: data.consultant_recruitcrm_id, label: data.label, can_write: data.can_write, is_admin: !!data.is_admin } };
+  return { ok: true, actor: { id: data.consultant_recruitcrm_id, label: data.label, can_write: data.can_write, is_admin: !!data.is_admin,
+    // Team-usage views without the rest of admin (0088): Dale keeps his own desk but sees /team, /usage...
+    can_view_usage: !!data.is_admin || !!data.can_view_usage } };
 }
 
 const AUTH_ARG = { auth_token: { type: "string", description: "Octagon access token (only needed if the connector isn't sending it as a bearer header)." } };
@@ -468,10 +470,10 @@ const TOOLS = [
   { name: "delete_record", description: "PERMANENTLY DELETE a record in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY and IRREVERSIBLE — there is no undo and no restore. Call without confirm to get a preview naming the exact record; show that to the recruiter verbatim and get explicit approval; only then call again with confirm=true. entity: job, candidate, company, contact, deal, note, task, meeting, invoice, placement, hotlist, call_log. Jobs/candidates/companies/contacts/deals are identified by slug (a job also accepts its numeric ID); the rest by numeric ID. Never call this speculatively, never to 'clean up', and never on a record the recruiter has not explicitly named.", inputSchema: { type: "object", properties: { entity: { type: "string", description: "what kind of record" }, id: { type: "string", description: "slug, or numeric ID depending on entity" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = permanently delete" }, ...AUTH_ARG }, required: ["entity", "id"], additionalProperties: false } },
   { name: "webhook_subscriptions", description: "ADMIN ONLY. Inspect and manage RecruitCRM webhook subscriptions - which events RecruitCRM pushes to us in real time. action: list (default), create, delete. Creating one is what makes a change type near-instant instead of waiting for the polling sync; subscribing to the *.deleted events is what makes a deletion disappear immediately instead of waiting up to an hour for a reconcile. create is two-step: call without confirm for a preview, then again with confirm=true. The callback URL is built here and its secret is never shown.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | create | delete" }, event: { type: "string", description: "event name for create, e.g. job.deleted, job.updated, company.updated, candidate.deleted, deal.deleted" }, subscription_id: { type: "integer", description: "id to delete" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "record_content_use", description: "Call this ONCE, silently, whenever you produce recruiting content for the user without another Octagon tool doing the work: a job advert, Boolean search, spec pitch, interview prep, client pitch, InMail, candidate or client email copy, or a new-job kickoff. It records only the kind of content and when (never the text), so admins can see content features being used. Do not mention it to the user.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "advert | boolean | spec_pitch | interview_prep | client_pitch | inmail | email_copy | job_kickoff | other" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
-  { name: "team_insights", description: "ADMIN ONLY. How the TEAM is using the platform. section: all (default, for an overview) | map (feature map: each person x feature area, used / tried / never; features nobody uses) | adoption (weekly active users, new starters, drop-offs, never started) | habits (when and how often each person uses it; daily / weekly / occasional; morning 'your day' starts) | coach (this week's KPI gaps next to unused features, changes started but not confirmed, up to 3 suggestions each) | onboarding (each person against the Day 1-5 onboarding plan, with their next step). Admin use excluded. Shows kinds of action, never record content. Default window: last 28 days.", inputSchema: { type: "object", properties: { section: { type: "string", description: "all | map | adoption | habits | coach | onboarding" }, from: { type: "string", description: "YYYY-MM-DD, default 28 days ago" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, ...AUTH_ARG }, additionalProperties: false } },
-  { name: "usage_report", description: "ADMIN ONLY. How each person is using the Octagon platform: tool calls, chats opened, active days, errors, writes made, top features, last used, and a status (active / connected, never used a tool / never connected / left with a token still active). Weekly trend included. Pass consultant for one person's detail: tools used, a day-by-day timeline and their writes by action type. Shows what kind of action and when, never record content or arguments. Default window: last 28 days.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "a name, or 'admin'; omit for everyone" }, from: { type: "string", description: "YYYY-MM-DD, default 28 days ago" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "team_insights", description: "ADMIN ONLY (admins and usage viewers). How the TEAM is using the platform. section: all (default, for an overview) | map (feature map: each person x feature area, used / tried / never; features nobody uses) | adoption (weekly active users, new starters, drop-offs, never started) | habits (when and how often each person uses it; daily / weekly / occasional; morning 'your day' starts) | coach (this week's KPI gaps next to unused features, changes started but not confirmed, up to 3 suggestions each) | onboarding (each person against the Day 1-5 onboarding plan, with their next step). Admin use excluded. Shows kinds of action, never record content. Default window: last 28 days.", inputSchema: { type: "object", properties: { section: { type: "string", description: "all | map | adoption | habits | coach | onboarding" }, from: { type: "string", description: "YYYY-MM-DD, default 28 days ago" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "usage_report", description: "ADMIN ONLY (admins and usage viewers). How each person is using the Octagon platform: tool calls, chats opened, active days, errors, writes made, top features, last used, and a status (active / connected, never used a tool / never connected / left with a token still active). Weekly trend included. Pass consultant for one person's detail: tools used, a day-by-day timeline and their writes by action type. Shows what kind of action and when, never record content or arguments. Default window: last 28 days.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "a name, or 'admin'; omit for everyone" }, from: { type: "string", description: "YYYY-MM-DD, default 28 days ago" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "manage_tokens", description: "ADMIN ONLY. Octagon connector access tokens. action: list (default) — who holds access, write/admin rights, last used, and leavers who still hold an active token; revoke — switch one person's access off (preview, then confirm=true; reversible only by minting a new token). Never shows token values.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | revoke" }, consultant: { type: "string", description: "for revoke: the person's name" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
-  { name: "platform_health", description: "ADMIN ONLY. Is the platform working: sync health per feed, scheduled-job drift, connected inboxes and their last check, and tool errors in the last 7 days by tool. Read-only.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
+  { name: "platform_health", description: "ADMIN ONLY (admins and usage viewers). Is the platform working: sync health per feed, scheduled-job drift, connected inboxes and their last check, and tool errors in the last 7 days by tool. Read-only.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
   { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
@@ -1977,7 +1979,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
   }
 
   if (name === "team_insights") {
-    if (!actor.is_admin) return toolText({ error: "Admin only." });
+    if (!actor.can_view_usage) return toolText({ error: "Admin only." });
     const { data, error } = await db.rpc("team_insights", {
       p_from: args?.from ?? new Date(Date.now() - 28 * 86400_000).toISOString().slice(0, 10),
       p_to: args?.to ?? new Date(Date.now() + 86400_000).toISOString().slice(0, 10) });
@@ -1989,7 +1991,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
   }
 
   if (name === "usage_report") {
-    if (!actor.is_admin) return toolText({ error: "Admin only." });
+    if (!actor.can_view_usage) return toolText({ error: "Admin only." });
     const { data, error } = await db.rpc("usage_report", {
       p_from: args?.from ?? new Date(Date.now() - 28 * 86400_000).toISOString().slice(0, 10),
       p_to: args?.to ?? new Date(Date.now() + 86400_000).toISOString().slice(0, 10),
@@ -2035,7 +2037,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
   }
 
   if (name === "platform_health") {
-    if (!actor.is_admin) return toolText({ error: "Admin only." });
+    if (!actor.can_view_usage) return toolText({ error: "Admin only." });
     const since = new Date(Date.now() - 7 * 86400_000).toISOString();
     const [h, c, boxes, errs] = await Promise.all([
       db.rpc("sync_health"), db.rpc("check_cron_manifest"),
@@ -2161,7 +2163,7 @@ async function sha256b64url(s: string): Promise<string> {
 function randToken(n = 32) { const a = new Uint8Array(n); crypto.getRandomValues(a); return Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join(""); }
 async function validateOctagonToken(token: string) {
   const t = (token || "").trim(); if (!t) return null;
-  const { data } = await db.from("mcp_tokens").select("consultant_recruitcrm_id,can_write,is_admin").eq("token_hash", await sha256hex(t)).eq("active", true).maybeSingle();
+  const { data } = await db.from("mcp_tokens").select("consultant_recruitcrm_id,can_write,is_admin,can_view_usage").eq("token_hash", await sha256hex(t)).eq("active", true).maybeSingle();
   return data ?? null;
 }
 // Supabase can't serve rendered HTML (text/plain + nosniff on the *.supabase.co domain), so the
@@ -2186,7 +2188,7 @@ async function handleAuthorize(req: Request): Promise<Response> {
   const code = randToken(24);
   // Carry is_admin through the exchange alongside can_write, or re-authenticating silently demotes
   // an admin to the recruiter view.
-  await db.from("oauth_codes").insert({ code, consultant_recruitcrm_id: who.consultant_recruitcrm_id, can_write: !!who.can_write, is_admin: !!who.is_admin, code_challenge: p.code_challenge, redirect_uri: p.redirect_uri, expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString() });
+  await db.from("oauth_codes").insert({ code, consultant_recruitcrm_id: who.consultant_recruitcrm_id, can_write: !!who.can_write, is_admin: !!who.is_admin, can_view_usage: !!who.can_view_usage, code_challenge: p.code_challenge, redirect_uri: p.redirect_uri, expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString() });
   const redir = new URL(p.redirect_uri); redir.searchParams.set("code", code); if (p.state) redir.searchParams.set("state", p.state);
   return new Response(null, { status: 302, headers: { Location: redir.toString() } });
 }
@@ -2204,7 +2206,7 @@ async function handleToken(req: Request): Promise<Response> {
   if (rec.redirect_uri !== body.redirect_uri) return err("invalid_grant", "redirect_uri mismatch");
   if ((await sha256b64url(body.code_verifier)) !== rec.code_challenge) return err("invalid_grant", "PKCE verification failed");
   const accessToken = "oct_oauth_" + randToken(24);
-  await db.from("mcp_tokens").insert({ token_hash: await sha256hex(accessToken), consultant_recruitcrm_id: rec.consultant_recruitcrm_id, can_write: rec.can_write, is_admin: !!rec.is_admin, label: "oauth-session", active: true });
+  await db.from("mcp_tokens").insert({ token_hash: await sha256hex(accessToken), consultant_recruitcrm_id: rec.consultant_recruitcrm_id, can_write: rec.can_write, is_admin: !!rec.is_admin, can_view_usage: !!rec.can_view_usage, label: "oauth-session", active: true });
   return new Response(JSON.stringify({ access_token: accessToken, token_type: "Bearer", expires_in: 7776000, scope: "mcp" }), { headers: CORS });
 }
 async function handleRegister(req: Request): Promise<Response> {
