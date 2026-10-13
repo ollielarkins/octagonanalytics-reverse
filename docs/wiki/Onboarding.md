@@ -57,6 +57,13 @@ Dashboard" with a whole-team table instead, your token is resolving as an admin 
 If you get an authentication error, your token is wrong or revoked. If nothing happens at all, the
 connector isn't enabled in that chat.
 
+### What admins can see
+
+Admins can see how each person uses the platform: which features, how often, when, and what kind
+of change was made (e.g. "3 stage moves on 12/10/2026"). They can't see which candidate or what you
+wrote through this view, and chats that don't use the Octagon connector aren't counted. It exists to
+help people get set up and to spot problems, not to measure performance.
+
 ---
 
 ## Part 2 — Read this before you trust a number

@@ -26,7 +26,7 @@ import { graph, graphConfigured, mbx } from "../_shared/graph.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.46.1" };
+const SERVER = { name: "octagon-analytics", version: "3.47.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -467,6 +467,9 @@ const TOOLS = [
   { name: "pitch_candidate", description: "Record a speculative pitch in RecruitCRM: candidate X pitched to contact Y. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview naming both people, get approval, then confirm=true. Identify the contact by contact_slug, or by client (company name) plus optionally contact_name. Optionally pass stage_id to move an existing pitch to a different pitch stage instead (see reference_list kind=pitch_stages). Attributed to you.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name or slug" }, contact_slug: { type: "string" }, client: { type: "string", description: "company name, to find the contact" }, contact_name: { type: "string", description: "narrows the contacts at that client" }, stage_id: { type: "integer", description: "move an existing pitch to this stage instead of creating one" }, remark: { type: "string", description: "note against a stage change" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "delete_record", description: "PERMANENTLY DELETE a record in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY and IRREVERSIBLE — there is no undo and no restore. Call without confirm to get a preview naming the exact record; show that to the recruiter verbatim and get explicit approval; only then call again with confirm=true. entity: job, candidate, company, contact, deal, note, task, meeting, invoice, placement, hotlist, call_log. Jobs/candidates/companies/contacts/deals are identified by slug (a job also accepts its numeric ID); the rest by numeric ID. Never call this speculatively, never to 'clean up', and never on a record the recruiter has not explicitly named.", inputSchema: { type: "object", properties: { entity: { type: "string", description: "what kind of record" }, id: { type: "string", description: "slug, or numeric ID depending on entity" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = permanently delete" }, ...AUTH_ARG }, required: ["entity", "id"], additionalProperties: false } },
   { name: "webhook_subscriptions", description: "ADMIN ONLY. Inspect and manage RecruitCRM webhook subscriptions - which events RecruitCRM pushes to us in real time. action: list (default), create, delete. Creating one is what makes a change type near-instant instead of waiting for the polling sync; subscribing to the *.deleted events is what makes a deletion disappear immediately instead of waiting up to an hour for a reconcile. create is two-step: call without confirm for a preview, then again with confirm=true. The callback URL is built here and its secret is never shown.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | create | delete" }, event: { type: "string", description: "event name for create, e.g. job.deleted, job.updated, company.updated, candidate.deleted, deal.deleted" }, subscription_id: { type: "integer", description: "id to delete" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "usage_report", description: "ADMIN ONLY. How each person is using the Octagon platform: tool calls, chats opened, active days, errors, writes made, top features, last used, and a status (active / connected, never used a tool / never connected / left with a token still active). Weekly trend included. Pass consultant for one person's detail: tools used, a day-by-day timeline and their writes by action type. Shows what kind of action and when, never record content or arguments. Default window: last 28 days.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "a name, or 'admin'; omit for everyone" }, from: { type: "string", description: "YYYY-MM-DD, default 28 days ago" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "manage_tokens", description: "ADMIN ONLY. Octagon connector access tokens. action: list (default) — who holds access, write/admin rights, last used, and leavers who still hold an active token; revoke — switch one person's access off (preview, then confirm=true; reversible only by minting a new token). Never shows token values.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | revoke" }, consultant: { type: "string", description: "for revoke: the person's name" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "platform_health", description: "ADMIN ONLY. Is the platform working: sync health per feed, scheduled-job drift, connected inboxes and their last check, and tool errors in the last 7 days by tool. Read-only.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
   { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
@@ -659,12 +662,30 @@ async function consultantName(id: any): Promise<string | null> {
   return data?.name ?? null;
 }
 
+// A result counts as failed when the tool returned an error object (or nothing). Logged after the
+// tool runs: until 3.47.0 every call was logged ok=true BEFORE it ran, so admin error counts read 0.
+function resultOk(out: any): boolean {
+  if (!out) return false;
+  const t = out?.content?.[0]?.text;
+  if (typeof t !== "string") return true;
+  return !t.startsWith('{"error"');
+}
 async function callTool(name: string, args: any, req: Request) {
   // Every tool requires a valid token.
   const auth = await authenticate(req, args);
   if (!auth.ok) return toolText({ error: auth.reason });
   const actor = auth.actor;
-  logCall(actor.id, name);
+  try {
+    const out = await runTool(name, args, req, actor);
+    logCall(actor.id, name, resultOk(out));
+    return out;
+  } catch (e) {
+    logCall(actor.id, name, false);
+    throw e;
+  }
+}
+
+async function runTool(name: string, args: any, req: Request, actor: any) {
 
   if (name === "get_dashboard") {
     const { data, error } = await db.rpc("dashboard_json");
@@ -1946,6 +1967,72 @@ async function callTool(name: string, args: any, req: Request) {
     const refreshed = await refreshCandidate(args.candidate_slug);
     return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, mirror_events_refreshed: refreshed, note: "Candidate assigned in RecruitCRM and mirror refreshed." });
   }
+  if (name === "usage_report") {
+    if (!actor.is_admin) return toolText({ error: "Admin only." });
+    const { data, error } = await db.rpc("usage_report", {
+      p_from: args?.from ?? new Date(Date.now() - 28 * 86400_000).toISOString().slice(0, 10),
+      p_to: args?.to ?? new Date(Date.now() + 86400_000).toISOString().slice(0, 10),
+      p_consultant: args?.consultant ?? null });
+    return toolText(error ? { error: error.message } : data);
+  }
+
+  if (name === "manage_tokens") {
+    if (!actor.is_admin) return toolText({ error: "Admin only." });
+    const act = String(args?.action ?? "list").toLowerCase();
+    const { data: toks, error } = await db.from("mcp_tokens").select("id,consultant_recruitcrm_id,label,can_write,is_admin,active,created_at,last_used_at");
+    if (error) return toolText({ error: error.message });
+    const { data: cons } = await db.from("consultants").select("recruitcrm_id,name,active");
+    const byId = new Map((cons ?? []).map((c: any) => [Number(c.recruitcrm_id), c]));
+    const who = (t: any) => Number(t.consultant_recruitcrm_id) === 0 ? "Admin" : (byId.get(Number(t.consultant_recruitcrm_id))?.name ?? `user ${t.consultant_recruitcrm_id}`);
+    const left = (t: any) => Number(t.consultant_recruitcrm_id) !== 0 && byId.get(Number(t.consultant_recruitcrm_id))?.active === false;
+    if (act === "list") {
+      const active = (toks ?? []).filter((t: any) => t.active);
+      return toolText({ active_tokens: active.length,
+        tokens: active.map((t: any) => ({ name: who(t), left: left(t), can_write: t.can_write, is_admin: !!t.is_admin, created: t.created_at, last_used: t.last_used_at }))
+          .sort((a: any, b: any) => Number(b.left) - Number(a.left) || String(b.last_used ?? "").localeCompare(String(a.last_used ?? ""))),
+        leavers_with_access: active.filter(left).map(who),
+        note: "A token that is listed but never used means the person was given access and has not connected. Token values are never shown." });
+    }
+    if (act === "revoke") {
+      const q = String(args?.consultant ?? "").trim().toLowerCase();
+      if (!q) return toolText({ error: "Name the person whose access to revoke." });
+      const hits = (toks ?? []).filter((t: any) => t.active && who(t).toLowerCase().includes(q));
+      const names = [...new Set(hits.map(who))];
+      if (!hits.length) return toolText({ error: `No active token for '${args.consultant}'.` });
+      if (names.length > 1) return toolText({ error: "ambiguous", matches: names, instruction: "Ask which person." });
+      if (names[0] === "Admin" && hits.some((t: any) => t.is_admin)) return toolText({ error: "Refusing to revoke admin tokens from chat: it could lock every admin out. Do it in the SQL editor." });
+      if (!args?.confirm) return toolText({ mode: "preview", action: "revoke_token", person: names[0], tokens: hits.length,
+        left_octagon: hits.some(left), effect: "Their Claude connector stops working immediately. To restore access an admin mints a new token.",
+        instruction: "Show this to the admin. To revoke, call again with confirm=true." });
+      const { error: e2 } = await db.from("mcp_tokens").update({ active: false }).in("id", hits.map((t: any) => t.id));
+      if (e2) return toolText({ error: e2.message });
+      for (const t of hits) await audit({ actor: String(actor.id), action: "revoke_token", entity: "mcp_token", entity_id: t.id,
+        before: { active: true, consultant_recruitcrm_id: t.consultant_recruitcrm_id }, after: { active: false }, via: "claude" });
+      return toolText({ mode: "applied", person: names[0], revoked: hits.length });
+    }
+    return toolText({ error: "action must be list or revoke." });
+  }
+
+  if (name === "platform_health") {
+    if (!actor.is_admin) return toolText({ error: "Admin only." });
+    const since = new Date(Date.now() - 7 * 86400_000).toISOString();
+    const [h, c, boxes, errs] = await Promise.all([
+      db.rpc("sync_health"), db.rpc("check_cron_manifest"),
+      db.from("inbox_mailboxes").select("consultant_recruitcrm_id,enabled,last_run_at,last_status"),
+      db.from("mcp_call_log").select("tool,ok").gte("created_at", since).neq("tool", "_session"),
+    ]);
+    const byTool: Record<string, { calls: number; errors: number }> = {};
+    for (const r of errs.data ?? []) { const b = byTool[r.tool] ??= { calls: 0, errors: 0 }; b.calls++; if (!r.ok) b.errors++; }
+    const failing = Object.entries(byTool).filter(([, v]) => v.errors > 0).map(([tool, v]) => ({ tool, ...v })).sort((a, b) => b.errors - a.errors);
+    const names = new Map(((await db.from("consultants").select("recruitcrm_id,name")).data ?? []).map((x: any) => [Number(x.recruitcrm_id), x.name]));
+    return toolText({ sync: h.data ?? { error: h.error?.message }, cron: c.data ?? { error: c.error?.message },
+      inboxes: (boxes.data ?? []).map((b: any) => ({ who: Number(b.consultant_recruitcrm_id) === 0 ? "Admin" : names.get(Number(b.consultant_recruitcrm_id)) ?? b.consultant_recruitcrm_id,
+        enabled: b.enabled, last_check: b.last_run_at, status: b.last_status })),
+      inbox_link: graphConfigured() ? "configured" : "not configured",
+      tool_errors_7d: failing, tool_calls_7d: (errs.data ?? []).length,
+      note: "Tool errors are recorded accurately from 13/10/2026 (octagon-mcp 3.47.0)." });
+  }
+
   if (name === "webhook_subscriptions") {
     if (!actor.is_admin) return toolText({ error: "Admin only. Webhook subscriptions change what RecruitCRM pushes for the whole business." });
     const act = String(args?.action ?? "list").toLowerCase();
@@ -2124,6 +2211,8 @@ Deno.serve(async (req) => {
   if (!auth.ok) return new Response(JSON.stringify(rpcErr(null, -32001, "Unauthorized")), { status: 401, headers: { ...headers, "WWW-Authenticate": `Bearer resource_metadata="${OAUTH_BASE}/.well-known/oauth-protected-resource"` } });
 
   let msg: any; try { msg = await req.json(); } catch { return new Response(JSON.stringify(rpcErr(null, -32700, "Parse error")), { headers }); }
+  // A chat opening the connector: lets usage_report tell "connected, never used a tool" from "never connected".
+  if (!Array.isArray(msg) && msg?.method === "initialize") logCall(auth.actor.id, "_session");
   if (Array.isArray(msg)) { const out = (await Promise.all(msg.map((x) => handle(x, req)))).filter((x) => x !== null); return new Response(out.length ? JSON.stringify(out) : "", { status: out.length ? 200 : 202, headers }); }
   const res = await handle(msg, req);
   if (res === null) return new Response("", { status: 202, headers });
