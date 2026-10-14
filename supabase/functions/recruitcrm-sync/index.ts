@@ -40,6 +40,19 @@ function customField(obj: any, nameRe: RegExp) {
   const v = f ? (f.value ?? f.field_value ?? f.val ?? null) : null;
   return (v != null && String(v).trim() !== "") ? String(v).trim() : null;
 }
+// Every custom field, keyed by field_id (stable across label renames): { "<id>": { name, value } }.
+// Empty values are kept as null so a cleared field overwrites the old value in the mirror.
+function allCustomFields(obj: any) {
+  const arr = Array.isArray(obj?.custom_fields) ? obj.custom_fields : [];
+  const out: Record<string, { name: string | null; value: string | null }> = {};
+  for (const f of arr) {
+    const id = f?.field_id ?? f?.id;
+    if (id == null) continue;
+    const v = f.value ?? f.field_value ?? f.val ?? null;
+    out[String(id)] = { name: f.field_name ?? f.label ?? f.name ?? null, value: v != null && String(v).trim() !== "" ? String(v).trim() : null };
+  }
+  return Object.keys(out).length ? out : null;
+}
 // Custom fields arrive as text. Strip currency symbols, commas and % before casting.
 function numField(obj: any, nameRe: RegExp) {
   const s = customField(obj, nameRe);
@@ -101,6 +114,7 @@ function mapJobFactory(consByRid: Map<any, any>, clientBySlug: Map<any, any>) {
     salary_min: job.min_annual_salary ?? null, salary_max: job.max_annual_salary ?? null,
     created_date: job.created_on ?? null,
     forecast_fee: numField(job, /^forecast fee/i),   // "Forecast Fee (£)" — per-role forward indicator
+    custom_fields: allCustomFields(job),             // DPE scores, grade and dates (0090)
   });
 }
 const mapDeal = (d: any) => ({
