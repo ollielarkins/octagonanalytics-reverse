@@ -26,7 +26,7 @@ import { graph, graphConfigured, mbx } from "../_shared/graph.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.59.0" };
+const SERVER = { name: "octagon-analytics", version: "3.60.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -71,6 +71,7 @@ const REFERENCE_LISTS: Record<string, string> = {
   hiring_pipelines: "/hiring-pipelines",
   hiring_stages: "/hiring-pipelines/{id}",   // special-cased: every stage across all pipelines
   job_custom_fields: "/custom-fields/jobs",  // field definitions (id, label, type, options), no record values
+  candidate_custom_fields: "/custom-fields/candidates",  // definitions only (CV cover sheet fields)
   enrollment_statuses: "/enrollment-statuses",
 };
 
@@ -583,6 +584,7 @@ const TOOLS = [
   { name: "platform_health", description: "ADMIN ONLY (admins and usage viewers). Is the platform working: sync health per feed, scheduled-job drift, connected inboxes and their last check, and tool errors in the last 7 days by tool. Read-only.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, hiring_stages (every candidate stage id+label across all pipelines, for update_hiring_stage), job_custom_fields (job custom field definitions: ids, types, dropdown options), enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
+  { name: "cv_pack", description: "Data for a candidate's formatted (coversheet) CV, already REDACTED by default: name as first name + surname initial; no phone, email, LinkedIn or full address (town only); the 3 most recent roles removed and those employers' names scrubbed from all text. Returns the cover-sheet fields (location, relocate, education summary, sponsorship, notice period, recruiter notes) and the CV content (title, skills, remaining work history, education). Off-limit candidates are refused, because this goes to clients. redacted=false gives the full version for internal use only. Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name, slug or RecruitCRM ID" }, redacted: { type: "boolean", description: "default true" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "job_spec", description: "A job's full spec, read live from RecruitCRM: title, client, status, location, salary range, skills, the job description text, and the client briefing answers recorded on the job (ideal candidate background, day-to-day, interview process, etc.). Use it before a Boolean search, an advert, candidate matching or interview prep whenever a job is named, instead of asking the recruiter to paste the spec. Identify the job by ID, slug or part of the title. Read-only.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "eow_email", description: "End-of-week team email, MANAGERS/ADMINS only. action=report (read): the week's per-consultant table (jobs added, candidates assigned, CVs sent, interview requests, interviews, offers, BD calls; same counting as weekly_kpis), totals, shout-outs (10+ CVs, 4+ interview requests, 10+ BD calls, any offer), the week's offers with each candidate's current stage, and new jobs with their contact. Default window this week Monday to today; from/until (YYYY-MM-DD, until is end-exclusive) for another. action=draft (WRITE, two-step, internal): builds the formatted email (greeting, intro, week totals, shout-outs with the manager's comments, closing, then Team, Offers and Jobs tables) and saves it to the manager's Outlook Drafts, never sent. comments is {cv_sent, interview_requests, bd_calls, offers}: the manager's own words, never written for them. to defaults to every current consultant. Call without confirm for a preview, read it back, then confirm=true with the same values.", inputSchema: { type: "object", properties: { action: { type: "string", description: "report | draft" }, from: { type: "string" }, until: { type: "string" }, to: { type: "array", items: { type: "string" }, description: "recipient addresses; default every current consultant" }, greeting: { type: "string" }, intro: { type: "string" }, comments: { type: "object", properties: { cv_sent: { type: "string" }, interview_requests: { type: "string" }, bd_calls: { type: "string" }, offers: { type: "string" } }, additionalProperties: false }, closing: { type: "string" }, subject: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "push_tell", description: "Push & Tell: the weekly client update email. action=list (read): the consultant's open jobs grouped by client, A and B grade included by default and C/ungraded listed separately, each with the last 7 days of client-visible activity (CVs sent, interviews, offers) and the candidates already submitted to that client, plus the last Push & Tell date. action=draft (WRITE, two-step, OUTWARD-FACING draft): job_ids for ONE client, subject and body; the recipient is the jobs' RecruitCRM contact (or contact_slug), opted-out contacts are refused; call without confirm for a preview, read it back, then confirm=true saves it to the consultant's Outlook Drafts (never sent) and sets the Push & Tell Email date to today on each job. Managers/admins may pass consultant for someone else's desk.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | draft" }, consultant: { type: "string" }, job_ids: { type: "array", items: { type: "integer" } }, contact_slug: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -2107,6 +2109,66 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=jobs`,
       { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
     return toolText({ mode: "applied", job_id: created.id ?? null, job_title: fields.name, client: client.company_name, status: JOB_STATUS_NAME[fields.job_status], note: "Job created in RecruitCRM and the mirror refreshed." });
+  }
+
+  if (name === "cv_pack") {
+    // Everything the formatted (coversheet) CV needs, REDACTED HERE rather than by the model, so the
+    // contact details never reach the chat at all. Client-facing, so off-limit candidates are refused.
+    const m = await resolveCandidate(String(args?.candidate ?? ""));
+    if (!m.length) return toolText({ error: `No candidate matches '${args?.candidate}'.` });
+    if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name) });
+    const cand = m.find((c: any) => c.slug === args.candidate) ?? m[0];
+    const chk = await liveOffLimit(cand.slug);
+    if (!chk.verified || chk.off) return offLimitRefusal(cand.name, chk);
+    const unwrap = (r: any) => { const i = r.json?.data ?? r.json; return Array.isArray(i) ? i : (i?.records ?? []); };
+    const [det, work, edu] = await Promise.all([crm("GET", `/candidates/${cand.slug}`), crm("GET", `/candidates/${cand.slug}/work-history`), crm("GET", `/candidates/${cand.slug}/education-history`)]);
+    const d = det.json?.data ?? det.json ?? {};
+    const cf = new Map<number, any>((Array.isArray(d.custom_fields) ? d.custom_fields : []).map((f: any) => [Number(f.field_id), f.value]));
+    const redacted = args?.redacted !== false;
+    const plain = (s: any) => String(s ?? "").replace(/<(br|\/p|\/li)\s*\/?>/gi, "\n").replace(/<li[^>]*>/gi, "• ").replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/\n{3,}/g, "\n\n").trim();
+    const first = String(d.first_name ?? "").trim(), last = String(d.last_name ?? "").trim();
+
+    // Most recent first: current roles, then by start date.
+    const jobs = unwrap(work).map((w: any) => ({ title: w.title ?? null, company: w.work_company_name ?? null, location: w.work_location ?? null,
+        start: w.work_start_date ?? null, end: w.is_currently_working ? "Present" : (w.work_end_date ?? null), current: !!w.is_currently_working, description: plain(w.work_description) || null }))
+      .sort((a: any, b: any) => (Number(b.current) - Number(a.current)) || String(b.start ?? "").localeCompare(String(a.start ?? "")));
+    const removed = redacted ? jobs.slice(0, 3) : [];
+    const kept = redacted ? jobs.slice(3) : jobs;
+
+    // Scrub contact details everywhere, and in the redacted version the surname and the removed employers.
+    const hide = redacted ? [last, ...removed.map((j: any) => j.company)].filter((s: any) => s && String(s).length > 2) : [];
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const scrub = (s: any) => {
+      let t = String(s ?? "").replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[email removed]")
+        .replace(/(https?:\/\/)?([a-z]{2,3}\.)?linkedin\.com\/\S*/gi, "[LinkedIn removed]")
+        // A phone has 10+ digits; "2019 - 2021" (8) must survive.
+        .replace(/\+?\d[\d\s().-]{8,}\d/g, (m) => (m.replace(/\D/g, "").length >= 10 ? "[phone removed]" : m));
+      for (const h of hide) t = t.replace(new RegExp(esc(String(h)), "gi"), "[redacted]");
+      return t;
+    };
+    const name = redacted ? [first, last ? last[0] + "." : ""].filter(Boolean).join(" ") : [first, last].filter(Boolean).join(" ");
+    const reloc = d.willing_to_relocate === 1 || d.willing_to_relocate === true ? "Yes" : d.willing_to_relocate === 0 || d.willing_to_relocate === false ? "No" : null;
+    logCall(actor.id, "content:formatted_cv");
+    return toolText({
+      redacted,
+      cover: {
+        candidate_name: name, candidate_id: d.id ?? null, current_location: d.city ?? null,
+        willing_to_relocate: [reloc, cf.get(4) ? scrub(cf.get(4)) : null].filter(Boolean).join(", ") || null,
+        education_summary: cf.get(13) ? scrub(cf.get(13)) : null,
+        sponsorship: [cf.get(1), cf.get(2) ? scrub(cf.get(2)) : null].filter(Boolean).join(", ") || null,
+        notice_period_days: d.notice_period ?? null,
+        recruiter_notes: scrub(plain(d.candidate_summary)) || null,
+      },
+      cv: {
+        name, current_title: d.position ? scrub(d.position) : null, skills: d.skill ? scrub(Array.isArray(d.skill) ? d.skill.join(", ") : d.skill) : null,
+        work_history: kept.map((j: any) => ({ ...j, title: scrub(j.title), company: scrub(j.company), location: scrub(j.location), description: j.description ? scrub(j.description) : null })),
+        education: unwrap(edu).map((e: any) => ({ qualification: e.educational_qualification ?? null, specialisation: e.educational_specialization ?? null,
+          institution: e.institute_name ?? null, grade: e.grade ?? null, start: e.education_start_date ?? null, end: e.education_end_date ?? null,
+          description: e.education_description ? scrub(plain(e.education_description)) : null })),
+      },
+      redaction: redacted ? { name: "first name and surname initial", removed: "phone, email, LinkedIn, full address (town only), the 3 most recent roles and their employer names wherever they appear", roles_removed: removed.length, roles_kept: kept.length } : "none (internal use only)",
+      note: "Build only from this data. Never add contact details, employer names marked [redacted], or facts not here. Candidate data is PII; this document is for the client the candidate is being put forward to." });
   }
 
   if (name === "job_spec") {
