@@ -26,7 +26,7 @@ import { graph, graphConfigured, mbx } from "../_shared/graph.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.53.0" };
+const SERVER = { name: "octagon-analytics", version: "3.55.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -70,6 +70,7 @@ const REFERENCE_LISTS: Record<string, string> = {
   pitch_stages: "/pitch-pipeline",
   hiring_pipelines: "/hiring-pipelines",
   hiring_stages: "/hiring-pipelines/{id}",   // special-cased: every stage across all pipelines
+  job_custom_fields: "/custom-fields/jobs",  // field definitions (id, label, type, options), no record values
   enrollment_statuses: "/enrollment-statuses",
 };
 
@@ -177,6 +178,71 @@ async function resolveJob(q: string) {
   sel = isNum ? sel.eq("recruitcrm_id", Number(q)) : sel.or(`slug.eq.${q},title.ilike.%${q}%`);
   const { data } = await sel.limit(5);
   return data ?? [];
+}
+
+// ---- Job custom fields (DPE, Push & Tell) ------------------------------------------------------
+// Field ids read live from GET /custom-fields/jobs on 14/10/2026. Dropdown option strings carry
+// descriptor text ("3 - (They want someone...)"), so writes always use the exact live option.
+const DPE_SCORES: Record<string, number> = { urgency: 45, cooperation: 46, track_record: 47, commitment: 48, process_quality: 49, positioning: 50 };
+const CF_TOTAL = 51, CF_GRADE = 13, CF_FINDABILITY = 52, CF_BRIEFING = 4, CF_DPE_SENT = 41, CF_PUSH_TELL = 44;
+const CF_DATES = new Set([CF_BRIEFING, CF_DPE_SENT, CF_PUSH_TELL]);
+const dpeGrade = (total: number) => total >= 25 ? "A" : total >= 19 ? "B" : "C";
+
+async function jobFieldDefs() {
+  const r = await crm("GET", "/custom-fields/jobs");
+  const list = Array.isArray(r.json) ? r.json : (r.json?.data ?? []);
+  return new Map<number, any>(list.map((f: any) => [Number(f.field_id), f]));
+}
+// The live dropdown option whose leading number is n ("3 - (...)" or plain "4"), or null.
+function dropdownOption(def: any, n: number): string | null {
+  const opts = String(def?.default_value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return opts.find((o) => parseInt(o, 10) === n) ?? null;
+}
+// A job's custom fields straight from RecruitCRM: field_id -> value (null when empty).
+async function liveJobCustomFields(slug: string) {
+  const r = await crm("GET", `/jobs/${slug}`);
+  const arr = r.json?.custom_fields ?? r.json?.data?.custom_fields ?? [];
+  const out = new Map<number, string | null>();
+  for (const f of Array.isArray(arr) ? arr : []) {
+    const v = f?.value ?? f?.field_value ?? null;
+    out.set(Number(f.field_id ?? f.id), v != null && String(v).trim() !== "" ? String(v).trim() : null);
+  }
+  return { ok: r.ok, fields: out };
+}
+const cfSame = (id: number, a: string | null | undefined, b: string | null | undefined) =>
+  CF_DATES.has(id) ? String(a ?? "").slice(0, 10) === String(b ?? "").slice(0, 10) : String(a ?? "").trim() === String(b ?? "").trim();
+
+// Write job custom fields and prove it. The docs give custom_fields as [{field_id, value}] on the
+// multipart job edit but not how a form encodes it, and nothing here had written one before. So:
+// send it as one JSON field (the docs' curl sample shows a single custom_fields part), read the job
+// back, and only if the values did not land retry with Laravel bracket notation. Both writes set the
+// same values, so the retry is safe. Any OTHER custom field that changed is reported, never hidden:
+// a partial custom_fields write that blanked the rest would be a silent data loss.
+async function writeJobCustomFields(slug: string, changes: Record<number, string>, actorId: any) {
+  const before = await liveJobCustomFields(slug);
+  const pairs = Object.entries(changes).map(([id, value]) => ({ field_id: Number(id), value }));
+  const check = async () => {
+    const after = await liveJobCustomFields(slug);
+    const missing = pairs.filter((p) => !cfSame(p.field_id, after.fields.get(p.field_id), p.value)).map((p) => p.field_id);
+    const othersChanged = [...before.fields.entries()]
+      .filter(([id, v]) => !(id in changes) && !cfSame(id, after.fields.get(id), v))
+      .map(([id, v]) => ({ field_id: id, before: v, after: after.fields.get(id) ?? null }));
+    return { missing, othersChanged };
+  };
+  let encoding = "json";
+  let r = await crmForm(`/jobs/${slug}`, { custom_fields: pairs, updated_by: actorId });
+  let res = r.ok ? await check() : { missing: pairs.map((p) => p.field_id), othersChanged: [] as any[] };
+  if (res.missing.length) {
+    encoding = "brackets";
+    const fd = new FormData();
+    pairs.forEach((p, i) => { fd.append(`custom_fields[${i}][field_id]`, String(p.field_id)); fd.append(`custom_fields[${i}][value]`, p.value); });
+    if (actorId != null) fd.append("updated_by", String(actorId));
+    const res2 = await fetch(`${BASE}/jobs/${slug}`, { method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" }, body: fd });
+    r = { ok: res2.ok, status: res2.status, json: null, text: await res2.text() };
+    res = r.ok ? await check() : res;
+  }
+  return { ok: !res.missing.length, encoding, status: r.status, detail: r.ok ? undefined : r.text?.slice(0, 300),
+    not_applied: res.missing, other_fields_changed: res.othersChanged, before: Object.fromEntries(before.fields) };
 }
 
 async function stageLookup() {
@@ -507,8 +573,9 @@ const TOOLS = [
   { name: "usage_report", description: "ADMIN ONLY (admins and usage viewers). How each person is using the Octagon platform: tool calls, chats opened, active days, errors, writes made, top features, last used, and a status (active / connected, never used a tool / never connected / left with a token still active). Weekly trend included. Pass consultant for one person's detail: tools used, a day-by-day timeline and their writes by action type. Shows what kind of action and when, never record content or arguments. Default window: last 28 days.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "a name, or 'admin'; omit for everyone" }, from: { type: "string", description: "YYYY-MM-DD, default 28 days ago" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "manage_tokens", description: "ADMIN ONLY. Octagon connector access tokens. action: list (default) — who holds access, write/admin rights, last used, and leavers who still hold an active token; revoke — switch one person's access off (preview, then confirm=true; reversible only by minting a new token). Never shows token values.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | revoke" }, consultant: { type: "string", description: "for revoke: the person's name" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "platform_health", description: "ADMIN ONLY (admins and usage viewers). Is the platform working: sync health per feed, scheduled-job drift, connected inboxes and their last check, and tool errors in the last 7 days by tool. Read-only.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
-  { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, hiring_stages (every candidate stage id+label across all pipelines, for update_hiring_stage), enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
+  { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, hiring_stages (every candidate stage id+label across all pipelines, for update_hiring_stage), job_custom_fields (job custom field definitions: ids, types, dropdown options), enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
+  { name: "job_dpe", description: "Record a job's DPE in RecruitCRM: the six scores the CONSULTANT gives (urgency, cooperation, track_record, commitment, process_quality, positioning, each 1-5 - never estimate one), then Total Score (out of 30) and Job Grade (A 25-30, B 19-24, C under 19) are calculated and written back, plus optional findability (1-3, not in the total), briefing_call_date and dpe_sent_date (YYYY-MM-DD). WRITE, two-step, EXPLICIT-ONLY: call without confirm for a current-vs-new preview, get approval, then confirm=true with the same values. The write is read back from RecruitCRM and verified.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, urgency: { type: "integer" }, cooperation: { type: "integer" }, track_record: { type: "integer" }, commitment: { type: "integer" }, process_quality: { type: "integer" }, positioning: { type: "integer" }, findability: { type: "integer" }, briefing_call_date: { type: "string" }, dpe_sent_date: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
   { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
@@ -2027,6 +2094,52 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=jobs`,
       { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
     return toolText({ mode: "applied", job_id: created.id ?? null, job_title: fields.name, client: client.company_name, status: JOB_STATUS_NAME[fields.job_status], note: "Job created in RecruitCRM and the mirror refreshed." });
+  }
+
+  if (name === "job_dpe") {
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Recording a DPE requires a write-enabled token (an admin sets can_write)." });
+    const matches = await resolveJob(String(args.job ?? ""));
+    if (!matches.length) return toolText({ error: `No job matches '${args.job}'.` });
+    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: matches.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, status: j.status })), instruction: "Ask which one, then call again with that job ID." });
+    const job = matches[0];
+    // The consultant scores; nothing here infers a score. All six or none, since the total needs all six.
+    const missing = Object.keys(DPE_SCORES).filter((k) => ![1, 2, 3, 4, 5].includes(Number(args[k])));
+    if (missing.length) return toolText({ error: "scores_needed", missing, instruction: "Ask the consultant for each missing score, 1 to 5. Never estimate one." });
+    const isoDate = (s: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(s ?? "")) ? String(s) : null;
+    for (const k of ["briefing_call_date", "dpe_sent_date"]) if (args[k] != null && !isoDate(args[k])) return toolText({ error: `${k} must be YYYY-MM-DD` });
+    if (args.findability != null && ![1, 2, 3].includes(Number(args.findability))) return toolText({ error: "findability must be 1, 2 or 3" });
+
+    const defs = await jobFieldDefs();
+    const changes: Record<number, string> = {};
+    for (const [k, id] of Object.entries(DPE_SCORES)) {
+      const opt = dropdownOption(defs.get(id), Number(args[k]));
+      if (!opt) return toolText({ error: "option_not_found", field: defs.get(id)?.field_name ?? id, score: args[k], message: "RecruitCRM's dropdown for this field has no matching option. Check the field in RecruitCRM settings." });
+      changes[id] = opt;
+    }
+    const total = Object.keys(DPE_SCORES).reduce((s, k) => s + Number(args[k]), 0);
+    const grade = dpeGrade(total);
+    if (!String(defs.get(CF_GRADE)?.default_value ?? "").split(",").map((s) => s.trim()).includes(grade)) return toolText({ error: "option_not_found", field: "Job Grade", value: grade });
+    changes[CF_TOTAL] = String(total);
+    changes[CF_GRADE] = grade;
+    if (args.findability != null) { const o = dropdownOption(defs.get(CF_FINDABILITY), Number(args.findability)); if (o) changes[CF_FINDABILITY] = o; }
+    if (args.briefing_call_date) changes[CF_BRIEFING] = String(args.briefing_call_date);
+    if (args.dpe_sent_date) changes[CF_DPE_SENT] = String(args.dpe_sent_date);
+
+    const cur = await liveJobCustomFields(job.slug);
+    const rows = Object.entries(changes).map(([id, v]) => ({ field: defs.get(Number(id))?.field_name ?? id, current: cur.fields.get(Number(id)) ?? null, new: v }));
+    if (!args.confirm) return toolText({ mode: "preview", action: "job_dpe", job: { job_id: job.recruitcrm_id, title: job.title, status: job.status },
+      total_score: total, job_grade: grade, grade_bands: "A 25-30, B 19-24, C under 19", changes: rows,
+      untouched: "every other job field and custom field is left as it is",
+      instruction: "Show this to the consultant. To apply, call again with the same scores and confirm=true." });
+
+    const w = await writeJobCustomFields(job.slug, changes, actor.id);
+    await audit({ actor: String(actor.id), action: "job_dpe", entity: "job", entity_id: job.slug, before: w.before, after: { ...changes, encoding: w.encoding, ok: w.ok }, via: "claude" });
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=jobs`,
+      { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    if (!w.ok) return toolText({ error: "not_applied", job_title: job.title, not_applied: w.not_applied.map((id) => defs.get(id)?.field_name ?? id), status: w.status, detail: w.detail, other_fields_changed: w.other_fields_changed,
+      message: "RecruitCRM did not take these values. Nothing should be assumed saved; check the job in RecruitCRM." });
+    return toolText({ mode: "applied", job_id: job.recruitcrm_id, job_title: job.title, total_score: total, job_grade: grade, verified: "read back from RecruitCRM and matched",
+      ...(w.other_fields_changed.length ? { warning: "Other custom fields on this job changed during the write. Tell the consultant and an admin; the before values are in other_fields_changed.", other_fields_changed: w.other_fields_changed.map((o: any) => ({ ...o, field: defs.get(o.field_id)?.field_name })) } : {}) });
   }
 
   if (name === "update_job") {
