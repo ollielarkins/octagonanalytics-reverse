@@ -470,6 +470,36 @@ async function syncHistory(maxCandidates: number) {
   return { entity: "history", processed, skipped, events, cursor, stopped };
 }
 
+// Assignment sweep. history_recent finds candidates by their updated_on, but an assignment does not
+// always bump it: on 14/10/2026, 14 assignments made through the API (and some of Steve's made in
+// the app) never reached candidate_assignments because the candidate looked unchanged. This walks
+// each open job's assigned-candidates list and queues any candidate we hold no assignment for on
+// that job, so history_recent picks them up within minutes. ~140 open jobs, one call each per page.
+async function sweepAssignments() {
+  const { data: jobs } = await db.from("jobs").select("slug").eq("status", "Open").is("deleted_at", null);
+  let checked = 0, queued = 0, stopped: any = null;
+  for (const j of jobs ?? []) {
+    const onJob = new Set<string>();
+    let page = 1, more = true;
+    while (more) {
+      const r = await crm(`/jobs/${j.slug}/assigned-candidates?limit=100&page=${page}`);
+      if (!r.ok) { if (r.status === 429) stopped = 429; more = false; break; }
+      for (const rec of (r.json?.data ?? [])) { const s = rec?.candidate?.slug ?? rec?.candidate_slug; if (s) onJob.add(String(s)); }
+      more = !!r.json?.next_page_url; page += 1; await sleep(250);
+    }
+    if (stopped) break;
+    checked++;
+    if (!onJob.size) continue;
+    const { data: have } = await db.from("candidate_assignments").select("candidate_slug").eq("job_slug", j.slug).in("candidate_slug", [...onJob]);
+    const missing = [...onJob].filter((s) => !(have ?? []).some((h: any) => h.candidate_slug === s));
+    if (missing.length) {
+      const { count } = await db.from("candidates").update({ history_walked_at: null }, { count: "exact" }).in("slug", missing);
+      queued += count ?? 0;
+    }
+  }
+  return { entity: "assignment_sweep", jobs_checked: checked, candidates_queued: queued, stopped };
+}
+
 // The ongoing feed. A hiring-stage change bumps the candidate's updated_on in RecruitCRM, and the
 // incremental sync keeps candidates.updated_date current, so "changed recently" is a reliable and
 // very cheap filter — ~90 candidates a day against 16,600 total.
@@ -581,6 +611,13 @@ Deno.serve(async (req) => {
         last_status: res.stopped ? `stopped:${res.stopped}` : `pages=${res.pages_processed} +${res.total_upserted}`,
         last_synced_at: new Date().toISOString() }, { onConflict: "entity" });
       return Response.json(res);
+    }
+
+    // Background, like reconcile: ~140 jobs at 250ms is past a synchronous caller's patience.
+    if (mode === "assignment_sweep") {
+      try { (globalThis as any).EdgeRuntime?.waitUntil(runBg("assignment_sweep", sweepAssignments)); }
+      catch { return Response.json(await sweepAssignments()); }
+      return Response.json({ mode: "assignment_sweep", status: "started (background)" }, { status: 202 });
     }
 
     if (mode === "history_recent") {
