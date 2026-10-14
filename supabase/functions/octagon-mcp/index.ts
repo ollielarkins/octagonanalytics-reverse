@@ -26,7 +26,7 @@ import { graph, graphConfigured, mbx } from "../_shared/graph.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.56.0" };
+const SERVER = { name: "octagon-analytics", version: "3.57.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -575,6 +575,7 @@ const TOOLS = [
   { name: "platform_health", description: "ADMIN ONLY (admins and usage viewers). Is the platform working: sync health per feed, scheduled-job drift, connected inboxes and their last check, and tool errors in the last 7 days by tool. Read-only.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, hiring_stages (every candidate stage id+label across all pipelines, for update_hiring_stage), job_custom_fields (job custom field definitions: ids, types, dropdown options), enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
+  { name: "eow_email", description: "End-of-week team email, MANAGERS/ADMINS only. action=report (read): the week's per-consultant table (jobs added, CVs sent, interview requests, interviews, offers, BD calls; same counting as weekly_kpis), totals, shout-outs (10+ CVs, 4+ interview requests, 10+ BD calls, any offer), the week's offers with each candidate's current stage, and new jobs with their contact. Default window this week Monday to today; from/until (YYYY-MM-DD, until is end-exclusive) for another. action=draft (WRITE, two-step, internal): builds the formatted email (greeting, intro, week totals, shout-outs with the manager's comments, closing, then Team, Offers and Jobs tables) and saves it to the manager's Outlook Drafts, never sent. comments is {cv_sent, interview_requests, bd_calls, offers}: the manager's own words, never written for them. to defaults to every current consultant. Call without confirm for a preview, read it back, then confirm=true with the same values.", inputSchema: { type: "object", properties: { action: { type: "string", description: "report | draft" }, from: { type: "string" }, until: { type: "string" }, to: { type: "array", items: { type: "string" }, description: "recipient addresses; default every current consultant" }, greeting: { type: "string" }, intro: { type: "string" }, comments: { type: "object", properties: { cv_sent: { type: "string" }, interview_requests: { type: "string" }, bd_calls: { type: "string" }, offers: { type: "string" } }, additionalProperties: false }, closing: { type: "string" }, subject: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "push_tell", description: "Push & Tell: the weekly client update email. action=list (read): the consultant's open jobs grouped by client, A and B grade included by default and C/ungraded listed separately, each with the last 7 days of client-visible activity (CVs sent, interviews, offers) and the candidates already submitted to that client, plus the last Push & Tell date. action=draft (WRITE, two-step, OUTWARD-FACING draft): job_ids for ONE client, subject and body; the recipient is the jobs' RecruitCRM contact (or contact_slug), opted-out contacts are refused; call without confirm for a preview, read it back, then confirm=true saves it to the consultant's Outlook Drafts (never sent) and sets the Push & Tell Email date to today on each job. Managers/admins may pass consultant for someone else's desk.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | draft" }, consultant: { type: "string" }, job_ids: { type: "array", items: { type: "integer" } }, contact_slug: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "job_dpe", description: "Record a job's DPE in RecruitCRM: the six scores the CONSULTANT gives (urgency, cooperation, track_record, commitment, process_quality, positioning, each 1-5 - never estimate one), then Total Score (out of 30) and Job Grade (A 25-30, B 19-24, C under 19) are calculated and written back, plus optional findability (1-3, not in the total), briefing_call_date and dpe_sent_date (YYYY-MM-DD). WRITE, two-step, EXPLICIT-ONLY: call without confirm for a current-vs-new preview, get approval, then confirm=true with the same values. The write is read back from RecruitCRM and verified.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, urgency: { type: "integer" }, cooperation: { type: "integer" }, track_record: { type: "integer" }, commitment: { type: "integer" }, process_quality: { type: "integer" }, positioning: { type: "integer" }, findability: { type: "integer" }, briefing_call_date: { type: "string" }, dpe_sent_date: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
@@ -820,6 +821,8 @@ const isoDaysAgo = (n: number) => {
   return d.toISOString().slice(0, 10);
 };
 const isoMonthStart = () => new Date().toISOString().slice(0, 8) + "01";
+// This week's Monday (UTC), the start of a week-to-date window.
+const isoMonday = () => isoDaysAgo((new Date().getUTCDay() + 6) % 7);
 const widgetResult = (data: any, uri: string, summary: string) => ({ content: [{ type: "text", text: summary }], structuredContent: data, _meta: { ui: { resourceUri: uri } } });
 async function consultantName(id: any): Promise<string | null> {
   if (!id) return null;
@@ -2095,6 +2098,84 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=jobs`,
       { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
     return toolText({ mode: "applied", job_id: created.id ?? null, job_title: fields.name, client: client.company_name, status: JOB_STATUS_NAME[fields.job_status], note: "Job created in RecruitCRM and the mirror refreshed." });
+  }
+
+  if (name === "eow_email") {
+    // The end-of-week team email is a manager's: it names everyone's numbers and the offers.
+    if (!actor.sees_team) return toolText({ error: "The end-of-week team email is for managers and admins." });
+    const action = String(args?.action ?? "report").toLowerCase();
+    const p = { p_from: args?.from ?? isoMonday(), p_to: args?.until ?? isoDaysAgo(-1) };
+    const { data: rep, error } = await db.rpc("eow_report", p);
+    if (error) return toolText({ error: error.message });
+    // Contact names are not in the mirror; fetch them live for the week's new jobs (a handful).
+    for (const j of rep.jobs ?? []) {
+      const r = await crm("GET", `/jobs/${j.slug}`); const cs = (r.json?.data ?? r.json)?.contact_slug;
+      if (cs) { const c = await crm("GET", `/contacts/${cs}`); const d = c.json?.data ?? c.json ?? {}; j.contact = [d.first_name, d.last_name].filter(Boolean).join(" ") || null; }
+      delete j.slug;
+    }
+    const first = (n: string) => String(n ?? "").split(" ")[0];
+    const people = (rep.consultants ?? []).filter((c: any) => !c.left);
+    const named = (rows: any[], k: string) => rows.sort((a, b) => b[k] - a[k]).map((c) => `${first(c.name)} (${c[k]})`);
+    const shout = {
+      cv_sent: named(people.filter((c: any) => c.cv_sent >= 10), "cv_sent"),
+      interview_requests: named(people.filter((c: any) => c.interview_requests >= 4), "interview_requests"),
+      bd_calls: named(people.filter((c: any) => c.bd_calls >= 10), "bd_calls"),
+      offers: people.filter((c: any) => c.offers > 0).sort((a: any, b: any) => b.offers - a.offers).map((c: any) => c.offers > 1 ? `${first(c.name)} (${c.offers})` : first(c.name)),
+    };
+    if (action === "report") return toolText({ ...rep, shout_outs: shout, thresholds: "10+ CVs sent, 4+ interview requests, 10+ BD calls, any offer",
+      notes: "Same counting as /week. Candidates assigned is not tracked. Rows with no activity are left out; leavers tagged left. Candidate names are internal: this email is for the team only." });
+
+    if (action === "draft") {
+      if (!actor.can_write) return toolText({ error: "Your token is read-only. Drafting requires a write-enabled token (an admin sets can_write)." });
+      const box = await myMailbox(actor.id);
+      if (!box) return toolText({ error: "not_connected", message: "Connect your inbox first (inbox action=connect). The draft is saved in your own Outlook." });
+      if (!graphConfigured()) return toolText({ error: "not_configured", message: "Microsoft 365 link not set up yet." });
+      const h = (s: any) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+      const para = (s: any) => String(s ?? "").trim() ? `<p>${h(s).replace(/\n/g, "<br>")}</p>` : "";
+      const list = (xs: string[]) => xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+      const dmy = (s: any) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s ?? "")); return m ? `${m[3]}/${m[2]}/${m[1]}` : h(s); };
+      const c = args?.comments ?? {};
+      const t = rep.totals ?? {};
+      const shoutLine = (label: string, xs: string[], comment: any) => xs.length ? `<li><b>${label}:</b> ${h(list(xs))}.${String(comment ?? "").trim() ? " " + h(comment) : ""}</li>` : "";
+      const TH = 'style="background:#0b4479;color:#fff;padding:6px 10px;border:1px solid #d9d9d9;text-align:left"';
+      const TD = (i: number) => `style="padding:6px 10px;border:1px solid #d9d9d9;${i % 2 ? "background:#f1eee8;" : ""}"`;
+      const table = (head: string[], rows: any[][]) => `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:14px;margin:8px 0 18px">`
+        + `<tr>${head.map((x) => `<th ${TH}>${h(x)}</th>`).join("")}</tr>`
+        + rows.map((r, i) => `<tr>${r.map((x) => `<td ${TD(i)}>${h(x)}</td>`).join("")}</tr>`).join("") + `</table>`;
+      const team = table(["Team member", "Jobs added", "CVs sent", "IV requests", "Interviews", "Offers", "BD calls"],
+        [...(rep.consultants ?? []).map((r: any) => [r.left ? `${r.name} (left)` : r.name, r.jobs_added, r.cv_sent, r.interview_requests, r.interviews, r.offers, r.bd_calls]),
+         ["Total", t.jobs_added, t.cv_sent, t.interview_requests, t.interviews, t.offers, t.bd_calls]]);
+      const offersT = (rep.offers ?? []).length ? table(["Candidate", "Company", "Job", "Current stage", "Stage date", "Offered by"],
+        rep.offers.map((o: any) => [o.candidate, o.company, o.job, o.current_stage, dmy(o.current_stage_date), o.offered_by])) : "<p>No offers this week.</p>";
+      const jobsT = (rep.jobs ?? []).length ? table(["Job", "Company", "Contact", "Status", "Date added", "Owner"],
+        rep.jobs.map((j: any) => [j.title, j.company, j.contact ?? "", j.status, dmy(j.date_added), j.owner])) : "<p>No new jobs this week.</p>";
+      const html = `<div style="font-family:Calibri,Arial,sans-serif;font-size:15px">`
+        + `<p>${h(args?.greeting ?? "Hi all,")}</p>` + para(args?.intro)
+        + `<p>Here's how the week shaped up:</p><ul>`
+        + `<li>📄 ${t.cv_sent ?? 0} CVs sent to clients</li><li>📞 ${t.interview_requests ?? 0} interview requests secured</li>`
+        + `<li>☎️ ${t.bd_calls ?? 0} BD calls made</li><li>🎉 ${t.offers ?? 0} offer${t.offers === 1 ? "" : "s"} landed</li></ul>`
+        + `<p>Shout-outs:</p><ul>`
+        + shoutLine("10+ CVs sent", shout.cv_sent, c.cv_sent) + shoutLine("4+ interview requests", shout.interview_requests, c.interview_requests)
+        + shoutLine("10+ BD calls", shout.bd_calls, c.bd_calls) + shoutLine("Offers landed: congrats to", shout.offers, c.offers) + `</ul>`
+        + para(args?.closing)
+        + `<p><b>Team</b></p>${team}<p><b>Offers</b></p>${offersT}<p><b>Jobs</b></p>${jobsT}</div>`;
+
+      // Recipients: as given, else every current consultant with an email on record.
+      let to: string[] = Array.isArray(args?.to) ? args.to.map((x: any) => String(x).trim()).filter(Boolean) : [];
+      if (!to.length) { const { data: cs } = await db.from("consultants").select("email").is("deleted_at", null).eq("active", true); to = (cs ?? []).map((x: any) => x.email).filter(Boolean); }
+      const bad = to.filter((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+      if (bad.length) return toolText({ error: "bad_address", addresses: bad });
+      const subject = String(args?.subject ?? `End of week: ${dmy(p.p_from)}`).trim();
+      if (!args?.confirm) return toolText({ mode: "preview", action: "eow_email_draft", to, subject, window: rep.window, totals: t, shout_outs: shout,
+        comments_used: c, intro: args?.intro ?? null, closing: args?.closing ?? null, tables: { team_rows: (rep.consultants ?? []).length, offers: (rep.offers ?? []).length, jobs: (rep.jobs ?? []).length },
+        what_happens: "Saved to your Outlook Drafts as a formatted email with the three tables. Never sent: you review and send it from Outlook.",
+        instruction: "Read the recipients, totals, shout-outs with their comments, intro and closing back to the manager. Only on explicit approval call again with the same values and confirm=true." });
+      const g = await graph("POST", `${mbx(box.mailbox)}/messages`, { subject, body: { contentType: "HTML", content: html }, toRecipients: to.map((address) => ({ emailAddress: { address } })) });
+      if (!g.ok) return toolText({ error: "graph_error", status: g.status, detail: String(g.json?.error?.message ?? g.text).slice(0, 200), message: "No draft was saved." });
+      await audit({ actor: String(actor.id), action: "eow_email_draft", entity: "email", entity_id: g.json?.id ?? null, before: null, after: { to_count: to.length, window: rep.window, totals: t }, via: "claude" });
+      return toolText({ mode: "applied", saved_to: "Outlook Drafts", open_in_outlook: g.json?.webLink ?? null, recipients: to.length, note: "Draft saved, not sent." });
+    }
+    return toolText({ error: "action must be report or draft" });
   }
 
   if (name === "push_tell") {
