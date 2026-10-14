@@ -26,7 +26,7 @@ import { graph, graphConfigured, mbx } from "../_shared/graph.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.60.0" };
+const SERVER = { name: "octagon-analytics", version: "3.61.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -588,6 +588,7 @@ const TOOLS = [
   { name: "job_spec", description: "A job's full spec, read live from RecruitCRM: title, client, status, location, salary range, skills, the job description text, and the client briefing answers recorded on the job (ideal candidate background, day-to-day, interview process, etc.). Use it before a Boolean search, an advert, candidate matching or interview prep whenever a job is named, instead of asking the recruiter to paste the spec. Identify the job by ID, slug or part of the title. Read-only.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "eow_email", description: "End-of-week team email, MANAGERS/ADMINS only. action=report (read): the week's per-consultant table (jobs added, candidates assigned, CVs sent, interview requests, interviews, offers, BD calls; same counting as weekly_kpis), totals, shout-outs (10+ CVs, 4+ interview requests, 10+ BD calls, any offer), the week's offers with each candidate's current stage, and new jobs with their contact. Default window this week Monday to today; from/until (YYYY-MM-DD, until is end-exclusive) for another. action=draft (WRITE, two-step, internal): builds the formatted email (greeting, intro, week totals, shout-outs with the manager's comments, closing, then Team, Offers and Jobs tables) and saves it to the manager's Outlook Drafts, never sent. comments is {cv_sent, interview_requests, bd_calls, offers}: the manager's own words, never written for them. to defaults to every current consultant. Call without confirm for a preview, read it back, then confirm=true with the same values.", inputSchema: { type: "object", properties: { action: { type: "string", description: "report | draft" }, from: { type: "string" }, until: { type: "string" }, to: { type: "array", items: { type: "string" }, description: "recipient addresses; default every current consultant" }, greeting: { type: "string" }, intro: { type: "string" }, comments: { type: "object", properties: { cv_sent: { type: "string" }, interview_requests: { type: "string" }, bd_calls: { type: "string" }, offers: { type: "string" } }, additionalProperties: false }, closing: { type: "string" }, subject: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "push_tell", description: "Push & Tell: the weekly client update email. action=list (read): the consultant's open jobs grouped by client, A and B grade included by default and C/ungraded listed separately, each with the last 7 days of client-visible activity (CVs sent, interviews, offers) and the candidates already submitted to that client, plus the last Push & Tell date. action=draft (WRITE, two-step, OUTWARD-FACING draft): job_ids for ONE client, subject and body; the recipient is the jobs' RecruitCRM contact (or contact_slug), opted-out contacts are refused; call without confirm for a preview, read it back, then confirm=true saves it to the consultant's Outlook Drafts (never sent) and sets the Push & Tell Email date to today on each job. Managers/admins may pass consultant for someone else's desk.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | draft" }, consultant: { type: "string" }, job_ids: { type: "array", items: { type: "integer" } }, contact_slug: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "dpe_email", description: "Draft the DPE email for a job: Octagon's FIXED template, written by the server so it is identical every time, confirming the brief to the client after the briefing call (location, salary, day-to-day, ideal background, interview stages, interviewers, timescales, next steps). Missing facts read 'To be confirmed'. Scores and Job Grade never appear. Needs first_cvs_by (YYYY-MM-DD), the date the consultant commits to sending the first CVs. Recipient is the job's RecruitCRM contact (or contact_slug); opted-out contacts are refused. WRITE, two-step, OUTWARD-FACING draft: without confirm returns a preview; confirm=true saves it to the consultant's Outlook Drafts (never sent) and sets DPE Sent to today.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, first_cvs_by: { type: "string", description: "YYYY-MM-DD" }, contact_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "job_dpe", description: "Record a job's DPE in RecruitCRM: the six scores the CONSULTANT gives (urgency, cooperation, track_record, commitment, process_quality, positioning, each 1-5 - never estimate one), then Total Score (out of 30) and Job Grade (A 25-30, B 19-24, C under 19) are calculated and written back, plus optional findability (1-3, not in the total), briefing_call_date and dpe_sent_date (YYYY-MM-DD). WRITE, two-step, EXPLICIT-ONLY: call without confirm for a current-vs-new preview, get approval, then confirm=true with the same values. The write is read back from RecruitCRM and verified.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, urgency: { type: "integer" }, cooperation: { type: "integer" }, track_record: { type: "integer" }, commitment: { type: "integer" }, process_quality: { type: "integer" }, positioning: { type: "integer" }, findability: { type: "integer" }, briefing_call_date: { type: "string" }, dpe_sent_date: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
@@ -2362,6 +2363,74 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         note: stamped.every((s: any) => s.date_set) ? "Draft saved, not sent. Push & Tell Email date set on every job." : "Draft saved, not sent. Some job dates did not save: see jobs." });
     }
     return toolText({ error: "action must be list or draft" });
+  }
+
+  if (name === "dpe_email") {
+    // The DPE email: sent to the client after the briefing call, confirming the brief and the
+    // process. Octagon wants it IDENTICAL every time, so the server writes it from one fixed
+    // template; the model never composes it. Missing facts read "To be confirmed" so the shape never
+    // changes. Scores and Job Grade are internal and never appear.
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Drafting requires a write-enabled token (an admin sets can_write)." });
+    const matches = await resolveJob(String(args?.job ?? ""));
+    if (!matches.length) return toolText({ error: `No job matches '${args?.job}'.` });
+    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: matches.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, status: j.status })), instruction: "Ask which one, then call again with that job ID." });
+    const job = matches[0];
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(args?.first_cvs_by ?? ""))) return toolText({ error: "first_cvs_by needed", message: "Ask the consultant when the client will get the first CVs (YYYY-MM-DD). It is the one thing they commit to in the email." });
+    const box = await myMailbox(actor.id);
+    if (!box) return toolText({ error: "not_connected", message: "Connect your inbox first (inbox action=connect). The draft is saved in your own Outlook." });
+    if (!graphConfigured()) return toolText({ error: "not_configured", message: "Microsoft 365 link not set up yet." });
+
+    const jr = await crm("GET", `/jobs/${job.slug}`);
+    if (!jr.ok) return toolText({ error: "recruitcrm_error", status: jr.status, detail: jr.text?.slice(0, 200) });
+    const j = jr.json?.data ?? jr.json ?? {};
+    const cf = new Map<number, any>((Array.isArray(j.custom_fields) ? j.custom_fields : []).map((f: any) => [Number(f.field_id), f.value]));
+    const plain = (s: any) => String(s ?? "").replace(/<(br|\/p|\/li)\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').trim();
+    const TBC = "To be confirmed";
+    const val = (id: number) => plain(cf.get(id)) || TBC;
+    const dmy = (s: any) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s ?? "")); return m ? `${m[3]}/${m[2]}/${m[1]}` : null; };
+    const gbp = (n: any) => n ? `£${Math.round(Number(n)).toLocaleString("en-GB")}` : null;
+    const salary = j.min_annual_salary || j.max_annual_salary ? [gbp(j.min_annual_salary), gbp(j.max_annual_salary)].filter(Boolean).join(" – ") : TBC;
+    const location = plain(cf.get(28)) || [j.city, j.country].filter(Boolean).join(", ") || TBC;
+    const briefed = dmy(cf.get(CF_BRIEFING));
+
+    // Recipient: the job's contact, or one named. Opted-out contacts are refused.
+    const contactSlug = args?.contact_slug ? String(args.contact_slug) : (j.contact_slug ? String(j.contact_slug) : null);
+    if (!contactSlug) return toolText({ error: "no_contact", message: "This job has no contact in RecruitCRM. Add one there, or pass contact_slug." });
+    const cr = await crm("GET", `/contacts/${contactSlug}`);
+    const c = cr.json?.data ?? cr.json ?? {};
+    const who = [c.first_name, c.last_name].filter(Boolean).join(" ") || contactSlug;
+    if (isOptedOut(c.is_email_opted_out)) return toolText({ error: "opted_out", recipient: who, message: `${who} has opted out of email in RecruitCRM. No draft was made.` });
+    if (!c.email) return toolText({ error: "no_email", recipient: who, message: `${who} has no email address in RecruitCRM.` });
+    const me = (await consultantName(actor.id)) ?? "";
+
+    const title = j.name ?? job.title;
+    const h = (s: any) => String(s ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]!)).replace(/\n/g, "<br>");
+    const li = (k: string, v: string) => `<li><b>${h(k)}:</b> ${h(v)}</li>`;
+    const subject = `${title} – brief and next steps – ${dmy(new Date().toISOString())}`;
+    const html = `<div style="font-family:Calibri,Arial,sans-serif;font-size:15px">`
+      + `<p>Hi ${h(c.first_name ?? who)},</p>`
+      + `<p>Thank you for your time on the briefing call${briefed ? ` on ${briefed}` : ""}. As promised, here is a summary of the ${h(title)} role as we understand it, and how we will work together to fill it.</p>`
+      + `<p><b>The role</b></p><ul>` + li("Location", location) + li("Salary", salary) + li("Day-to-day", val(17)) + li("Ideal background", val(19)) + `</ul>`
+      + `<p><b>The process</b></p><ul>` + li("Interview stages", val(35)) + li("Interviewers", val(38)) + li("Timescales", val(37)) + `</ul>`
+      + `<p><b>Next steps</b></p><ul><li>You will receive our first shortlisted CVs by ${h(dmy(args.first_cvs_by))}.</li>`
+      + `<li>To keep strong candidates engaged, we ask for feedback on each CV within 48 hours and for interview slots to be held in the diary.</li></ul>`
+      + `<p>If anything above is not quite right, just reply and I will update it.</p>`
+      + `<p>Kind regards,<br>${h(me)}</p></div>`;
+    const tbc = [["Location", location], ["Salary", salary], ["Day-to-day", val(17)], ["Ideal background", val(19)], ["Interview stages", val(35)], ["Interviewers", val(38)], ["Timescales", val(37)]].filter(([, v]) => v === TBC).map(([k]) => k);
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (!args?.confirm) return toolText({ mode: "preview", action: "dpe_email_draft", to: `${who} <${c.email}>`, subject, job: title,
+      email_text: html.replace(/<li>/g, "\n- ").replace(/<\/p>|<br>/g, "\n").replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/\n{3,}/g, "\n\n").trim(),
+      to_be_confirmed: tbc, dpe_sent_date: { current: dmy(cf.get(CF_DPE_SENT)), new: dmy(today) },
+      what_happens: "Saved to your Outlook Drafts, never sent. Then the DPE Sent date is set to today on the job. The wording is Octagon's fixed template; only the job's facts change.",
+      instruction: tbc.length ? "Read it back. Some lines say 'To be confirmed' because the briefing fields are empty on the job: suggest filling them in RecruitCRM first, then re-preview. Only on explicit approval call again with confirm=true." : "Read it back. Only on explicit approval call again with confirm=true." });
+
+    const g = await graph("POST", `${mbx(box.mailbox)}/messages`, { subject, body: { contentType: "HTML", content: html }, toRecipients: [{ emailAddress: { address: c.email, name: who } }] });
+    if (!g.ok) return toolText({ error: "graph_error", status: g.status, detail: String(g.json?.error?.message ?? g.text).slice(0, 200), message: "No draft was saved and the DPE Sent date was not changed." });
+    const w = await writeJobCustomFields(job.slug, { [CF_DPE_SENT]: today }, actor.id);
+    await audit({ actor: String(actor.id), action: "dpe_email_draft", entity: "job", entity_id: job.slug, before: null, after: { to: c.email, dpe_sent_set: w.ok }, via: "claude" });
+    return toolText({ mode: "applied", saved_to: "Outlook Drafts", open_in_outlook: g.json?.webLink ?? null, to: `${who} <${c.email}>`,
+      dpe_sent_date_set: w.ok, note: w.ok ? "Draft saved, not sent. DPE Sent date set to today." : "Draft saved, not sent. The DPE Sent date did not save: set it on the job." });
   }
 
   if (name === "job_dpe") {
