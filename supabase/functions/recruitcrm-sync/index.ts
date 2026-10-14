@@ -398,7 +398,15 @@ async function historyForCandidate(cand: any, maps: any) {
   const hist = Array.isArray(r.json) ? r.json : [];
   const jobId = await jobIdsFor([...new Set(hist.map((e: any) => e?.job_slug).filter(Boolean))] as string[]);
   const raw: any[] = [];
+  const assigned: any[] = [];
   for (const e of hist) {
+    // Assigned (id 1) is not a funnel stage, so it is not in stage_lookup; it goes to its own
+    // table instead (0097), credited to whoever made the assignment.
+    if ((e.candidate_status_id === 1 || String(e.candidate_status ?? "").toLowerCase() === "assigned") && e.updated_on && e.job_slug) {
+      assigned.push({ job_slug: e.job_slug, assigned_at: e.updated_on, candidate_id: cand.recruitcrm_id, candidate_name: cand.name,
+        job_id: jobId.get(e.job_slug) ?? null, job_title: e.job_name ?? null, consultant_id: e.updated_by ?? null, consultant: maps.consName.get(e.updated_by) ?? null });
+      continue;
+    }
     const s = maps.byId.get(e.candidate_status_id) ?? maps.byLabel.get(String(e.candidate_status ?? "").toLowerCase());
     if (!s || !e.updated_on || !e.job_slug) continue;
     raw.push({
@@ -428,7 +436,14 @@ async function historyForCandidate(cand: any, maps: any) {
     pruned = pr ?? 0;
   } catch { /* leave the row set as-is; the next walk retries */ }
 
-  return { ok: true, status: 200, events: rows.length, pruned };
+  // Same complete-history reasoning: replace, so an un-assignment drops out.
+  let assignments = 0;
+  try {
+    const { data: n } = await db.rpc("replace_candidate_assignments", { p_candidate_slug: cand.slug, p_rows: assigned });
+    assignments = n ?? 0;
+  } catch { /* the next walk retries */ }
+
+  return { ok: true, status: 200, events: rows.length, pruned, assignments };
 }
 
 async function syncHistory(maxCandidates: number) {
