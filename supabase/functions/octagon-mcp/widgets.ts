@@ -162,6 +162,17 @@ td.met{color:var(--o-success);font-weight:var(--font-weight-medium,500)}
 .chk{font:inherit;width:22px;height:22px;border-radius:6px;border:var(--o-bw) solid var(--o-border-2);background:transparent;color:var(--o-on-chip);cursor:pointer;vertical-align:middle;padding:0;font-size:13px}
 .chk.on{background:var(--o-chip);border-color:var(--o-chip)}
 @media (pointer:coarse){.chk{width:32px;height:32px}}
+.rwrap{display:flex;justify-content:center;margin:4px 0}
+.radar .ring{fill:none;stroke:var(--o-border);stroke-width:1}
+.radar .spoke{stroke:var(--o-border);stroke-width:1}
+.radar .lab{font-size:11px;fill:var(--o-text-2);font-family:var(--o-font)}
+.radar .area.s1{fill:var(--o-bar);fill-opacity:.22;stroke:var(--o-bar);stroke-width:2}
+.radar .area.s2{fill:var(--o-chip);fill-opacity:.18;stroke:var(--o-chip);stroke-width:1.5;stroke-dasharray:4 3}
+.radar .pt{fill:var(--o-bar);stroke:var(--o-bg);stroke-width:1.5}.radar .pt.s2{fill:var(--o-chip)}
+.radar .pt.half{fill:var(--o-bg);stroke:var(--o-bar);stroke-width:2}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+.rcell{background:var(--o-bg-2);border-radius:var(--o-r-md);padding:10px;text-align:center}
+.rcell .rn{font-weight:var(--font-weight-medium,500);margin-bottom:4px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 `;
 
@@ -393,6 +404,7 @@ B.act=function(name,d,api){var c=d._card;if(c.tool!=='job_dpe'||(name.indexOf('d
 const REPORT_JS = String.raw`// Report views for the read tools. The server wraps each result as { ...the tool's own JSON,
 // _view: { tool } }. Each renderer gives an inline summary (at most a handful of figures) and,
 // where there is more, a full view for fullscreen.
+function lab(k){if(k==='push_tell_date')return 'Push & Tell date';k=String(k).replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)}
 function P1(f){return f==null?'—':(Math.round(f*1000)/10).toFixed(1)+'%'}   // fraction 0-1
 function PC(p){return p==null?'—':(Math.round(p*10)/10).toFixed(1)+'%'}     // already x100
 function win(w){if(!w)return '';var f=w.from,t=w.to||w.to_exclusive;return (f?D(f):'')+(t?(String(t).indexOf('2100')===0?' – to date':' – '+D(t)+' excl.'):'')}
@@ -407,6 +419,17 @@ function sec(t,cap){return '<div class="sec">'+t+(cap?' <span class="cap" style=
 function more(rows,max,label){return rows.length>max?'<div class="note">'+(rows.length-max)+' more '+label+' in the full view.</div>':''}
 function nm(r){return who(r)}
 var ST=['Shortlist','CV Sent','Interview Request','1st Interview','2nd Interview','3rd Interview','Offered','Placed'];
+// Spider (radar) chart in plain SVG. axes: labels; series: [{values:[0..max], cls}], dots drawn
+// at every vertex: filled = full marks, ringed = part, none = 0.
+function radar(axes,series,max,size,labels){var n=axes.length,c=size/2,r=c-(labels?34:10),pad=labels?70:0,o='<svg class="radar" viewBox="'+(-pad)+' 0 '+(size+2*pad)+' '+size+'" width="100%" style="max-width:'+(size+2*pad)+'px" role="img" aria-label="Spider chart">';
+ var pt=function(i,v){var a=-Math.PI/2+2*Math.PI*i/n,d=r*v/max;return [c+d*Math.cos(a),c+d*Math.sin(a)]};
+ for(var k=1;k<=max;k++){o+='<polygon class="ring" points="'+axes.map(function(_,i){return pt(i,k).join(',')}).join(' ')+'"/>'}
+ axes.forEach(function(ax,i){var e=pt(i,max);o+='<line class="spoke" x1="'+c+'" y1="'+c+'" x2="'+e[0]+'" y2="'+e[1]+'"/>';
+  if(labels){var l=pt(i,max*1.17),anc=Math.abs(l[0]-c)<4?'middle':(l[0]>c?'start':'end');o+='<text class="lab" x="'+l[0]+'" y="'+(l[1]+4)+'" text-anchor="'+anc+'">'+esc(ax)+'</text>'}});
+ series.forEach(function(sr){o+='<polygon class="area '+(sr.cls||'')+'" points="'+sr.values.map(function(v,i){return pt(i,v).join(',')}).join(' ')+'"/>';
+  if(!sr.nodots)sr.values.forEach(function(v,i){if(!v)return;var p=pt(i,v);o+='<circle class="'+(sr.half&&v<max?'pt half':'pt')+' '+(sr.cls||'')+'" cx="'+p[0]+'" cy="'+p[1]+'" r="'+(labels?4.5:3)+'"/>'})});
+ return o+'</svg>'}
+
 function list(items,line,max){return '<div class="li">'+items.slice(0,max||items.length).map(function(x){return '<div class="row">'+line(x)+'</div>'}).join('')+'</div>'}
 var R={
 my_day:{title:function(d){return 'My day'},cap:function(d){return d.consultant?esc(d.consultant):''},
@@ -520,8 +543,16 @@ usage_report:{title:function(){return 'Platform usage'},cap:function(d){return w
  sum:function(d){var p=d.people||[];var by=function(s){return p.filter(function(x){return x.status===s&&!x.left}).length};return tiles([['Active',N(by('active'))],['Connected, no tools yet',N(by('connected, never used a tool'))],['Never connected',N(by('never connected'))],['Tool calls',N(p.reduce(function(a,x){return a+(x.tool_calls||0)},0))]])},
  full:function(d){return R.usage_report.sum(d)+tbl([['Person',nm],['Status',function(x){return esc(x.status)}],['Calls',function(x){return N(x.tool_calls)},1],['Changes',function(x){return N(x.writes)},1],['Active days',function(x){return N(x.active_days)},1],['Errors',function(x){return N(x.errors)},1],['Last used',function(x){return x.last_tool_call?D(x.last_tool_call):'—'}]],rank(d.people||[],function(x){return x.tool_calls||0}))}},
 team_insights:{title:function(){return 'Team insights'},cap:function(d){return win(d.window)},
- sum:function(d){var h=d.headline||{};return tiles([['Active, last 7 days',N(h.active_last_7d),'prior 7 days '+N(h.active_prior_7d)],['With access',N(h.with_access)],['Never started',N(h.never_started)],['Dropped off',N(h.dropped_off)]])},
- full:function(d){var fm=d.feature_map||{},ar=fm.areas||[],o=R.team_insights.sum(d);
+ sum:function(d){var h=d.headline||{},fm=d.feature_map||{},ar=fm.areas||[],ppl=(fm.people||[]).filter(function(p){return !p.left});
+  var o=tiles([['Active, last 7 days',N(h.active_last_7d),'prior 7 days '+N(h.active_prior_7d)],['With access',N(h.with_access)],['Never started',N(h.never_started)]]);
+  if(ar.length){var used=ar.map(function(a){return ppl.filter(function(p){return p.areas&&p.areas[a]==='used'}).length}),tried=ar.map(function(a,i){return used[i]+ppl.filter(function(p){return p.areas&&p.areas[a]==='tried'}).length});
+   var activeN=ppl.filter(function(p){return ar.some(function(a){return p.areas&&p.areas[a]!=='never'})}).length,mx=Math.max(1,activeN);o+=sec('Where the team sits',N(ppl.filter(function(p){return ar.some(function(a){return p.areas&&p.areas[a]!=='never'})}).length)+' of '+N(ppl.length)+' have used it')+'<div class="rwrap">'+radar(ar.map(lab),[{values:tried,cls:'s2',nodots:true},{values:used,cls:'s1'}],mx,340,true)+'</div><div class="note"><span class="dot u"></span> people using each area · <span class="dot t"></span> including those who have tried it · outer ring = all '+N(activeN)+' who have used it</div>'}
+  return o},
+ full:function(d){var fm=d.feature_map||{},ar=fm.areas||[],o=R.team_insights.sum(d),sc={used:2,tried:1,never:0};
+  var act=rank((fm.people||[]).filter(function(p){return ar.some(function(a){return p.areas&&p.areas[a]&&p.areas[a]!=='never'})}),function(p){return ar.reduce(function(t,a){return t+(sc[p.areas[a]]||0)},0)});
+  var non=(fm.people||[]).filter(function(p){return act.indexOf(p)<0&&!p.left});
+  if(act.length)o+=sec('Each person')+'<div class="rgrid">'+act.map(function(p){var v=ar.map(function(a){return sc[p.areas&&p.areas[a]]||0});return '<div class="rcell"><div class="rn">'+who(p)+'</div>'+radar(ar,[{values:v,cls:'s1',half:true}],2,150,false)+'<div class="m">'+N(v.filter(function(x){return x===2}).length)+' used · '+N(v.filter(function(x){return x===1}).length)+' tried</div></div>'}).join('')+'</div><div class="note">Spokes run clockwise from the top: '+ar.map(lab).map(esc).join(', ')+'. A filled dot is an area used, a ringed dot one tried.</div>';
+  if(non.length)o+='<div class="note">Not started yet: '+non.map(function(p){return esc(p.name)}).join(', ')+'.</div>';
   if(ar.length)o+=sec('Feature map')+'<div class="tw"><table><tr><th>Person</th>'+ar.map(function(a){return '<th class="num">'+esc(a)+'</th>'}).join('')+'</tr>'+rank(fm.people||[],function(p){return ar.filter(function(a){return p.areas&&p.areas[a]==='used'}).length}).map(function(p){return '<tr><td>'+who(p)+'</td>'+ar.map(function(a){var v=p.areas&&p.areas[a];return '<td class="num">'+(v==='used'?'<span class="dot u" title="used"></span>':v==='tried'?'<span class="dot t" title="tried"></span>':'<span class="dot n" title="never"></span>')+'</td>'}).join('')+'</tr>'}).join('')+'</table></div><div class="note"><span class="dot u"></span> used · <span class="dot t"></span> tried · <span class="dot n"></span> never</div>';
   if((d.coach||[]).length)o+=sec('Coaching')+list(d.coach,function(c){return '<span style="display:block"><b style="font-weight:500">'+esc(c.name)+'</b>'+(c.behind&&c.behind.length?' <span class="m">behind on '+c.behind.map(function(x){return esc(String(x).replace(/_/g,' '))}).join(', ')+'</span>':'')+'<br><span class="m">'+(c.suggestions||[]).slice(0,3).map(esc).join(' · ')+'</span></span>'});
   if((d.onboarding||[]).length)o+=sec('Onboarding')+tbl([['Person',function(x){return esc(x.name)}],['Steps done',function(x){return N(x.done)+' / 7'},1],['Next step',function(x){return esc(x.next_step)}]],d.onboarding);
