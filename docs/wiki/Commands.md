@@ -108,7 +108,7 @@ Every one is two-step: preview, then your explicit confirm.
 
 | Command | What it does |
 |---|---|
-| `/dashboard` | Render a live Octagon recruitment dashboard inline. Use whenever the recruiter says "dashboard", "KPIs", "overview", or a scoped request in the quoted form such as dashboard "clients", dashboard "Keelan Riley", dashboard "cold jobs", or dashboard "billing this quarter". Pulls fresh data from the octagon-mcp connector and draws it through the visualize widget path instead of the native connector widget, so it renders reliably even when the native inline widget fails to mount |
+| `/dashboard` | Render a live Octagon recruitment dashboard inline. Use whenever the recruiter says "dashboard", "KPIs", "overview", or a scoped request in the quoted form such as dashboard "clients", dashboard "Keelan Riley", dashboard "cold jobs", or dashboard "billing this quarter". The bare dashboard is the connector's own inline widget from get_dashboard; scoped views are drawn with visualize from fresh connector data |
 | `/kpi` | Headline recruitment KPIs only — placements, open jobs, pipeline value and firm totals, concise |
 | `/ref` | Reference data from RecruitCRM — the valid IDs behind stages, types and statuses |
 

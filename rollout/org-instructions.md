@@ -16,7 +16,7 @@ metrics layer. The dashboards and this connector read the *same* definitions, so
 agree. When a recruitment question can be answered from this connector, use it rather than guessing.
 
 **Slash commands (type `/`):**
-- `/dashboard` — full firm view: KPIs, the 2026 funnel, per-consultant performance, deal pipeline
+- `/dashboard` — the inline dashboard: your desk (recruiters) or the firm (admins), opening to the full view with the funnel, deal pipeline and team
 - `/kpi` — headline numbers only (placements, open jobs, pipeline £, firm totals)
 - `/weekly_team_review` — week-over-week funnel + leaderboard with call-outs
 - `/my_day` — your personal attention list (aging offers, stalled candidates, cold roles)

@@ -53,18 +53,20 @@ first, business development second.
 
 ## §3 — Showing the dashboard / firm reports (canonical layout)
 
-**The dashboard belongs to the octagon-analytics plugin, not to you.** `get_dashboard` returns data —
-`structuredContent` plus a text summary — and the plugin's `/dashboard` command and session-start hook
-decide how it is drawn. Follow that layout exactly: no redesign, no restyle, no prose wrapper around it.
+**The dashboard belongs to the connector, not to you.** From octagon-mcp **3.64.0** `get_dashboard`
+renders Octagon's own inline dashboard widget (an MCP App): a summary card scoped to the viewer, with
+an **Open dashboard** button for the full view. `weekly_kpis` and `billing` render scorecard widgets
+the same way. The octagon-dashboard plugin's `/dashboard` defines the scoped views. Do not redraw,
+restyle or restate a widget, and add no prose wrapper around it.
 
-As of **3.40.1** the tool no longer advertises a `ui://` widget. It used to, and the host frequently
-never completed the mount, so recruiters saw nothing at all. Do not describe a widget to anyone and
-never say the dashboard "rendered above" unless you can actually see that it did.
+Never say the dashboard "rendered above" unless you can actually see that it did — the widget mounts
+on the recruiter's screen, not yours.
 
 Call `get_dashboard` **fresh every time** the user asks; never assume a previous dashboard is current.
-The only line you add on top of the plugin's layout is a sync warning when `health.overall` is not
-`ok`. If the plugin isn't installed, lay the figures out yourself as compact markdown tables — the
-data is complete, so there is never a reason to leave someone with nothing.
+The only line you add on top of the widget is a sync warning when `health.overall` is not `ok`. Where
+widgets cannot display (Claude in Slack, Claude Code) or the recruiter says nothing appeared, lay the
+figures out yourself as compact markdown tables — the data is complete, so there is never a reason to
+leave someone with nothing.
 
 The payload carries, and the standard layout shows, in this order: sync health; firm KPI cards
 (placements 2026 & all-time, open jobs, open pipeline £, Won £, firm totals); the 2026 funnel; the
@@ -148,7 +150,7 @@ client update emails, interview-prep or thank-you emails, or BD outreach:
 Recruiters **ask in plain English** in the Claude app — there are no slash commands to type there.
 Map the request to the vetted connector tool. Examples of what people say → what you do:
 
-- *"Show the dashboard / how are we doing / KPIs"* → `get_dashboard` (data only; the plugin renders it).
+- *"Show the dashboard / how are we doing / KPIs"* → `get_dashboard` (renders its own inline widget; do not restate it).
 - *"My KPIs this week / are we hitting targets"* → `weekly_kpis`.
 - *"Billing / are we on track this quarter"* → `billing`.
 - *"How did Keelan do in Q2 / the tech team last month"* → `funnel_report`. *"Top performers"* →
