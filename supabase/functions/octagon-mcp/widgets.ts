@@ -2,7 +2,8 @@
 // Inline UI that Claude renders for tools whose definition carries _meta.ui.resourceUri.
 //
 // Each widget is one self-contained HTML document:
-//   1. the MCP Apps SDK browser client, inlined (ext_apps_bundle.ts, exposed as window.McpApps) —
+//   1. the MCP Apps SDK browser client, inlined (ext_apps_bundle.ts, exposed as window.McpApps) and
+//      wrapped in its own function scope, so its minified top-level names cannot collide with ours —
 //      it does the ui/initialize handshake, receives the tool result, and reports the content
 //      height to the host. The old hand-rolled postMessage code never completed the handshake or
 //      reported a size, which is why the iframe so often mounted at zero height.
@@ -20,6 +21,7 @@ export const MCP_APP_MIME = "text/html;profile=mcp-app";
 export const DASH_UI = "ui://octagon/dashboard";
 export const SCORE_UI = "ui://octagon/scorecard";
 export const CONFIRM_UI = "ui://octagon/confirm";
+export const REPORT_UI = "ui://octagon/report";
 
 // get_dashboard links to its widget (on from 3.64.0, once the SDK runtime was live via weekly_kpis /
 // billing). octagon-dashboard 0.5.0 stopped redrawing the bare dashboard with visualize at the same
@@ -124,6 +126,33 @@ td.met{color:var(--o-success);font-weight:var(--font-weight-medium,500)}
 .state.ok{color:var(--o-success)}.state.bad{color:var(--color-text-danger,#7F2C28)}
 :root[data-theme=dark] .state.bad{color:var(--color-text-danger,#EE8884)}
 .btn[disabled]{opacity:.5;cursor:default}
+.note+.tiles,.fun+.tiles,.tw+.tiles{margin-top:14px}
+.li{display:grid;gap:0;margin-top:4px}
+.li .row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:var(--o-bw) solid var(--o-border)}
+.li .row:last-child{border-bottom:0}
+.tag{font-size:12px;color:var(--o-text-2);background:var(--o-bg-2);border-radius:var(--o-r-full);padding:2px 8px;white-space:nowrap}
+.m{font-size:12px;color:var(--o-text-3)}
+.car{display:grid;grid-auto-flow:column;grid-auto-columns:220px;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:4px}
+.cc{scroll-snap-align:start;background:var(--o-bg-2);border-radius:var(--o-r-md);padding:14px;display:flex;flex-direction:column;gap:4px}
+.cc .t{font-weight:var(--font-weight-medium,500)}.cc .m{font-size:12px}
+.cc .chips{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 10px}.cc .btn{margin-top:auto;align-self:flex-start}
+.board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(180px,1fr);gap:12px;overflow-x:auto}
+.col{background:var(--o-bg-2);border-radius:var(--o-r-md);padding:10px;display:flex;flex-direction:column;gap:8px;min-height:80px}
+.col .ch{font-size:13px;font-weight:var(--font-weight-medium,500);display:flex;justify-content:space-between}.col .ch span{color:var(--o-text-3);font-weight:400}
+.bc{background:var(--o-bg);border:var(--o-bw) solid var(--o-border);border-radius:var(--o-r-sm);padding:8px 10px;font-size:13px}
+.vb{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;align-items:end;height:160px;margin-top:4px}
+.vb .c{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:4px}
+.vb .c i{display:block;width:100%;max-width:28px;background:var(--o-bar);border-radius:4px 4px 0 0}
+.vb .n{font-size:11px;color:var(--o-text-3)}.vb .l{font-size:12px;color:var(--o-text-2)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%}.dot.u{background:var(--o-bar)}.dot.t{background:var(--o-chip);opacity:.6}.dot.n{background:var(--o-track);box-shadow:inset 0 0 0 1px var(--o-border-2)}
+.dpe{display:grid;grid-template-columns:minmax(120px,max-content) 1fr;gap:8px 16px;align-items:center}
+.dpe .l{color:var(--o-text-2)}
+.seg2{display:inline-flex;justify-self:start;width:max-content;border:var(--o-bw) solid var(--o-border-2);border-radius:var(--o-r-md);overflow:hidden}
+.seg2 button{font:inherit;min-width:36px;min-height:32px;border:0;background:transparent;color:var(--o-text);cursor:pointer;border-right:var(--o-bw) solid var(--o-border)}
+.seg2 button:last-child{border-right:0}.seg2 button.on{background:var(--o-chip);color:var(--o-on-chip);font-weight:var(--font-weight-medium,500)}
+@media (pointer:coarse){.seg2 button{min-width:44px;min-height:44px}}
+.tot{display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:24px;margin-top:16px;align-items:end}
+.tot .l{font-size:13px;color:var(--o-text-2);margin-bottom:4px}.tot .v{font-size:24px;font-weight:var(--font-weight-medium,500)}.tot small{font-size:14px;color:var(--o-text-3);font-weight:400}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 `;
 
@@ -317,11 +346,190 @@ if(err){c.state='fail';c.fail_msg=(res&&(res.message||res.error))||'That did not
 c.state='done';c.done_msg=name==='draft'?'Draft saved. Nothing was sent.':(c.tool==='post_digest'?'Posted to Slack.':(c.tool==='draft_reply'||c.tool==='dpe_email')?'Saved to your Outlook Drafts.':'Done. Applied in RecruitCRM.');api.set(d);
 tell('The recruiter confirmed the '+c.tool+' change with the preview card button and it has ALREADY BEEN APPLIED'+(name==='draft'?' (saved as a draft, not sent)':'')+'. Result: '+JSON.stringify(res).slice(0,1500)+'. Do not call '+c.tool+' with confirm=true again for this change.')})
 .catch(function(e){c.state='fail';c.fail_msg='Could not reach the connector. Nothing was changed.';api.set(d)})}};
+// DPE scoring screen (job_dpe): the consultant picks each score; the card shows the live total and
+// banded grade, re-previews on the server after any change (so what is confirmed is always what
+// the server previewed), then records it with the confirm button.
+(function(){var B=window.OCT,baseRender=B.render,baseAct=B.act;
+var SC=[['urgency','Urgency'],['cooperation','Cooperation'],['track_record','Track record'],['commitment','Commitment'],['process_quality','Process quality'],['positioning','Positioning']];
+function band(t){return t>=25?'A':t>=19?'B':'C'}
+function st(c){if(!c.dpe){var a=c.args||c.confirm_args||{};c.dpe={};SC.forEach(function(s){if(a[s[0]]!=null)c.dpe[s[0]]=Number(a[s[0]])});if(a.findability!=null)c.dpe.findability=Number(a.findability);if(a.grade)c.dpe.grade=String(a.grade).toUpperCase()}return c.dpe}
+function seg(key,vals,cur){return '<div class="seg2">'+vals.map(function(v){return '<button class="'+(String(cur)===String(v)?'on':'')+'" data-act="dpe:'+key+':'+v+'" aria-pressed="'+(String(cur)===String(v))+'">'+v+'</button>'}).join('')+'</div>'}
+B.render=function(d,ctx){var c=d._card;if(c.tool!=='job_dpe'||c.state==='done'||c.kind==='done'||(c.kind==='error'&&['grade_choice_needed','scores_needed'].indexOf(d.error)<0))return baseRender(d,ctx);
+ var s=st(c),all=SC.every(function(x){return s[x[0]]>=1}),tot=all?SC.reduce(function(a,x){return a+s[x[0]]},0):null,sug=tot!=null?band(tot):null,gr=s.grade||(c.kind==='preview'&&!c.dirty?d.job_grade:null)||sug;
+ var o=head('Record DPE'+(d.job&&d.job.title?' · '+esc(d.job.title):''),c.state==='busy'?'Checking…':'<span class="chip">'+(c.dirty||c.kind!=='preview'?'Draft':'Preview')+'</span>');
+ if(c.kind==='error')o+='<div class="warn">'+esc(d.error==='grade_choice_needed'?'The scores suggest '+d.suggested_grade+' but the job is graded '+d.current_grade+'. Pick the grade it should be.':'Score every factor from 1 to 5.')+'</div>';
+ o+='<div class="dpe">'+SC.map(function(x){return '<span class="l">'+x[1]+'</span>'+seg(x[0],[1,2,3,4,5],s[x[0]])}).join('')+'<span class="l">Findability <span class="m">(optional, not in total)</span></span>'+seg('findability',[1,2,3],s.findability)+'</div>';
+ o+='<div class="tot"><div><div class="l">Total</div><div class="v">'+(tot!=null?tot:'—')+'<small> / 30</small></div></div><div><div class="l">Bands suggest</div><div class="v">'+(sug||'—')+'</div></div><div><div class="l">Grade</div>'+seg('grade',['A','B','C'],gr)+'</div></div><div class="note">A 25–30 · B 19–24 · C under 19. You decide the grade.</div>';
+ if(c.kind==='preview'&&!c.dirty&&(d.changes||[]).length)o+='<div class="sec" style="font-size:13px">What will be written</div><dl class="kv">'+d.changes.map(function(r){return '<dt>'+esc(r.field)+'</dt><dd><span class="from">'+val(r.current)+'</span><span class="arrow">→</span><span class="to">'+val(r.new)+'</span></dd>'}).join('')+'</dl>';
+ if(c.state==='fail')o+='<div class="foot"><div class="state bad">'+esc(c.fail_msg||'That did not go through.')+'</div></div>';
+ else if(!ctx.canTools)o+='<div class="foot"><span class="hint">Reply in the chat to confirm or change the scores.</span></div>';
+ else if(c.dirty||c.kind!=='preview')o+='<div class="foot"><span class="hint">Check the change before recording</span><button class="btn btn-p" data-act="dpe-preview"'+(all?'':' disabled')+'>Update preview</button></div>';
+ else o+='<div class="foot"><span class="hint">Nothing changes until you confirm</span><button class="btn btn-g" data-act="cancel">Cancel</button><button class="btn btn-p" data-act="confirm">Record DPE</button></div>';
+ return o};
+B.act=function(name,d,api){var c=d._card;if(c.tool!=='job_dpe'||(name.indexOf('dpe')!==0))return baseAct(name,d,api);if(c.state==='busy')return;var s=st(c);
+ if(name.indexOf('dpe:')===0){var p=name.split(':'),k=p[1],v=p[2];if(k==='grade')s.grade=v;else s[k]=Number(v);c.dirty=true;api.set(d);return}
+ if(name==='dpe-preview'){var a={};var base=c.args||{};Object.keys(base).forEach(function(k){a[k]=base[k]});Object.keys(s).forEach(function(k){a[k]=s[k]});delete a.confirm;delete a.card_nonce;c.state='busy';api.set(d);
+  api.app.callServerTool({name:'job_dpe',arguments:a}).then(function(r){var n=r&&r.structuredContent;if(!n){try{n=JSON.parse(r.content[0].text)}catch(e){}}
+   if(n&&n._card){n._card.dpe=s;n._card.dirty=false;api.set(n)}else{c.state='fail';c.fail_msg='Could not refresh the preview.';api.set(d)}}).catch(function(){c.state='fail';c.fail_msg='Could not reach the connector. Nothing was changed.';api.set(d)})}};
+})();
+
+`;
+
+// ---- Report views for the read tools -----------------------------------------------------------
+const REPORT_JS = String.raw`// Report views for the read tools. The server wraps each result as { ...the tool's own JSON,
+// _view: { tool } }. Each renderer gives an inline summary (at most a handful of figures) and,
+// where there is more, a full view for fullscreen.
+function P1(f){return f==null?'—':(Math.round(f*1000)/10).toFixed(1)+'%'}   // fraction 0-1
+function PC(p){return p==null?'—':(Math.round(p*10)/10).toFixed(1)+'%'}     // already x100
+function win(w){if(!w)return '';var f=w.from,t=w.to||w.to_exclusive;return (f?D(f):'')+(t?(String(t).indexOf('2100')===0?' – to date':' – '+D(t)+' excl.'):'')}
+function UX(s){if(!s)return '';var d=new Date(Number(s)*1000);return isNaN(d)?'':d.toLocaleDateString('en-GB',{month:'short',year:'numeric'})}
+function tiles(t){return '<div class="tiles">'+t.map(function(x){return '<div class="tile"><div class="l">'+x[0]+'</div><div class="v">'+x[1]+'</div>'+(x[2]?'<div class="s">'+x[2]+'</div>':'')+'</div>'}).join('')+'</div>'}
+function bars(rows,fmt){var mx=Math.max.apply(null,rows.map(function(r){return r[1]||0}).concat([1]));fmt=fmt||N;
+return '<div class="fun">'+rows.map(function(r){return '<span class="l">'+r[0]+'</span><span class="t"><i style="width:'+Math.round(100*(r[1]||0)/mx)+'%'+(r[2]?';background:'+r[2]:'')+'"></i></span><span class="n">'+fmt(r[1]||0)+'</span>'}).join('')+'</div>'}
+function vbars(rows,hi){var mx=Math.max.apply(null,rows.map(function(r){return r[1]||0}).concat([1]));
+return '<div class="vb">'+rows.map(function(r){return '<div class="c" title="'+esc(r[0])+': '+N(r[1])+'"><span class="n">'+N(r[1])+'</span><i style="height:'+Math.max(2,Math.round(100*(r[1]||0)/mx))+'%'+(hi&&hi(r)?';background:var(--o-action)':'')+'"></i><span class="l">'+esc(r[0])+'</span></div>'}).join('')+'</div>'}
+function tbl(cols,rows,max){var rs=max?rows.slice(0,max):rows;return '<div class="tw"><table><tr>'+cols.map(function(c){return '<th'+(c[2]?' class="num"':'')+'>'+c[0]+'</th>'}).join('')+'</tr>'+rs.map(function(r){return '<tr>'+cols.map(function(c){return '<td'+(c[2]?' class="num"':'')+'>'+c[1](r)+'</td>'}).join('')+'</tr>'}).join('')+'</table></div>'+(max&&rows.length>max?'<div class="note">Top '+max+' of '+rows.length+'.</div>':'')}
+function sec(t,cap){return '<div class="sec">'+t+(cap?' <span class="cap" style="font-weight:400">'+cap+'</span>':'')+'</div>'}
+function more(rows,max,label){return rows.length>max?'<div class="note">'+(rows.length-max)+' more '+label+' in the full view.</div>':''}
+function nm(r){return who(r)}
+var ST=['Shortlist','CV Sent','Interview Request','1st Interview','2nd Interview','3rd Interview','Offered','Placed'];
+function list(items,line,max){return '<div class="li">'+items.slice(0,max||items.length).map(function(x){return '<div class="row">'+line(x)+'</div>'}).join('')+'</div>'}
+var R={
+my_day:{title:function(d){return 'My day'},cap:function(d){return d.consultant?esc(d.consultant):''},
+ sum:function(d){if(d.error)return '<div class="note" style="margin-top:0">'+(d.error==='consultant not found'?'This login has no recruiter desk, so there is no attention list.':esc(d.error))+(d.inbox_line?' '+esc(d.inbox_line):'')+'</div>';
+  var ao=d.aging_offers||[],sl=(d.stalled||[]).slice().sort(function(a,b){return b.days-a.days});
+  return tiles([['Aging offers',N(ao.length)],['Stalled',N(sl.length)],['Cold roles',N(d.cold_open_roles)],['Placed, last 7 days',N(d.placed_last_7d)]])
+   +(ao.length||sl.length?'<div class="li" style="margin-top:12px">'+ao.slice(0,2).map(function(x){return '<div class="row"><span>'+esc(x.candidate)+' · '+esc(x.job_title)+'</span><span class="tag">Offer '+N(x.days)+'d</span></div>'}).join('')+sl.slice(0,3-Math.min(2,ao.length)).map(function(x){return '<div class="row"><span>'+esc(x.candidate)+' · '+esc(x.job_title)+'</span><span class="tag">'+esc(x.stage)+' '+N(x.days)+'d</span></div>'}).join('')+'</div>':'<div class="note">Nothing aging or stalled. '+N(d.active_in_play)+' in play.</div>')},
+ full:function(d){if(d.error)return null;var ao=d.aging_offers||[],sl=(d.stalled||[]).slice().sort(function(a,b){return b.days-a.days});
+  return tiles([['Aging offers',N(ao.length)],['Stalled',N(sl.length)],['Cold roles',N(d.cold_open_roles)],['Active in play',N(d.active_in_play)],['Placed, last 7 days',N(d.placed_last_7d)]])
+   +(ao.length?sec('Aging offers — chase today')+tbl([['Candidate',function(x){return esc(x.candidate)}],['Role',function(x){return esc(x.job_title)}],['Days',function(x){return N(x.days)},1]],ao):'')
+   +(sl.length?sec('Stalled candidates')+tbl([['Candidate',function(x){return esc(x.candidate)}],['Role',function(x){return esc(x.job_title)}],['Stage',function(x){return esc(x.stage)}],['Days',function(x){return N(x.days)},1]],sl):'')}},
+stalled_report:{title:function(){return 'What is slipping'},cap:function(){return 'open roles'},
+ sum:function(d){var ao=d.aging_offers||[],sl=d.stalled||[];return tiles([['Aging offers',N(ao.length)],['Stalled',N(sl.length)],['Longest stall',N(Math.max.apply(null,sl.map(function(x){return x.days_stalled}).concat([0])))+' days']])+list(ao.slice().sort(function(a,b){return b.days_since_offer-a.days_since_offer}).slice(0,3),function(x){return '<span>'+esc(x.candidate)+' · '+esc(x.job_title)+' <span style="color:var(--o-text-3)">'+esc(x.consultant)+'</span></span><span class="tag">Offer '+N(x.days_since_offer)+'d</span>'})},
+ full:function(d){var ao=(d.aging_offers||[]).slice().sort(function(a,b){return b.days_since_offer-a.days_since_offer}),sl=(d.stalled||[]).slice().sort(function(a,b){return b.days_stalled-a.days_stalled});var t=d.thresholds||{};
+  return tiles([['Aging offers',N(ao.length),'out '+N(t.offer_days)+'+ days'],['Stalled',N(sl.length),'no move '+N(t.stall_days)+'+ days']])+(ao.length?sec('Aging offers')+tbl([['Candidate',function(x){return esc(x.candidate)}],['Role',function(x){return esc(x.job_title)}],['Owner',function(x){return esc(x.consultant)}],['Days',function(x){return N(x.days_since_offer)},1]],ao):'')
+  +(sl.length?sec('Stalled candidates')+tbl([['Candidate',function(x){return esc(x.candidate)}],['Role',function(x){return esc(x.job_title)}],['Stage',function(x){return esc(x.stage)}],['Owner',function(x){return esc(x.consultant)}],['Days',function(x){return N(x.days_stalled)},1]],sl):'')}},
+cold_jobs:{title:function(){return 'Cold roles'},cap:function(d){return 'no activity '+N(d.threshold_days)+'+ days'},
+ sum:function(d){var j=d.jobs||[];return tiles([['Cold open roles',N(d.cold_count!=null?d.cold_count:j.length)],['Never had activity',N(j.filter(function(x){return x.last_activity==null}).length)]])+list(j.slice(0,3),function(x){return '<span>'+esc(x.job_title)+' · '+esc(x.client)+'</span><span class="tag">'+(x.days_since_activity==null?'no activity':N(x.days_since_activity)+'d')+'</span>'})},
+ full:function(d){var j=d.jobs||[];return tbl([['Role',function(x){return esc(x.job_title)}],['Client',function(x){return esc(x.client)}],['Owner',function(x){return esc(x.consultant)}],['Opened',function(x){return D(x.opened)}],['Last activity',function(x){return x.last_activity?D(x.last_activity):'never'}],['Days',function(x){return x.days_since_activity==null?'—':N(x.days_since_activity)},1]],j)+(d.cold_count>j.length?'<div class="note">Showing '+j.length+' of '+N(d.cold_count)+'.</div>':'')}},
+awaiting_feedback_report:{title:function(){return 'No feedback logged'},cap:function(d){return 'interviewed '+N(d.window&&d.window.min_days)+'+ days ago'},
+ sum:function(d){var c=(d.candidates||[]).slice().sort(function(a,b){return b.days_since-a.days_since});return tiles([['Waiting',N(d.total!=null?d.total:c.length)],['Longest',N(c[0]&&c[0].days_since)+' days']])+list(c.slice(0,3),function(x){return '<span>'+esc(x.candidate)+' · '+esc(x.job)+'</span><span class="tag">'+N(x.days_since)+'d</span>'})+'<div class="note">Nothing logged since the interview. That is silence in the system, not proof feedback was not given.</div>'},
+ full:function(d){var c=(d.candidates||[]).slice().sort(function(a,b){return b.days_since-a.days_since});return tbl([['Candidate',function(x){return esc(x.candidate)}],['Role',function(x){return esc(x.job)}],['Owner',function(x){return esc(x.consultant)}],['Interviewed',function(x){return D(x.interviewed)}],['Days',function(x){return N(x.days_since)},1]],c)+'<div class="note">Nothing logged since the interview. That is silence in the system, not proof feedback was not given.</div>'}},
+interview_requests_unbooked:{title:function(){return 'Interview requests not booked'},cap:function(d){return 'last '+N(d.window&&d.window.within_days)+' days'},
+ sum:function(d){var r=(d.requests||[]).slice().sort(function(a,b){return b.days_waiting-a.days_waiting});return tiles([['Waiting on a date',N(d.total!=null?d.total:r.length)],['Longest wait',N(r[0]&&r[0].days_waiting)+' days']])+list(r.slice(0,3),function(x){return '<span>'+esc(x.candidate)+' · '+esc(x.job)+'</span><span class="tag">'+N(x.days_waiting)+'d</span>'})},
+ full:function(d){var r=(d.requests||[]).slice().sort(function(a,b){return b.days_waiting-a.days_waiting});return tbl([['Candidate',function(x){return esc(x.candidate)}],['Role',function(x){return esc(x.job)}],['Owner',function(x){return esc(x.consultant)}],['Requested',function(x){return D(x.requested)}],['Days',function(x){return N(x.days_waiting)},1]],r)}},
+new_jobs_report:{title:function(){return 'New jobs'},cap:function(d){return win(d.window)},
+ sum:function(d){var t=d.totals||{},j=d.jobs||[];return tiles([['New jobs',N(t.new_jobs)],['Job order form logged',PC(t.form_completion_pct),N(t.with_job_order_form)+' of '+N(t.new_jobs)],['Missing a form',N(t.missing_job_order_form)]])+list(j.filter(function(x){return !x.job_order_form}).slice(0,3),function(x){return '<span>'+esc(x.title)+' <span style="color:var(--o-text-3)">'+esc(x.owner)+'</span></span><span class="tag">no form</span>'})+'<div class="note">A missing form means the note was not logged. Chase it; it does not prove the call did not happen.</div>'},
+ full:function(d){var j=d.jobs||[];return tbl([['Role',function(x){return esc(x.title)}],['Owner',function(x){return esc(x.owner)}],['Created',function(x){return D(x.created)}],['Status',function(x){return esc(x.status)}],['Form',function(x){return x.job_order_form?'<span class="ok">Logged</span>':'Missing'}]],j)+sec('By consultant')+tbl([['Consultant',nm],['New',function(x){return N(x.new_jobs)},1],['With form',function(x){return N(x.with_form)},1],['Missing',function(x){return N(x.missing_form)},1]],d.by_consultant||[])}},
+activity_report:{title:function(d){return d.kind==='tasks'?'Tasks':'Meetings and visits'},cap:function(d){return win(d.window)},
+ sum:function(d){var it=d.items||[];return tiles([[d.kind==='tasks'?'Tasks':'Meetings',N(d.count)+(d.count_is_capped?'+':'')],['Typed',N(it.filter(function(x){return x.type}).length)]])+list(it.slice(0,3),function(x){return '<span>'+esc(x.title)+'</span><span class="tag">'+(x.start?D(x.start)+' '+esc(String(x.start).slice(11,16)):'')+'</span>'})},
+ full:function(d){var it=d.items||[];return tbl([['When',function(x){return x.start?D(x.start)+' '+esc(String(x.start).slice(11,16)):''}],['What',function(x){return esc(x.title)}],['Type',function(x){return x.type?esc(x.type):'—'}]],it)+(d.count_is_capped?'<div class="note">RecruitCRM returns at most '+N(it.length)+', so there may be more.</div>':'')}},
+funnel_report:{title:function(){return 'Funnel'},cap:function(d){return win(d.window)+(d.filters&&d.filters.consultant?' · '+esc(d.filters.consultant):'')+(d.filters&&d.filters.team?' · '+esc(d.filters.team):'')},
+ sum:function(d){var t=d.totals||{};return bars([['CV Sent',t.cv_sent],['Interview Request',t.interview_request],['1st Interview',t.first_interview],['2nd Interview',t.second_interview],['3rd Interview',t.third_interview],['Offered',t.offered],['Placed',t.placed]])+'<div class="note">CV→placed '+P1(t.cv_to_placed_pct)+' · CV→1st interview '+P1(t.cv_to_first_interview_pct)+' · 1st interview→offer '+P1(t.first_interview_to_offer_pct)+'</div>'},
+ full:function(d){var t=d.totals||{},cs=rank(d.consultants||[],function(c){return c.placed||0});return R.funnel_report.sum(d)+tiles([['CV→placed',P1(t.cv_to_placed_pct)],['CV→interview',P1(t.cv_to_interview_pct)],['CV→1st interview',P1(t.cv_to_first_interview_pct)],['1st interview→offer',P1(t.first_interview_to_offer_pct)]])
+  +(cs.length?sec('By consultant')+tbl([['Consultant',nm],['CV',function(c){return N(c.cv_sent)},1],['Int req',function(c){return N(c.interview_request)},1],['1st',function(c){return N(c.first_interview)},1],['2nd',function(c){return N(c.second_interview)},1],['3rd',function(c){return N(c.third_interview)},1],['Offered',function(c){return N(c.offered)},1],['Placed',function(c){return N(c.placed)},1],['CV→placed',function(c){return P1(c.cv_to_placed_pct)},1]],cs):'')}},
+consultant_leaderboard:{title:function(d){return 'Leaderboard'},cap:function(d){return 'by '+esc(String(d.ranked_by||'placed').replace(/_/g,' '))+' · '+win(d.window)},
+ sum:function(d){var k=d.ranked_by||'placed',l=d.leaderboard||[];return bars(l.slice(0,6).map(function(r){return [esc(r.name),r[k]]}))+more(l,6,'consultants')},
+ full:function(d){var k=d.ranked_by||'placed',l=d.leaderboard||[];return bars(l.map(function(r){return [esc(r.name),r[k]]}))+sec('Detail')+tbl([['Consultant',nm],['Placed',function(c){return N(c.placed)},1],['CV sent',function(c){return N(c.cv_sent)},1],['1st interview',function(c){return N(c.first_interview)},1],['CV→placed',function(c){return P1(c.cv_to_placed_pct)},1]],l)}},
+client_report:{title:function(){return 'Accounts'},cap:function(d){return win(d.window)},
+ sum:function(d){var c=d.clients||[];return bars(c.slice(0,5).map(function(r){return [esc(r.client),r.cv_sent]}))+'<div class="note">CVs sent. '+(c[0]?esc(c[0].client)+': '+N(c[0].placed)+' placed, CV→placed '+PC(c[0].cv_to_placed_pct)+'.':'')+'</div>'+more(c,5,'accounts')},
+ full:function(d){return tbl([['Client',function(r){return esc(r.client)}],['CV sent',function(r){return N(r.cv_sent)},1],['1st interview',function(r){return N(r.first_interview)},1],['Placed',function(r){return N(r.placed)},1],['CV→placed',function(r){return PC(r.cv_to_placed_pct)},1],['Open / total jobs',function(r){return N(r.open_jobs)+' / '+N(r.total_jobs)},1]],d.clients||[])}},
+bd_report:{title:function(){return 'BD pipeline'},cap:function(){return 'company status'},
+ sum:function(d){var o=['Prospect','Engaged','Client','Passive','Blocklisted','Do not contact'],b=(d.by_status||[]).slice().sort(function(a,c){var i=o.indexOf(a.status),j=o.indexOf(c.status);return (i<0?9:i)-(j<0?9:j)});return bars(b.map(function(r){return [esc(r.status),r.companies]}))+'<div class="note">'+N(d.classified)+' of '+N(d.total_companies)+' companies have a status.</div>'}},
+rejection_report:{title:function(){return 'Rejections'},cap:function(d){return win(d.window)},
+ sum:function(d){var t=d.totals||{};return tiles([['CVs sent',N(t.cv_sent)],['Rejected by client',N(t.rejected_by_client),PC(t.client_rejection_rate_pct)+' of CVs sent'],['Screened out by us',N(t.rejected_by_consultant)]])},
+ full:function(d){return R.rejection_report.sum(d)+sec('By client')+tbl([['Client',function(r){return esc(r.client)}],['CV sent',function(r){return N(r.cv_sent)},1],['Rejected',function(r){return N(r.rejected_by_client)},1],['Rate',function(r){return PC(r.client_rejection_rate_pct)},1]],d.by_client||[])+sec('By consultant')+tbl([['Consultant',nm],['CV sent',function(r){return N(r.cv_sent)},1],['Client rejected',function(r){return N(r.rejected_by_client)},1],['We screened',function(r){return N(r.rejected_by_consultant)},1],['Client rate',function(r){return PC(r.client_rejection_rate_pct)},1]],d.by_consultant||[])}},
+call_activity:{title:function(){return 'Calls'},cap:function(d){return win(d.window)},
+ sum:function(d){var t=d.totals||{};return tiles([['Calls',N(t.calls),N(t.outgoing)+' out · '+N(t.incoming)+' in'],['Connect rate',P1(t.connect_rate)],['Talk time',N(Math.round(t.talk_minutes||0))+' min']])},
+ full:function(d){var c=(d.by_category||[]).slice().sort(function(a,b){return b.calls-a.calls});return R.call_activity.sum(d)+sec('By category')+bars(c.map(function(r){return [esc(r.category),r.calls,r.category==='(uncategorised)'?'var(--o-text-3)':null]}))+'<div class="note">BD and client call KPIs count categorised calls only.</div>'+sec('By consultant')+tbl([['Consultant',nm],['Calls',function(r){return N(r.calls)},1],['Connected',function(r){return N(r.connected)},1],['Connect rate',function(r){return P1(r.connect_rate)},1],['Talk min',function(r){return N(Math.round(r.talk_minutes||0))},1]],rank(d.by_consultant||[],function(r){return r.calls}))}},
+call_hours_report:{title:function(){return 'Calls by hour'},cap:function(d){return win(d.window)},
+ sum:function(d){var t=d.totals||{},e=(d.window&&d.window.evening_from_hour)||17,h={};(d.by_hour||[]).forEach(function(r){h[r.hour]=r.calls});var rows=[];for(var i=8;i<=21;i++)rows.push([String(i),h[i]||0,i]);
+  return vbars(rows,function(r){return r[2]>=e})+'<div class="note">'+N(t.evening_calls)+' calls from '+e+':00 ('+PC(t.evening_pct)+' of '+N(t.calls)+'). Counts every call, tagged or not.</div>'},
+ full:function(d){return R.call_hours_report.sum(d)+sec('Evening calls by consultant')+tbl([['Consultant',nm],['All calls',function(r){return N(r.calls)},1],['Evening',function(r){return N(r.evening_calls)},1],['Evening connected',function(r){return N(r.evening_connected)},1]],rank(d.by_consultant||[],function(r){return r.evening_calls}))}},
+fee_analysis:{title:function(){return 'Fees'},cap:function(d){return win(d.window)},
+ sum:function(d){var t=d.totals||{},f=d.fee_percentage||{};return tiles([['Median fee',GBP(t.fee_median),N(t.won_deals)+' Won deals'],['Fee % (median)',PC(f.median),'middle half '+PC(f.p25)+'–'+PC(f.p75)],['Forecast, open roles',GBP(d.forecast_open_roles)]])},
+ full:function(d){var t=d.totals||{},s=d.annual_salary||{};return R.fee_analysis.sum(d)+tiles([['Total fees',GBP(t.fee_total)],['Average fee',GBP(t.fee_avg)],['Median salary placed',GBP(s.median),GBP(s.p25)+'–'+GBP(s.p75)]])+sec('By consultant')+tbl([['Consultant',nm],['Won deals',function(r){return N(r.won_deals)},1],['Total',function(r){return GBP(r.fee_total)},1],['Median fee',function(r){return GBP(r.fee_median)},1],['Median fee %',function(r){return PC(r.fee_pct_median)},1]],rank(d.by_consultant||[],function(r){return r.fee_total}))+'<div class="note">Median, not mean: a few deals carry a mistyped percentage.</div>'}},
+placements_report:{title:function(){return 'Placements'},cap:function(d){return win(d.window)},
+ sum:function(d){return tiles([['Placed',N(d.placed_total)],['Won deals closing in window',GBP(d.won_revenue)]])+bars((d.by_consultant||[]).slice(0,5).map(function(r){return [esc(r.name),r.placed]}))+'<div class="note">Not billing. For what the placements are worth, ask for placements with fees.</div>'},
+ full:function(d){return R.placements_report.sum(d)+sec('By client')+tbl([['Client',function(r){return esc(r.client)}],['Placed',function(r){return N(r.placed)},1]],d.by_client||[])}},
+placements_with_fees:{title:function(){return 'Placements and fees'},cap:function(d){return win(d.window)},
+ sum:function(d){var t=d.totals||{};return tiles([['Placed',N(t.placed)],['Value of placements',GBP(t.total_value)],['Missing a Won deal',N(t.missing_won_deal)]])+'<div class="note">Valued from each job\'s Won deal. Not confirmed billing.</div>'},
+ full:function(d){return R.placements_with_fees.sum(d)+tbl([['Placed',function(r){return D(r.placed_on)}],['Role',function(r){return esc(r.candidate_job)}],['Consultant',function(r){return esc(r.consultant)}],['Fee',function(r){return r.deal_value==null?'—':GBP(r.deal_value)},1],['Fee %',function(r){return r.fee_pct==null?'—':PC(r.fee_pct)},1]],d.placements||[])+sec('By consultant')+tbl([['Consultant',nm],['Placed',function(r){return N(r.placed)},1],['Value',function(r){return GBP(r.value)},1]],d.by_consultant||[])}},
+invoices_report:{title:function(){return 'Invoices'},cap:function(d){return win(d.window)},
+ sum:function(d){var iv=d.invoices||[];return tiles([['Invoices',N(d.count)],['Total',GBP(d.total_value)]])+(iv.length?'':'<div class="note">'+esc(d.note||'No invoices in this window.')+'</div>')},
+ full:function(d){var iv=d.invoices||[];if(!iv.length)return null;var ks=Object.keys(iv[0]).filter(function(k){return !/slug|_id$|^id$/.test(k)}).slice(0,6);return R.invoices_report.sum(d)+tbl(ks.map(function(k){return [esc(k.replace(/_/g,' ')),function(r){var v=r[k];return /total|amount|value/.test(k)?GBP(v):/date/.test(k)?D(v):esc(v)},/total|amount|value/.test(k)]}),iv)}},
+notes_kpi:{title:function(){return 'Notes KPIs'},cap:function(d){return win(d.window)},
+ sum:function(d){var h=d.headline||{};return tiles([['Leads',N(h.leads)],['Internal interviews',N(h.internal_interviews)],['Job order forms',N(h.job_order_forms)]])+'<div class="note">Counts only notes logged with that type. '+N(h.all_notes)+' notes in all.</div>'},
+ full:function(d){return R.notes_kpi.sum(d)+sec('By consultant')+tbl([['Consultant',nm],['Leads',function(r){return N(r.leads)},1],['Internal interviews',function(r){return N(r.internal_interviews)},1],['Job order forms',function(r){return N(r.job_order_forms)},1],['All notes',function(r){return N(r.all_notes)},1]],rank(d.by_consultant||[],function(r){return r.leads}))+sec('By note type')+bars((d.by_type||[]).map(function(r){return [esc(String(r.type).trim()),r.count]}))}},
+time_to_fill:{title:function(){return 'Time to fill'},cap:function(d){return win(d.window)},
+ sum:function(d){var x=d.days||{};return tiles([['Median',N(x.median)+' days'],['Average',N(x.avg)+' days'],['Range',N(x.min)+'–'+N(x.max)+' days'],['Placements',N(d.placements_measured)]])},
+ full:function(d){return R.time_to_fill.sum(d)+sec('By consultant')+tbl([['Consultant',nm],['Placements',function(r){return N(r.placements)},1],['Median days',function(r){return N(r.median_days)},1],['Average days',function(r){return N(r.avg_days)},1]],rank(d.by_consultant||[],function(r){return -(r.median_days||0)}))}},
+match_candidates:{title:function(){return 'Matches'},cap:function(d){return (d.skills_searched||[]).map(esc).join(', ')},
+ sum:function(d){var c=d.candidates||[];if(!c.length)return '<div class="note" style="margin-top:0">No matches.</div>';
+  return '<div class="car">'+c.slice(0,8).map(function(x){var loc=[x.city,x.country].filter(Boolean).join(', ');return '<div class="cc"><div class="t">'+esc(x.name)+'</div><div class="m">'+esc((x.recent_roles||[])[0]||'Role not recorded')+'</div><div class="m">'+esc(loc||'Location not recorded')+'</div><div class="chips">'+(x.matched_skills||[]).slice(0,5).map(function(s){return '<span class="chip">'+esc(s)+'</span>'}).join('')+'</div><button class="btn btn-g" data-act="ask:'+esc(x.name)+'">Next step</button></div>'}).join('')+'</div>'
+  +'<div class="note">'+N(d.match_count)+' candidates match at least one skill'+(d.off_limit_excluded?'. '+N(d.off_limit_excluded)+' off-limit candidates left out':'')+'.</div>'}},
+job_pipeline:{title:function(d){var j=d.jobs||[];return j.length===1?esc(j[0].job_title):'Jobs matching "'+esc(d.query)+'"'},cap:function(d){var j=d.jobs||[];return j.length===1?esc(j[0].status)+(j[0].job_id?' · job '+esc(j[0].job_id):''):N(d.matched)+' found'},
+ sum:function(d){var j=d.jobs||[];if(!j.length)return '<div class="note" style="margin-top:0">No job found.</div>';
+  if(j.length>1)return list(j.slice(0,5),function(x){return '<span>'+esc(x.job_title)+' <span style="color:var(--o-text-3)">'+esc(x.status)+'</span></span><span class="tag">'+N(x.candidates_in_play)+' in play</span>'})+more(j,5,'jobs');
+  var c=j[0].candidates||[],by={};c.forEach(function(x){by[x.current_stage]=(by[x.current_stage]||0)+1});var rows=ST.filter(function(s){return by[s]}).map(function(s){return [s,by[s]]});
+  return tiles([['In play',N(j[0].candidates_in_play)],['Furthest stage',rows.length?rows[rows.length-1][0]:'—']])+(rows.length?bars(rows):'<div class="note">No candidates on it yet.</div>')},
+ full:function(d){var j=d.jobs||[];if(j.length!==1)return null;var c=j[0].candidates||[],cols=ST.concat(['Other']),by={};c.forEach(function(x){var k=ST.indexOf(x.current_stage)>=0?x.current_stage:'Other';(by[k]=by[k]||[]).push(x)});
+  return '<div class="board">'+cols.filter(function(s){return by[s]}).map(function(s){return '<div class="col"><div class="ch">'+s+' <span>'+by[s].length+'</span></div>'+by[s].map(function(x){return '<div class="bc"><div>'+esc(x.name)+'</div><div class="m">'+(s==='Other'?esc(x.current_stage)+' · ':'')+D(x.last_activity)+'</div></div>'}).join('')+'</div>'}).join('')+'</div>'+(j[0].candidates_in_play>c.length?'<div class="note">Showing '+c.length+' of '+N(j[0].candidates_in_play)+'. Ask for more if needed.</div>':'')+'<div class="note">To move someone, ask Claude. You will see a preview first.</div>'}},
+find_candidate:{title:function(d){return 'Candidates matching "'+esc(d.query)+'"'},cap:function(d){return N(d.match_count)+' found'},
+ sum:function(d){var c=d.candidates||[];return list(c.slice(0,6),function(x){var j=x.jobs||[];return '<span>'+esc(x.name)+(j[0]?' <span style="color:var(--o-text-3)">'+esc(j[0].job_title)+' · '+esc(j[0].current_stage)+'</span>':'')+'</span><button class="btn btn-g" data-act="ask:'+esc(x.name)+'">This one</button>'})+(c.length>1?'<div class="note">More than one match. Pick the right person before making any change.</div>':'')}},
+candidate_profile:{title:function(d){return esc(d.candidate||'Candidate')},cap:function(){return 'internal only'},
+ sum:function(d){var w=(d.work_history||[]).slice().sort(function(a,b){return (b.work_start_date||0)-(a.work_start_date||0)}),cur=w.filter(function(x){return x.is_currently_working})[0]||w[0],ip=d.in_play_on||[];
+  return '<dl class="kv"><dt>Now</dt><dd>'+(cur?esc(cur.title||'—')+(cur.work_company_name?' · '+esc(cur.work_company_name):''):'—')+'</dd><dt>Roles on record</dt><dd>'+N(w.length)+'</dd><dt>Education</dt><dd>'+N((d.education||[]).length)+((d.education||[]).length===1?' entry':' entries')+'</dd></dl>'
+  +(ip.length?sec('On jobs')+list(ip,function(x){return '<span>'+esc(x.job)+'</span><span class="tag">'+esc(x.stage)+' · '+D(x.updated)+'</span>'}):'')},
+ full:function(d){var w=(d.work_history||[]).slice().sort(function(a,b){return (b.work_start_date||0)-(a.work_start_date||0)});return R.candidate_profile.sum(d)+sec('Work history')+'<div class="li">'+w.map(function(x){return '<div class="row" style="display:block"><div>'+esc(x.title||'—')+(x.work_company_name?' · '+esc(x.work_company_name):'')+'</div><div class="m">'+UX(x.work_start_date)+' – '+(x.is_currently_working?'now':UX(x.work_end_date))+(x.work_location?' · '+esc(x.work_location):'')+'</div></div>'}).join('')+'</div>'
+  +sec('Education')+'<div class="li">'+(d.education||[]).map(function(x){return '<div class="row" style="display:block"><div>'+esc([x.educational_qualification,x.educational_specialization].filter(Boolean).join(', ')||'—')+'</div><div class="m">'+esc(x.institute_name||'')+' · '+UX(x.education_start_date)+' – '+UX(x.education_end_date)+'</div></div>'}).join('')+'</div>'}},
+cv_pack:{title:function(d){return 'Formatted CV'},cap:function(d){return d.redacted===false?'<span style="color:var(--color-text-danger,#7F2C28)">Not redacted · internal only</span>':'<span class="chip">Redacted</span>'},
+ sum:function(d){var c=d.cover||{},v=d.cv||{},r=d.redaction||{};return '<dl class="kv"><dt>Candidate</dt><dd>'+esc(c.candidate_name)+'</dd><dt>Title</dt><dd>'+esc(v.current_title||'—')+'</dd><dt>Location</dt><dd>'+esc(c.current_location||'—')+'</dd><dt>Relocate</dt><dd>'+esc(c.willing_to_relocate||'—')+'</dd><dt>Notice</dt><dd>'+(c.notice_period_days!=null?N(c.notice_period_days)+' days':'—')+'</dd></dl>'+(d.redacted!==false?'<div class="note">'+N(r.roles_removed)+' most recent roles removed, '+N(r.roles_kept)+' kept. Check older roles for employer names before sending.</div>':'')},
+ full:function(d){var v=d.cv||{},c=d.cover||{};return R.cv_pack.sum(d)+(c.education_summary?sec('Education summary')+'<div class="body open">'+esc(c.education_summary)+'</div>':'')+(v.skills?sec('Skills')+'<div class="body open">'+esc(v.skills)+'</div>':'')+sec('Work history')+'<div class="li">'+(v.work_history||[]).map(function(x){return '<div class="row" style="display:block"><div>'+esc(x.title||'—')+' · '+esc(x.company||'')+'</div><div class="m">'+UX(x.start)+' – '+(x.current?'now':UX(x.end))+(x.location?' · '+esc(x.location):'')+'</div></div>'}).join('')+'</div>'}},
+job_spec:{title:function(d){return esc(d.title||'Job spec')},cap:function(d){return esc(d.status||'')+(d.job_id?' · job '+esc(d.job_id):'')},
+ sum:function(d){var s=d.salary||{};return '<dl class="kv"><dt>Client</dt><dd>'+esc(d.company||'—')+'</dd><dt>Location</dt><dd>'+esc(d.location||'—')+'</dd><dt>Type</dt><dd>'+esc(d.job_type||'—')+'</dd><dt>Salary</dt><dd>'+(s.min||s.max?GBP(s.min)+' – '+GBP(s.max):'not set')+'</dd>'+(d.skills?'<dt>Skills</dt><dd>'+esc(d.skills)+'</dd>':'')+'</dl>'+'<div class="note">'+N((d.briefing||[]).filter(function(b){return b.answer}).length)+' briefing answers recorded.</div>'},
+ full:function(d){return R.job_spec.sum(d)+(d.description?sec('Description')+'<div class="body open">'+esc(d.description)+'</div>':'')+((d.briefing||[]).length?sec('Client briefing')+'<dl class="kv">'+d.briefing.filter(function(b){return b.answer}).map(function(b){return '<dt>'+esc(b.question)+'</dt><dd>'+esc(b.answer)+'</dd>'}).join('')+'</dl>':'')}},
+notes_read:{title:function(){return 'Notes'},cap:function(d){return N(d.count)+' notes'},
+ sum:function(d){var n=d.notes||[];return list(n.slice(0,3),function(x){return '<span style="display:block"><span class="m">'+D(x.when)+(x.type?' · '+esc(x.type):'')+'</span><br>'+esc(String(x.text||'').slice(0,160))+(String(x.text||'').length>160?'…':'')+'</span>'})+more(n,3,'notes')},
+ full:function(d){return list(d.notes||[],function(x){return '<span style="display:block"><span class="m">'+D(x.when)+(x.type?' · '+esc(x.type):'')+'</span><br>'+esc(x.text)+'</span>'})}},
+pitch_history:{title:function(){return 'Pitch history'},cap:function(d){return N(d.count)+' pitches'},
+ sum:function(d){var h=d.history||[],c=d.currently_pitched_to||[];if(!h.length&&!c.length)return '<div class="note" style="margin-top:0">'+esc(d.note||'No pitches recorded.')+'</div>';
+  var line=function(x){var ks=Object.keys(x).filter(function(k){return !/slug|_id$|^id$/.test(k)});return '<span>'+ks.map(function(k){var v=x[k];return typeof v==='string'&&/^\d{4}-\d{2}-\d{2}/.test(v)?D(v):esc(v)}).join(' · ')+'</span>'};
+  return (c.length?sec('Currently pitched to')+list(c,line):'')+(h.length?sec('History')+list(h.slice(0,8),line):'')}},
+files_list:{title:function(){return 'Files'},cap:function(d){return N(d.count)+' files · internal only'},
+ sum:function(d){return list(d.files||[],function(x){return '<span>'+esc(x.name)+' <span style="color:var(--o-text-3)">'+D(x.added)+'</span></span><button class="btn btn-g" data-act="open:'+esc(x.link)+'">Open</button>'})}},
+platform_health:{title:function(){return 'Platform health'},cap:function(d){return d.sync&&d.sync.generated_at?D(d.sync.generated_at):''},
+ sum:function(d){var s=d.sync||{},bad=(s.entities||[]).filter(function(e){return e.status!=='ok'}),ib=(d.inboxes||[]).filter(function(i){return !/^ok/.test(i.status||'')}),te=(d.tool_errors_7d||[]).reduce(function(a,t){return a+(t.errors||0)},0);
+  return tiles([['Sync',s.overall==='ok'?'<span class="ok">OK</span>':esc(s.overall),bad.length?N(bad.length)+' feed(s) not ok':'all feeds fresh'],['Scheduled jobs',(d.cron&&d.cron.problems)?N(d.cron.problems)+' problem(s)':'<span class="ok">OK</span>'],['Inboxes with errors',N(ib.length)],['Tool errors, 7 days',N(te),'of '+N(d.tool_calls_7d)+' calls']])},
+ full:function(d){var s=d.sync||{};return R.platform_health.sum(d)+sec('Sync feeds')+tbl([['Feed',function(e){return esc(e.entity)}],['Status',function(e){return e.status==='ok'?'<span class="ok">ok</span>':esc(e.status)}],['Why',function(e){return esc(e.reason)}],['Minutes since',function(e){return N(e.minutes_stale)},1]],s.entities||[])+sec('Inboxes')+tbl([['Who',function(i){return esc(i.who)}],['Last check',function(i){return D(i.last_check)+' '+esc(String(i.last_check||'').slice(11,16))}],['Status',function(i){return esc(i.status)}]],d.inboxes||[])+sec('Tool errors, last 7 days')+tbl([['Tool',function(t){return esc(t.tool)}],['Calls',function(t){return N(t.calls)},1],['Errors',function(t){return N(t.errors)},1]],(d.tool_errors_7d||[]).slice().sort(function(a,b){return b.errors-a.errors}))}},
+usage_report:{title:function(){return 'Platform usage'},cap:function(d){return win(d.window)},
+ sum:function(d){var p=d.people||[];var by=function(s){return p.filter(function(x){return x.status===s&&!x.left}).length};return tiles([['Active',N(by('active'))],['Connected, no tools yet',N(by('connected, never used a tool'))],['Never connected',N(by('never connected'))],['Tool calls',N(p.reduce(function(a,x){return a+(x.tool_calls||0)},0))]])},
+ full:function(d){return R.usage_report.sum(d)+tbl([['Person',nm],['Status',function(x){return esc(x.status)}],['Calls',function(x){return N(x.tool_calls)},1],['Changes',function(x){return N(x.writes)},1],['Active days',function(x){return N(x.active_days)},1],['Errors',function(x){return N(x.errors)},1],['Last used',function(x){return x.last_tool_call?D(x.last_tool_call):'—'}]],rank(d.people||[],function(x){return x.tool_calls||0}))}},
+team_insights:{title:function(){return 'Team insights'},cap:function(d){return win(d.window)},
+ sum:function(d){var h=d.headline||{};return tiles([['Active, last 7 days',N(h.active_last_7d),'prior 7 days '+N(h.active_prior_7d)],['With access',N(h.with_access)],['Never started',N(h.never_started)],['Dropped off',N(h.dropped_off)]])},
+ full:function(d){var fm=d.feature_map||{},ar=fm.areas||[],o=R.team_insights.sum(d);
+  if(ar.length)o+=sec('Feature map')+'<div class="tw"><table><tr><th>Person</th>'+ar.map(function(a){return '<th class="num">'+esc(a)+'</th>'}).join('')+'</tr>'+rank(fm.people||[],function(p){return ar.filter(function(a){return p.areas&&p.areas[a]==='used'}).length}).map(function(p){return '<tr><td>'+who(p)+'</td>'+ar.map(function(a){var v=p.areas&&p.areas[a];return '<td class="num">'+(v==='used'?'<span class="dot u" title="used"></span>':v==='tried'?'<span class="dot t" title="tried"></span>':'<span class="dot n" title="never"></span>')+'</td>'}).join('')+'</tr>'}).join('')+'</table></div><div class="note"><span class="dot u"></span> used · <span class="dot t"></span> tried · <span class="dot n"></span> never</div>';
+  if((d.coach||[]).length)o+=sec('Coaching')+list(d.coach,function(c){return '<span style="display:block"><b style="font-weight:500">'+esc(c.name)+'</b>'+(c.behind&&c.behind.length?' <span class="m">behind on '+c.behind.map(function(x){return esc(String(x).replace(/_/g,' '))}).join(', ')+'</span>':'')+'<br><span class="m">'+(c.suggestions||[]).slice(0,3).map(esc).join(' · ')+'</span></span>'});
+  if((d.onboarding||[]).length)o+=sec('Onboarding')+tbl([['Person',function(x){return esc(x.name)}],['Steps done',function(x){return N(x.done)+' / 7'},1],['Next step',function(x){return esc(x.next_step)}]],d.onboarding);
+  return o}}
+};
+window.OCT={name:'octagon-report',title:'Octagon',full:true,
+accept:function(d){return !!(d&&d._view&&R[d._view.tool])},
+render:function(d,ctx){var r=R[d._view.tool],full=ctx.mode==='fullscreen',body;
+ if(d.error&&d._view.tool!=='my_day')return head(r.title(d))+'<div class="note" style="margin-top:0">'+esc(d.message||d.error)+'</div>';
+ var f=r.full?r.full(d):null;body=(full||(!ctx.canFull&&f))&&f?f:r.sum(d);
+ var o=head(r.title(d),r.cap?r.cap(d):'')+body;
+ if(f&&ctx.canFull)o+=full?'<div class="foot"><span class="hint">Live from RecruitCRM</span><button class="btn btn-g" data-mode="inline">Back to chat</button></div>':'<div class="foot"><span class="hint">Live from RecruitCRM</span><button class="btn btn-p" data-mode="fullscreen">Open full view</button></div>';
+ return o},
+act:function(name,d,api){
+ if(name.indexOf('ask:')===0){var who=name.slice(4),t=d._view.tool;var text=t==='match_candidates'?'What next with '+who+' from these matches?':'It is '+who+'.';
+  try{api.app.sendMessage({role:'user',content:[{type:'text',text:text}]})}catch(e){}return}
+ if(name.indexOf('open:')===0){try{api.app.openLink({url:name.slice(5)})}catch(e){}return}}};
 `;
 
 function page(title: string, appJs: string): string {
   return '<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>' + title + '</title><style>' + THEME_CSS + '</style></head><body><div id="app" aria-live="polite"></div>'
-    + '<script>' + EXT_APPS_JS + '</script>'
+    + '<script>(function(){' + EXT_APPS_JS + '\n})();</script>'
     + '<script>var OCT_LOGO_L="' + LOGO_LIGHT + '",OCT_LOGO_D="' + LOGO_DARK + '";' + appJs + '</script>'
     + '<script>' + RUNTIME_JS + '</script></body></html>';
 }
@@ -329,3 +537,4 @@ function page(title: string, appJs: string): string {
 export const SCORECARD_WIDGET_HTML = page("Octagon scorecard", SCORECARD_JS);
 export const DASHBOARD_WIDGET_HTML = page("Octagon dashboard", DASHBOARD_JS);
 export const CONFIRM_WIDGET_HTML = page("Octagon preview", CONFIRM_JS);
+export const REPORT_WIDGET_HTML = page("Octagon report", REPORT_JS);
