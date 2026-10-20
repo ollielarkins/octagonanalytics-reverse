@@ -13,3 +13,5 @@ create table if not exists public.mcp_card_confirms (
 );
 create index if not exists mcp_card_confirms_used_at_idx on public.mcp_card_confirms (used_at);
 alter table public.mcp_card_confirms enable row level security;   -- service role only
+create policy service_role_only on public.mcp_card_confirms
+  as restrictive for all to anon, authenticated using (false) with check (false);
