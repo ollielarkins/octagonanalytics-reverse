@@ -262,23 +262,26 @@ create_job:['New job','Create job'],update_job:['Edit job','Save changes'],creat
 log_activity:['Log activity','Log it'],manage_client:['Client record','Save'],pitch_candidate:['Record pitch','Record pitch'],
 job_dpe:['Record DPE','Record DPE'],post_digest:['Post digest','Post to Slack'],delete_record:['Delete record',''],
 send_email:['Email','Save draft'],draft_reply:['Reply draft','Save to Outlook Drafts'],dpe_email:['DPE email','Save to Outlook Drafts']};
-var HIDE=/^(mode|action|instruction|acting_as|preview|_card|card_note|carried_forward|untouched|what_happens|reason_prompt|note|opted_out_check)$|(_slug|^slug|status_id|stage_id)$/;
+var HIDE=/^(mode|action|instruction|acting_as|preview|_card|card_note|carried_forward|untouched|what_happens|reason_prompt|note|opted_out_check|changing|identifier|deal_id|job_id|target_type)$|(_slug|^slug|status_id|stage_id)$/;
+var MONEY=/(^|_)(value|fee|salary|amount|salary_min|salary_max)$/;
 var LONG=/^(body|email_text|note_preview|would_post|summary)$/;
 var WARN=/^(warning|caution|billing_note)$/;
 function lab(k){k=String(k).replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)}
-function val(v){if(v==null||v==='')return '<span style="color:var(--o-text-3)">—</span>';if(typeof v==='boolean')return v?'Yes':'No';
+function val(v,k){if(v==null||v==='')return '<span style="color:var(--o-text-3)">—</span>';if(typeof v==='boolean')return v?'Yes':'No';
+if(k&&MONEY.test(k)&&!isNaN(Number(v))&&String(v).trim()!=='')return GBP(v);
+if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}(T|$)/.test(v))return D(v);
 if(Array.isArray(v))return esc(v.map(function(x){return typeof x==='object'?Object.values(x).join(' '):x}).join(', '));
-if(typeof v==='object'){if('name' in v||'label' in v||'title' in v)return esc(v.name||v.label||v.title);return Object.keys(v).filter(function(k){return !HIDE.test(k)}).map(function(k){return esc(lab(k))+': '+val(v[k])}).join(' · ')}
+if(typeof v==='object'){if('name' in v||'label' in v||'title' in v)return esc(v.name||v.label||v.title);return Object.keys(v).filter(function(j){return !HIDE.test(j)}).map(function(j){return esc(lab(j))+': '+val(v[j],j)}).join(' · ')}
 return esc(v)}
-function diff(b,a){var ks=Object.keys(a||{});return ks.filter(function(k){return !HIDE.test(k)}).map(function(k){return '<dt>'+esc(lab(k))+'</dt><dd><span class="from">'+val(b&&b[k])+'</span><span class="arrow">→</span><span class="to">'+val(a[k])+'</span></dd>'}).join('')}
+function diff(b,a){var ks=Object.keys(a||{});return ks.filter(function(k){return !HIDE.test(k)}).map(function(k){var o=b&&b[k],n=a[k],same=JSON.stringify(o)===JSON.stringify(n);return '<dt>'+esc(lab(k))+'</dt><dd>'+(same?val(n,k):'<span class="from">'+val(o,k)+'</span><span class="arrow">→</span><span class="to">'+val(n,k)+'</span>')+'</dd>'}).join('')}
 function fields(d){var o='',longs='',warns='';
 if(d.current_stage||d.proposed_stage)o+='<dt>Stage</dt><dd><span class="from">'+val(d.current_stage&&(d.current_stage.label||d.current_stage.name))+'</span><span class="arrow">→</span><span class="to">'+val(d.proposed_stage&&d.proposed_stage.name)+'</span></dd>';
 if(d.before&&d.after)o+=diff(d.before,d.after);
 Object.keys(d).forEach(function(k){var v=d[k];if(v==null||HIDE.test(k)||k==='before'||k==='after'||k==='current_stage'||k==='proposed_stage')return;
 if(WARN.test(k)){warns+='<div class="'+(d._card&&d._card.tool==='delete_record'?'danger':'warn')+'">'+esc(v)+'</div>';return}
 if(LONG.test(k)&&typeof v==='string'){longs+='<div class="sec" style="margin:14px 0 8px;font-size:13px">'+esc(lab(k==='note_preview'?'note':k==='email_text'?'email':k))+'</div><div class="body" id="b-'+k+'">'+esc(v)+'</div>'+(v.split('\n').length>6||v.length>420?'<button class="link" data-act="more:'+k+'">Show all</button>':'');return}
-if(typeof v==='object'&&!Array.isArray(v)&&!('name' in v||'label' in v||'title' in v)&&(k==='will_create'||k==='fields'||k==='changes'||k==='job'||k==='dpe_sent_date')){Object.keys(v).forEach(function(j){if(!HIDE.test(j)&&v[j]!=null&&v[j]!=='')o+='<dt>'+esc(lab(j))+'</dt><dd>'+val(v[j])+'</dd>'});return}
-o+='<dt>'+esc(lab(k))+'</dt><dd>'+val(v)+'</dd>'});
+if(typeof v==='object'&&!Array.isArray(v)&&!('name' in v||'label' in v||'title' in v)&&(k==='will_create'||k==='fields'||k==='changes'||k==='job'||k==='dpe_sent_date')){Object.keys(v).forEach(function(j){if(!HIDE.test(j)&&v[j]!=null&&v[j]!=='')o+='<dt>'+esc(lab(j))+'</dt><dd>'+val(v[j],j)+'</dd>'});return}
+o+='<dt>'+esc(lab(k))+'</dt><dd>'+val(v,k)+'</dd>'});
 return warns+(o?'<dl class="kv">'+o+'</dl>':'')+longs}
 function foot(c,d,ctx){var t=c.tool,st=c.state;
 if(st==='busy')return '<div class="foot"><span class="hint">Applying…</span></div>';
@@ -298,7 +301,8 @@ accept:function(d){return !!(d&&d._card)},
 render:function(d,ctx){var c=d._card,t=c.tool,title=(T[t]||[lab(t)])[0];
 if(c.kind==='error'){var already=d.error==='already_applied';return head(title)+'<div class="'+(already?'note':'warn')+'" style="margin-top:0">'+esc(d.message||d.error||'Something went wrong.')+'</div>'}
 if(c.kind==='done')return head(title,'<span class="ok">Done</span>')+fields(d)+'<div class="foot"><div class="state ok">✓ Applied in RecruitCRM.</div></div>';
-return head(title,'<span class="chip">Preview</span>')+fields(d)+foot(c,d,ctx)},
+var chip=c.state==='done'?'<span class="ok">Done</span>':c.state==='cancel'?'Cancelled':c.state==='fail'?'Not applied':'<span class="chip">Preview</span>';
+return head(title,chip)+fields(d)+foot(c,d,ctx)},
 act:function(name,d,api){var c=d._card;
 if(name.indexOf('more:')===0){var el=document.getElementById('b-'+name.slice(5));if(el)el.classList.toggle('open');return}
 if(c.state==='busy'||c.state==='done')return;
