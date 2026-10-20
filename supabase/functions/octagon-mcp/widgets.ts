@@ -122,6 +122,9 @@ var N=function(n){return n==null?'—':Number(n).toLocaleString('en-GB')};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function D(s){var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s==null?'':s));return m?m[3]+'/'+m[2]+'/'+m[1]:esc(s)}
 function lc(s){return String(s).replace(/^[A-Z][a-z]/,function(c){return c.toLowerCase()})}
+// Leavers (left:true) stay below current staff and are tagged, never dropped (see the dashboard skill's house rules).
+function rank(cs,key){return cs.slice().sort(function(a,b){return ((a.left?1:0)-(b.left?1:0))||(key(b)-key(a))})}
+function who(c){return esc(c.name)+(c.left?' <span style="font-size:12px;color:var(--o-text-3)">left</span>':'')}
 function pct(a,t){return t?Math.max(0,Math.min(100,Math.round(100*(a||0)/t))):0}
 function head(title,cap){return '<div class="head"><img class="logo lt" src="data:image/png;base64,'+OCT_LOGO_L+'" alt=""><img class="logo dk" src="data:image/png;base64,'+OCT_LOGO_D+'" alt=""><span class="title">'+esc(title)+'</span>'+(cap?'<span class="cap">'+cap+'</span>':'')+'</div>'}
 function skeleton(){return '<div class="head"><div class="sk" style="width:20px;height:20px;border-radius:6px"></div><div class="sk" style="width:120px"></div></div><div class="kpis">'+[70,55,62,40,48].map(function(w){return '<div><div class="sk" style="width:'+w+'%;margin-bottom:8px"></div><div class="sk" style="height:6px"></div></div>'}).join('')+'</div>'}
@@ -163,9 +166,9 @@ var p=c.placed||{};
 o+='<div class="note">'+(gaps.length?'To go: '+gaps.map(function(x){return esc(lc(x.l))+' '+x.g}).join(', ')+'. ':(d.has_targets===false?'':'All weekly targets met. '))+(p.actual!=null?'Placed this week: '+N(p.actual)+'. ':'')+(d.has_targets===false?'Targets not loaded. ':'')+'BD and client calls count categorised Devyce calls only, so can undercount.</div>';
 return o}
 function weekTeam(d,cs){var m=[['CV','cv_sent'],['Int req','interview_request'],['Int','first_interview'],['BD','bd_calls'],['Client','client_calls'],['Placed','placed']];
-cs=cs.slice().sort(function(a,b){return ((b.cv_sent||{}).actual||0)-((a.cv_sent||{}).actual||0)});
+cs=rank(cs,function(c){return (c.cv_sent||{}).actual||0});
 var o=head('This week — team','from '+D(d.week_start));
-o+='<div class="tw"><table><tr><th>Consultant</th>'+m.map(function(x){return '<th class="num">'+x[0]+'</th>'}).join('')+'</tr>'+cs.map(function(c){return '<tr><td>'+esc(c.name)+'</td>'+m.map(function(x){var v=c[x[1]]||{},a=v.actual||0,t=v.target;return '<td class="num'+(t!=null&&a>=t?' met':'')+'">'+N(a)+(t!=null?'<span style="color:var(--o-text-3)">/'+N(t)+'</span>':'')+'</td>'}).join('')+'</tr>'}).join('')+'</table></div>';
+o+='<div class="tw"><table><tr><th>Consultant</th>'+m.map(function(x){return '<th class="num">'+x[0]+'</th>'}).join('')+'</tr>'+cs.map(function(c){return '<tr><td>'+who(c)+'</td>'+m.map(function(x){var v=c[x[1]]||{},a=v.actual||0,t=v.target;return '<td class="num'+(t!=null&&a>=t?' met':'')+'">'+N(a)+(t!=null?'<span style="color:var(--o-text-3)">/'+N(t)+'</span>':'')+'</td>'}).join('')+'</tr>'}).join('')+'</table></div>';
 o+='<div class="note">Green = target met. '+(d.has_targets===false?'Targets not loaded. ':'')+'BD and client calls count categorised Devyce calls only, so can undercount.</div>';return o}
 function billOne(d,c){var tg=c.quarterly_target,wq=c.won_qtr||0,left=tg!=null?Math.max(0,tg-wq):null;
 var o=head('Billing this quarter','from '+D(d.quarter_start));
@@ -173,9 +176,9 @@ o+='<div class="big">'+GBP(wq)+(tg!=null?' <small>of '+GBP(tg)+'</small>':'')+'<
 if(tg!=null)o+='<div class="bar" style="margin-top:10px" role="img" aria-label="'+pct(wq,tg)+'% of target"><i style="width:'+pct(wq,tg)+'%"></i></div>';
 o+='<dl class="rows">'+(tg!=null?'<dt>Of target</dt><dd>'+(tg?Math.round(100*wq/tg):0)+'%</dd><dt>Still to bill</dt><dd'+(left===0?' class="ok"':'')+'>'+GBP(left)+'</dd>':'')+'<dt>Open pipeline</dt><dd>'+GBP(c.pipeline_open)+'</dd></dl>';
 o+='<div class="note">Billing is Won deal value. Pipeline is the forward indicator.</div>';return o}
-function billTeam(d,cs){cs=cs.slice().sort(function(a,b){return (b.won_qtr||0)-(a.won_qtr||0)});
+function billTeam(d,cs){cs=rank(cs,function(c){return c.won_qtr||0});
 var o=head('Billing this quarter — team','from '+D(d.quarter_start));
-o+='<div class="tw"><table><tr><th>Consultant</th><th class="num">Won</th><th class="num">Target</th><th class="num">%</th><th class="num">Pipeline</th></tr>'+cs.map(function(c){var tg=c.quarterly_target,wq=c.won_qtr||0;return '<tr><td>'+esc(c.name)+'</td><td class="num'+(tg!=null&&wq>=tg?' met':'')+'">'+GBP(wq)+'</td><td class="num">'+(tg!=null?GBP(tg):'—')+'</td><td class="num">'+(tg?Math.round(100*wq/tg)+'%':'—')+'</td><td class="num">'+GBP(c.pipeline_open)+'</td></tr>'}).join('')+'</table></div>';
+o+='<div class="tw"><table><tr><th>Consultant</th><th class="num">Won</th><th class="num">Target</th><th class="num">%</th><th class="num">Pipeline</th></tr>'+cs.map(function(c){var tg=c.quarterly_target,wq=c.won_qtr||0;return '<tr><td>'+who(c)+'</td><td class="num'+(tg!=null&&wq>=tg?' met':'')+'">'+GBP(wq)+'</td><td class="num">'+(tg!=null?GBP(tg):'—')+'</td><td class="num">'+(tg?Math.round(100*wq/tg)+'%':'—')+'</td><td class="num">'+GBP(c.pipeline_open)+'</td></tr>'}).join('')+'</table></div>';
 o+='<div class="note">Billing is Won deal value. Pipeline is the forward indicator.</div>';return o}
 window.OCT={name:'octagon-scorecard',title:'Scorecard',full:false,
 accept:function(d){return !!(d&&d.consultants&&(d.week_start||d.quarter_start))},
@@ -218,7 +221,7 @@ if(v.my_2026)o+='<div class="sec">Your 2026 funnel</div>'+funnel([['Shortlist',y
 o+='<div class="sec">Firm — 2026</div><div class="note" style="margin-top:0">'+N(k.cv_2026)+' CV sent · '+N(k.placed_2026)+' placed · '+N(k.open_jobs)+' open jobs · '+GBP(k.open_pipeline)+' open pipeline</div>';
 if(d.consultants&&d.consultants.length)o+=team(d);
 return o+foot(ctx)}
-function team(d){var cs=d.consultants.slice().sort(function(a,b){return (b.placed||0)-(a.placed||0)});return '<div class="sec">Team — by job owner</div>'+table([['Consultant'],['CV',1],['1st Int',1],['Placed',1]],cs.map(function(c){return '<tr><td>'+esc(c.name)+'</td><td class="num">'+N(c.cv_sent)+'</td><td class="num">'+N(c.first_interview)+'</td><td class="num">'+N(c.placed)+'</td></tr>'}))}
+function team(d){var cs=rank(d.consultants,function(c){return c.placed||0});return '<div class="sec">Team — by job owner</div>'+table([['Consultant'],['CV',1],['1st Int',1],['Placed',1]],cs.map(function(c){return '<tr><td>'+who(c)+'</td><td class="num">'+N(c.cv_sent)+'</td><td class="num">'+N(c.first_interview)+'</td><td class="num">'+N(c.placed)+'</td></tr>'}))}
 function firmSummary(d,ctx){var k=d.kpis||{};return head('Octagon dashboard','2026')+sync(d.health)+tiles([['Placed 2026',N(k.placed_2026)],['Open jobs',N(k.open_jobs)],['Open pipeline',GBP(k.open_pipeline)],['Won',GBP(k.won)]])+foot(ctx)}
 function firmFull(d,ctx){var k=d.kpis||{},f=d.funnel||{},pl=d.pipeline||[];
 var o=head('Octagon dashboard','2026')+sync(d.health);
