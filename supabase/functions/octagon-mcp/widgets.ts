@@ -304,13 +304,17 @@ var HIDE=/^(mode|action|instruction|acting_as|preview|_card|card_note|carried_fo
 var MONEY=/(^|_)(value|fee|salary|amount|salary_min|salary_max)$/;
 var LONG=/^(body|email_text|note_preview|would_post|summary)$/;
 var WARN=/^(warning|caution|billing_note)$/;
-function lab(k){k=String(k).replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)}
+function lab(k){if(k==='push_tell_date')return 'Push & Tell date';k=String(k).replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)}
 function val(v,k){if(v==null||v==='')return '<span style="color:var(--o-text-3)">—</span>';if(typeof v==='boolean')return v?'Yes':'No';
 if(k&&MONEY.test(k)&&!isNaN(Number(v))&&String(v).trim()!=='')return GBP(v);
 if(typeof v==='string'&&/^\d{4}-\d{2}-\d{2}(T|$)/.test(v))return D(v);
-if(Array.isArray(v))return esc(v.map(function(x){return typeof x==='object'?Object.values(x).join(' '):x}).join(', '));
+if(Array.isArray(v)){if(v.length&&typeof v[0]==='object'&&v[0]!==null)return v.map(item).join('<br>');return esc(v.join(', '))}
 if(typeof v==='object'){if('name' in v||'label' in v||'title' in v)return esc(v.name||v.label||v.title);return Object.keys(v).filter(function(j){return !HIDE.test(j)}).map(function(j){return esc(lab(j))+': '+val(v[j],j)}).join(' · ')}
 return esc(v)}
+// One row of an array of objects: its name, then short fields, then any {current,new} pair as a change.
+function item(x){var head=x.title||x.name||x.label||x.candidate||x.field||'',parts=[];Object.keys(x).forEach(function(k){var v=x[k];if(v==null||v===''||HIDE.test(k)||['title','name','label','candidate','field'].indexOf(k)>=0)return;
+if(typeof v==='object'&&!Array.isArray(v)&&('current' in v||'new' in v))parts.push(esc(lab(k))+' <span class="from">'+val(v.current,k)+'</span><span class="arrow">→</span><span class="to">'+val(v['new'],k)+'</span>');
+else if(typeof v!=='object')parts.push(k==='grade'?'<span class="tag">'+esc(v)+'</span>':val(v,k))});return esc(head)+(parts.length?' · '+parts.join(' · '):'')}
 function diff(b,a){var ks=Object.keys(a||{});return ks.filter(function(k){return !HIDE.test(k)}).map(function(k){var o=b&&b[k],n=a[k],same=JSON.stringify(o)===JSON.stringify(n);return '<dt>'+esc(lab(k))+'</dt><dd>'+(same?val(n,k):'<span class="from">'+val(o,k)+'</span><span class="arrow">→</span><span class="to">'+val(n,k)+'</span>')+'</dd>'}).join('')}
 function fields(d){var o='',longs='',warns='';
 if(d.current_stage||d.proposed_stage)o+='<dt>Stage</dt><dd><span class="from">'+val(d.current_stage&&(d.current_stage.label||d.current_stage.name))+'</span><span class="arrow">→</span><span class="to">'+val(d.proposed_stage&&d.proposed_stage.name)+'</span></dd>';
@@ -343,7 +347,7 @@ if(c.kind==='done')return head(title,'<span class="ok">Done</span>')+fields(d)+'
 var chip=c.state==='done'?'<span class="ok">Done</span>':c.state==='cancel'?'Cancelled':c.state==='fail'?'Not applied':'<span class="chip">Preview</span>';
 return head(title,chip)+fields(d)+foot(c,d,ctx)},
 act:function(name,d,api){var c=d._card;
-if(name.indexOf('more:')===0){var el=document.getElementById('b-'+name.slice(5));if(el)el.classList.toggle('open');return}
+if(name.indexOf('more:')===0){var el=document.getElementById('b-'+name.slice(5));if(el){var o=el.classList.toggle('open');var bt=document.querySelector('[data-act="'+name+'"]');if(bt)bt.textContent=o?'Show less':'Show all'}return}
 if(c.state==='busy'||c.state==='done')return;
 var tell=function(text){try{api.app.updateModelContext({content:[{type:'text',text:text}]})}catch(e){}};
 if(name==='cancel'){c.state='cancel';api.set(d);tell('The recruiter pressed Cancel on the '+c.tool+' preview card. Nothing was applied. Do not apply this change unless they ask again.');return}
@@ -576,7 +580,7 @@ R.webhook_subscriptions={title:function(){return 'RecruitCRM webhooks'},cap:func
  sum:function(d){var s=d.subscriptions||[],by={};s.forEach(function(x){var k=String(x.event).split('.')[0];by[k]=(by[k]||0)+1});return tiles(Object.keys(by).sort().map(function(k){return [esc(lab(k)),N(by[k])]}))},
  full:function(d){return tbl([['Event',function(x){return esc(x.event)}],['ID',function(x){return esc(x.id)},1]],(d.subscriptions||[]).slice().sort(function(a,b){return String(a.event).localeCompare(String(b.event))}))+'<div class="note">Target URLs are hidden.</div>'}};
 (function(){var B=window.OCT,ba=B.act;B.act=function(name,d,api){
- if(name.indexOf('more:')===0){var el=document.getElementById('b-'+name.slice(5));if(el)el.classList.toggle('open');return}
+ if(name.indexOf('more:')===0){var el=document.getElementById('b-'+name.slice(5));if(el){var o=el.classList.toggle('open');var bt=document.querySelector('[data-act="'+name+'"]');if(bt)bt.textContent=o?'Show less':'Show all'}return}
  if(name.indexOf('ptj:')===0){var p=name.split(':'),c=(d.clients||[])[Number(p[1])];if(c){c._off=c._off||{};c._off[p[2]]=!c._off[p[2]];api.set(d)}return}
  if(name.indexOf('pt:')===0){var cl=name.slice(3),c2=(d.clients||[]).filter(function(x){return x.client===cl})[0];if(!c2)return;var ids=c2.included.filter(function(j){return !(c2._off&&c2._off[j.job_id])}).map(function(j){return j.job_id});
   if(!ids.length)return;try{api.app.sendMessage({role:'user',content:[{type:'text',text:'Draft the Push & Tell email for '+cl+' covering job'+(ids.length===1?' ':'s ')+ids.join(', ')+'.'}]})}catch(e){}return}
