@@ -27,7 +27,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.67.1" };
+const SERVER = { name: "octagon-analytics", version: "3.68.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -431,6 +431,7 @@ const TOOLS = [
   { name: "off_limit", description: "Off-limit status — candidates who must NOT be approached or pitched, usually because they were recently placed. action: list (everyone currently off limit), check (one candidate, with history), mark (set off limit until a date), release (make available again). Checking before pitching or sending a CV avoids a serious client problem. mark and release are WRITES: preview first, then confirm=true.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | check | mark | release" }, candidate: { type: "string", description: "candidate name, slug or RecruitCRM candidate ID" }, until: { type: "string", description: "YYYY-MM-DD, for mark" }, reason: { type: "string" }, status_id: { type: "integer", description: "off-limit status id — see reference_list kind=off_limit_status" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["action"], additionalProperties: false } },
   { name: "invoices_report", description: "Invoices raised in RecruitCRM for a date window, with status and totals. Billing in this platform means Won deal value; invoices are the finance side of the same story and nothing here has ever read them. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string", description: "YYYY-MM-DD issue date" }, to: { type: "string", description: "YYYY-MM-DD" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "manage_client", description: "Create or edit a company (client) or a contact in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. kind: company | contact. Omit `id` to create, pass it (company/contact slug, or company name) to edit. A contact should carry a client so it attaches to the right company. Checks for an existing record before creating. Attributed to you.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "company or contact" }, id: { type: "string", description: "slug or name of an existing record — omit to create" }, name: { type: "string", description: "company name (companies only)" }, first_name: { type: "string" }, last_name: { type: "string" }, client: { type: "string", description: "company to attach a contact to" }, email: { type: "string" }, phone: { type: "string" }, designation: { type: "string", description: "job title (contacts)" }, website: { type: "string" }, city: { type: "string" }, country: { type: "string" }, linkedin: { type: "string" }, about: { type: "string", description: "about the company" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
+  { name: "client_status", description: "A company's status and its contacts' stages in RecruitCRM. action=list (read): the company's Company Status and every contact at it with their current contact stage. action=set (WRITE, two-step, EXPLICIT-ONLY): change the Company Status (company_status: Prospect, Engaged, Client, Passive, Blocklisted, Do not contact) and/or the contact stage of its contacts (contact_stage: Prospect, Client, Engaged, Passive, Do Not Contact, Left the Company). contacts defaults to every contact at the company EXCEPT those at Left the Company or Do Not Contact, which are only changed when named. Call without confirm for a preview listing every record and its current -> new value, read it back, then confirm=true. At most 25 contacts per confirmation. Each write is read back from RecruitCRM and verified. Use for 'change all contacts at X to client', 'mark X as a client', 'who are our contacts at X'.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | set" }, client: { type: "string", description: "company name (partial) or company slug" }, company_status: { type: "string" }, contact_stage: { type: "string" }, contacts: { type: "array", items: { type: "string" }, description: "contact names or slugs to change; omit for all eligible contacts" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["action", "client"], additionalProperties: false } },
   { name: "notes_read", description: "Read notes already recorded in RecruitCRM against a candidate, job, company or contact — call notes, intake notes, client conversations. The platform could write notes but never read them, so prior context was invisible. Give a candidate name, or a job, or a client. Returns note text, which is internal-only PII. Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name, slug or RecruitCRM candidate ID" }, job: { type: "string", description: "job ID/slug/title" }, client: { type: "string", description: "company name" }, from: { type: "string", description: "YYYY-MM-DD" }, to: { type: "string", description: "YYYY-MM-DD" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "hotlist", description: "Shared talent pools in RecruitCRM. action: list (show hotlists), create (new one), add (put a candidate on one), remove. Use it to turn a shortlist into something the team can see rather than a message in a chat. Creating or changing one is a WRITE: preview first, then confirm=true.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | create | add | remove" }, name: { type: "string", description: "hotlist name (create)" }, hotlist_id: { type: "integer" }, candidate: { type: "string", description: "candidate name or slug (add/remove)" }, shared: { type: "boolean", description: "visible to the team (create)" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["action"], additionalProperties: false } },
   { name: "create_candidate", description: "Add a new candidate to RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Only a first name is strictly required, but supply as much as you have — email, phone, current role and employer, skills, salary and notice all make the record useful and searchable. Checks for an existing candidate with the same email or name first and refuses rather than creating a duplicate. Owned by and attributed to you. Candidate details are PII: internal only.", inputSchema: { type: "object", properties: { first_name: { type: "string" }, last_name: { type: "string" }, email: { type: "string" }, phone: { type: "string" }, position: { type: "string", description: "current job title" }, employer: { type: "string", description: "current organisation" }, skills: { type: "string", description: "comma separated" }, city: { type: "string" }, country: { type: "string" }, linkedin: { type: "string" }, current_salary: { type: "string" }, salary_expectation: { type: "string" }, notice_period: { type: "integer", description: "days" }, source: { type: "string" }, summary: { type: "string", description: "candidate summary / notes" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["first_name"], additionalProperties: false } },
@@ -491,7 +492,7 @@ for (const t of TOOLS as any[]) if (REPORT_TOOLS.has(t.name)) t._meta = { ui: { 
 // ---- Mixed read/write tools (3.67.0) -------------------------------------------------------------
 // One widget for both halves: a read action renders as a report view, a preview (or a confirmed
 // change) as the confirm card. They get card_nonce like the card tools.
-const MIXED_TOOLS = new Set(["off_limit", "hotlist", "inbox", "push_tell", "eow_email", "manage_tokens", "webhook_subscriptions"]);
+const MIXED_TOOLS = new Set(["off_limit", "hotlist", "inbox", "push_tell", "eow_email", "manage_tokens", "webhook_subscriptions", "client_status"]);
 for (const t of TOOLS as any[]) if (MIXED_TOOLS.has(t.name)) {
   t.inputSchema = { ...t.inputSchema, properties: { ...(t.inputSchema?.properties ?? {}), card_nonce: { type: "string", description: "Internal: copy it from _card.confirm_args when confirming a preview. Never invent one." } } };
   t._meta = { ui: { resourceUri: MIXED_UI, visibility: ["model", "app"] } };
@@ -1428,6 +1429,123 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (kind === "company") await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=clients`,
       { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
     return toolText({ mode: "applied", kind, slug: rec.slug ?? target, note: `${kind} ${editing ? "updated" : "created"} in RecruitCRM.` });
+  }
+
+  // ---- client_status (3.68.0): company status + contact stages, listed and set together ---------
+  // Company Status is a company custom field; a contact's status is its contact stage (the sales
+  // pipeline, reference_list kind=contact_stages). The API docs do not name the contact field that
+  // holds the stage, so it is detected on the live record and every write is read back: if the
+  // field cannot be found, nothing is written.
+  if (name === "client_status") {
+    const action = String(args?.action ?? "list");
+    const { data: cl } = await db.from("clients").select("company_slug,company_name,company_status").is("deleted_at", null)
+      .or(`company_slug.eq.${args?.client},company_name.ilike.%${args?.client}%`).limit(5);
+    if (!cl?.length) return toolText({ error: "no_company", message: `No company matches '${args?.client}'.` });
+    const exact = cl.find((c: any) => c.company_slug === args?.client || String(c.company_name).toLowerCase() === String(args?.client).toLowerCase());
+    if (!exact && cl.length > 1) return toolText({ error: "ambiguous_company", matches: cl.map((c: any) => c.company_name), message: "More than one company matches. Say which." });
+    const co = exact ?? cl[0];
+    // Contacts at the company, live (not mirrored). Follows next_page_url for up to 10 pages.
+    const contacts: any[] = [];
+    let url: string | null = `/contacts/search?company_slug=${encodeURIComponent(co.company_slug)}`;
+    for (let i = 0; url && i < 10; i++) {
+      const r = await crm("GET", url);
+      const page = Array.isArray(r.json) ? r.json : (r.json?.data ?? []);
+      contacts.push(...page);
+      const next = r.json?.next_page_url ?? null;
+      url = next ? String(next).replace(/^https?:\/\/[^/]+\/v1/, "") : null;
+    }
+    const stagesR = await crm("GET", "/sales-pipeline");
+    const stages: any[] = (Array.isArray(stagesR.json) ? stagesR.json : (stagesR.json?.data ?? [])).map((s: any) => ({ id: Number(s.stage_id ?? s.id), label: String(s.label ?? s.name ?? "") }));
+    const stageLabel = (v: any): string | null => { if (v == null || v === "") return null; if (typeof v === "object") return v.label ?? v.name ?? stageLabel(v.id ?? v.stage_id); const n = Number(v); const s = stages.find((x) => x.id === n); return s ? s.label : String(v); };
+    const STAGE_KEYS = ["stage_id", "contact_stage_id", "contact_stage", "sales_stage_id", "stage"];
+    const stageKey = (c: any) => STAGE_KEYS.find((k) => k in (c ?? {})) ?? null;
+    const fullName = (c: any) => [c.first_name, c.last_name].filter(Boolean).join(" ") || c.slug;
+    const rows = contacts.map((c: any) => ({ name: fullName(c), slug: c.slug, title: c.designation ?? null, stage: stageLabel(c[stageKey(c) ?? ""]) }));
+    if (action === "list") {
+      return toolText({ company: co.company_name, company_status: co.company_status ?? null, contacts: rows.map(({ slug, ...r }) => r), count: rows.length,
+        stage_field_found: contacts.length ? !!stageKey(contacts[0]) : null });
+    }
+    if (action !== "set") return toolText({ error: "action must be list or set" });
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Changing statuses requires a write-enabled token (an admin sets can_write)." });
+    if (!args.company_status && !args.contact_stage) return toolText({ error: "nothing_to_change", message: "Give company_status, contact_stage, or both." });
+
+    // Company Status: resolve the live option.
+    let statusDef: any = null, newStatus: string | null = null;
+    if (args.company_status) {
+      const fr = await crm("GET", "/custom-fields/companies");
+      const defs = Array.isArray(fr.json) ? fr.json : (fr.json?.data ?? []);
+      statusDef = defs.find((f: any) => /company status/i.test(String(f.field_name ?? f.label ?? "")));
+      if (!statusDef) return toolText({ error: "field_not_found", message: "RecruitCRM has no 'Company Status' company field, so nothing was changed." });
+      const opts = String(statusDef.default_value ?? "").split(",").map((s: string) => s.trim()).filter(Boolean);
+      newStatus = opts.find((o: string) => o.toLowerCase().replace(/[^a-z]/g, "") === String(args.company_status).toLowerCase().replace(/[^a-z]/g, "")) ?? null;
+      if (!newStatus) return toolText({ error: "unknown_company_status", given: args.company_status, valid: opts });
+    }
+    // Contact stage: resolve, pick the contacts, refuse if the stage field cannot be found.
+    let target: any = null, chosen: any[] = [], skipped: any[] = [];
+    if (args.contact_stage) {
+      const want = String(args.contact_stage).toLowerCase().replace(/[^a-z]/g, "");
+      target = stages.find((s) => s.label.toLowerCase().replace(/[^a-z]/g, "") === want);
+      if (!target) return toolText({ error: "unknown_contact_stage", given: args.contact_stage, valid: stages.map((s) => s.label) });
+      if (!contacts.length) return toolText({ error: "no_contacts", message: `${co.company_name} has no contacts in RecruitCRM.` });
+      if (!stageKey(contacts[0])) return toolText({ error: "stage_field_not_found", message: "Could not find the contact stage on RecruitCRM's contact record, so nothing was changed. Ollie needs to check the API field name.", fields_seen: Object.keys(contacts[0]).filter((k) => !/email|phone|number|linkedin|address/i.test(k)) });
+      const named: string[] = Array.isArray(args.contacts) ? args.contacts.map((s: any) => String(s).toLowerCase()) : [];
+      for (const c of contacts) {
+        const row = { name: fullName(c), slug: c.slug, current: stageLabel(c[stageKey(c)!]) };
+        const isNamed = named.length ? named.some((n) => n === String(c.slug).toLowerCase() || row.name.toLowerCase().includes(n)) : false;
+        if (named.length && !isNamed) continue;
+        if (row.current === target.label) { skipped.push({ name: row.name, reason: `already ${target.label}` }); continue; }
+        if (!named.length && /left the company|do not contact/i.test(String(row.current ?? ""))) { skipped.push({ name: row.name, reason: `${row.current}: only changed when named` }); continue; }
+        chosen.push({ ...row, key: stageKey(c), first_name: c.first_name, last_name: c.last_name });
+      }
+      if (named.length && !chosen.length && !skipped.length) return toolText({ error: "no_matching_contacts", message: "None of the named contacts are at this company.", contacts_at_company: rows.map((r) => r.name) });
+      if (chosen.length > 25) return toolText({ error: "too_many", message: `That would change ${chosen.length} contacts. The limit is 25 per confirmation: name the contacts to do it in batches.` });
+    }
+    const companyChanging = newStatus != null && newStatus !== co.company_status;
+    if (!companyChanging && !chosen.length) return toolText({ error: "nothing_to_change", message: "Everything is already at the requested status.", skipped });
+
+    if (!args.confirm) {
+      return toolText({ mode: "preview", action: "client_status",
+        company: co.company_name,
+        ...(companyChanging ? { before: { company_status: co.company_status ?? null }, after: { company_status: newStatus } } : {}),
+        contacts: chosen.map((c) => ({ name: c.name, contact_stage: { current: c.current, new: target.label } })),
+        not_changed: skipped.length ? skipped : undefined,
+        what_happens: `Changes ${companyChanging ? "the company status" : ""}${companyChanging && chosen.length ? " and " : ""}${chosen.length ? `${chosen.length} contact${chosen.length === 1 ? "" : "s"}` : ""} in RecruitCRM. Each is read back and checked.`,
+        instruction: "Read the company and every contact listed back to the recruiter. Only on explicit approval call again with the same arguments and confirm=true." });
+    }
+
+    const results: any[] = [];
+    if (companyChanging) {
+      const pairs = [{ field_id: Number(statusDef.field_id ?? statusDef.id), value: newStatus }];
+      const readStatus = async () => { const g = await crm("GET", `/companies/${co.company_slug}`); const d = g.json?.data ?? g.json ?? {};
+        const f = (d.custom_fields ?? []).find((x: any) => Number(x.field_id ?? x.id) === pairs[0].field_id); return { name: d.company_name, v: f?.value ?? f?.field_value ?? null }; };
+      const cur = await readStatus();
+      // JSON first, as manage_client edits companies; then the multipart bracket form the job writes needed.
+      let w = await crm("POST", `/companies/${co.company_slug}`, { company_name: cur.name ?? co.company_name, custom_fields: pairs, updated_by: actor.id });
+      let after = w.ok ? await readStatus() : cur;
+      if (String(after.v ?? "").trim() !== newStatus) {
+        const fd = new FormData(); fd.append("company_name", String(cur.name ?? co.company_name)); fd.append("custom_fields[0][field_id]", String(pairs[0].field_id)); fd.append("custom_fields[0][value]", String(newStatus)); fd.append("updated_by", String(actor.id));
+        const r2 = await fetch(`${BASE}/companies/${co.company_slug}`, { method: "POST", headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" }, body: fd });
+        after = r2.ok ? await readStatus() : after;
+      }
+      const ok = String(after.v ?? "").trim() === newStatus;
+      results.push({ record: co.company_name, field: "Company Status", ok, now: after.v ?? null });
+      await audit({ actor: String(actor.id), action: "client_status_company", entity: "company", entity_id: co.company_slug, before: { company_status: co.company_status ?? null }, after: { company_status: newStatus, verified: ok }, via: "claude" });
+    }
+    for (const c of chosen) {
+      const body: any = { first_name: c.first_name, last_name: c.last_name, updated_by: actor.id };
+      body[c.key === "stage" ? "stage_id" : c.key] = target.id;
+      const w = await crm("POST", `/contacts/${c.slug}`, body);   // JSON, as manage_client edits contacts
+      const g = await crm("GET", `/contacts/${c.slug}`); const d = g.json?.data ?? g.json ?? {};
+      const now = stageLabel(d[stageKey(d) ?? ""]);
+      const ok = now === target.label;
+      results.push({ record: c.name, field: "Contact stage", ok, now, ...(w.ok ? {} : { error: w.status }) });
+      await audit({ actor: String(actor.id), action: "client_status_contact", entity: "contact", entity_id: c.slug, before: { stage: c.current }, after: { stage: target.label, verified: ok }, via: "claude" });
+    }
+    if (companyChanging) await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=clients`,
+      { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    const failed = results.filter((r) => !r.ok);
+    return toolText({ mode: "applied", company: co.company_name, changed: results.filter((r) => r.ok).length, failed: failed.length, results,
+      note: failed.length ? `${failed.length} change(s) did not show up when read back from RecruitCRM. Check them there.` : "Every change was read back from RecruitCRM and checked." });
   }
 
   if (name === "notes_read") {
