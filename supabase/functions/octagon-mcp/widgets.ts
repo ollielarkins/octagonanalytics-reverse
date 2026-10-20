@@ -22,6 +22,7 @@ export const DASH_UI = "ui://octagon/dashboard";
 export const SCORE_UI = "ui://octagon/scorecard";
 export const CONFIRM_UI = "ui://octagon/confirm";
 export const REPORT_UI = "ui://octagon/report";
+export const MIXED_UI = "ui://octagon/mixed";
 
 // get_dashboard links to its widget (on from 3.64.0, once the SDK runtime was live via weekly_kpis /
 // billing). octagon-dashboard 0.5.0 stopped redrawing the bare dashboard with visualize at the same
@@ -153,6 +154,14 @@ td.met{color:var(--o-success);font-weight:var(--font-weight-medium,500)}
 @media (pointer:coarse){.seg2 button{min-width:44px;min-height:44px}}
 .tot{display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:24px;margin-top:16px;align-items:end}
 .tot .l{font-size:13px;color:var(--o-text-2);margin-bottom:4px}.tot .v{font-size:24px;font-weight:var(--font-weight-medium,500)}.tot small{font-size:14px;color:var(--o-text-3);font-weight:400}
+.badge{display:inline-block;margin:0 0 12px;padding:6px 12px;border-radius:var(--o-r-md);font-weight:var(--font-weight-medium,500)}
+.badge.stop{background:var(--color-background-danger,#F7ECEC);color:var(--color-text-danger,#7F2C28)}
+.badge.go{background:var(--color-background-success,#E9F1DC);color:var(--o-success)}
+:root[data-theme=dark] .badge.stop{background:var(--color-background-danger,#602A28);color:var(--color-text-danger,#EE8884)}
+:root[data-theme=dark] .badge.go{background:var(--color-background-success,#1B4614)}
+.chk{font:inherit;width:22px;height:22px;border-radius:6px;border:var(--o-bw) solid var(--o-border-2);background:transparent;color:var(--o-on-chip);cursor:pointer;vertical-align:middle;padding:0;font-size:13px}
+.chk.on{background:var(--o-chip);border-color:var(--o-chip)}
+@media (pointer:coarse){.chk{width:32px;height:32px}}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 `;
 
@@ -290,7 +299,7 @@ add_note:['Add note','Add note'],create_candidate:['New candidate','Create candi
 create_job:['New job','Create job'],update_job:['Edit job','Save changes'],create_deal:['New deal','Create deal'],update_deal:['Edit deal','Save changes'],
 log_activity:['Log activity','Log it'],manage_client:['Client record','Save'],pitch_candidate:['Record pitch','Record pitch'],
 job_dpe:['Record DPE','Record DPE'],post_digest:['Post digest','Post to Slack'],delete_record:['Delete record',''],
-send_email:['Email','Save draft'],draft_reply:['Reply draft','Save to Outlook Drafts'],dpe_email:['DPE email','Save to Outlook Drafts']};
+send_email:['Email','Save draft'],push_tell:['Push & Tell email','Save to Outlook Drafts'],eow_email:['End-of-week email','Save to Outlook Drafts'],off_limit:['Off-limit status','Apply'],hotlist:['Hotlist','Apply'],inbox:['Inbox','Apply'],manage_tokens:['Revoke access','Revoke'],webhook_subscriptions:['Webhook','Apply'],draft_reply:['Reply draft','Save to Outlook Drafts'],dpe_email:['DPE email','Save to Outlook Drafts']};
 var HIDE=/^(mode|action|instruction|acting_as|preview|_card|card_note|carried_forward|untouched|what_happens|reason_prompt|note|opted_out_check|changing|identifier|deal_id|job_id|target_type)$|(_slug|^slug|status_id|stage_id)$/;
 var MONEY=/(^|_)(value|fee|salary|amount|salary_min|salary_max)$/;
 var LONG=/^(body|email_text|note_preview|would_post|summary)$/;
@@ -322,7 +331,8 @@ if(!ctx.canTools||!c.confirm_args)return '<div class="foot"><span class="hint">R
 var label=(T[t]||[])[1]||'Confirm',hint='Nothing changes until you confirm';
 if(t==='send_email'){if(d.action==='send_email'){label='Save as draft instead';hint='To send it, confirm in the chat'}else hint='Saves a draft in RecruitCRM. Nothing is sent'}
 if(t==='update_deal'&&d.after&&String(d.after.stage||'').toLowerCase()==='won')label='Mark as Won';
-if(t==='draft_reply'||t==='dpe_email')hint='Saved as a draft. Nothing is sent';
+if(t==='draft_reply'||t==='dpe_email'||t==='push_tell'||t==='eow_email')hint='Saved as a draft. Nothing is sent';
+if(t==='manage_tokens')hint='Switches their connector access off';
 if(t==='post_digest')hint='Posts to Slack and cannot be unsent';
 return '<div class="foot"><span class="hint">'+hint+'</span><button class="btn btn-g" data-act="cancel">Cancel</button><button class="btn btn-p" data-act="'+(t==='send_email'?'draft':'confirm')+'">'+esc(label)+'</button></div>'}
 window.OCT={name:'octagon-confirm',title:'Octagon',full:false,
@@ -343,7 +353,7 @@ api.app.callServerTool({name:c.tool,arguments:args}).then(function(r){var sc=r&&
 if(!res&&txt){try{res=JSON.parse(txt)}catch(e){res={message:txt}}}
 var err=r&&r.isError||(res&&res.error);
 if(err){c.state='fail';c.fail_msg=(res&&(res.message||res.error))||'That did not go through.';api.set(d);tell('The recruiter pressed confirm on the '+c.tool+' preview card, but it failed: '+JSON.stringify(res||txt).slice(0,1200)+'. Nothing was applied.');return}
-c.state='done';c.done_msg=name==='draft'?'Draft saved. Nothing was sent.':(c.tool==='post_digest'?'Posted to Slack.':(c.tool==='draft_reply'||c.tool==='dpe_email')?'Saved to your Outlook Drafts.':'Done. Applied in RecruitCRM.');api.set(d);
+c.state='done';c.done_msg=name==='draft'?'Draft saved. Nothing was sent.':(c.tool==='post_digest'?'Posted to Slack.':(['draft_reply','dpe_email','push_tell','eow_email'].indexOf(c.tool)>=0)?'Saved to your Outlook Drafts.':'Done. Applied in RecruitCRM.');api.set(d);
 tell('The recruiter confirmed the '+c.tool+' change with the preview card button and it has ALREADY BEEN APPLIED'+(name==='draft'?' (saved as a draft, not sent)':'')+'. Result: '+JSON.stringify(res).slice(0,1500)+'. Do not call '+c.tool+' with confirm=true again for this change.')})
 .catch(function(e){c.state='fail';c.fail_msg='Could not reach the connector. Nothing was changed.';api.set(d)})}};
 // DPE scoring screen (job_dpe): the consultant picks each score; the card shows the live total and
@@ -527,6 +537,56 @@ act:function(name,d,api){
  if(name.indexOf('open:')===0){try{api.app.openLink({url:name.slice(5)})}catch(e){}return}}};
 `;
 
+// ---- Mixed read/write tools: read views + the confirm card in one widget ----------------------
+const MIXED_JS = String.raw`// Read views for the mixed read/write tools. Their previews go to the confirm card instead.
+function ISO(s){return s?D(String(s).slice(0,10)):'—'}
+function lab(k){k=String(k).replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)}
+function HM(s){var m=/T(\d{2}:\d{2})/.exec(String(s||''));return m?m[1]:''}
+R.off_limit={title:function(d){return d.off_limit?'Off-limit candidates':esc(d.candidate||'Off-limit check')},cap:function(d){return d.off_limit?N(d.count)+' do not approach':''},
+ sum:function(d){if(d.off_limit){var l=d.off_limit.slice().sort(function(a,b){return String(a.until||'9').localeCompare(String(b.until||'9'))});return tiles([['Off limit now',N(d.count)],['With an end date',N(l.filter(function(x){return x.until&&String(x.until).indexOf('2038')!==0}).length)]])+list(l.slice(0,4),function(x){return '<span>'+esc(x.name)+'</span><span class="tag">'+(x.until&&String(x.until).indexOf('2038')!==0?'until '+ISO(x.until):'no end date')+'</span>'})}
+  var on=!!d.currently_off_limit;return '<div class="badge '+(on?'stop':'go')+'">'+(on?'Off limit: do not approach or pitch':'Available to approach')+'</div><dl class="kv">'+(on?'<dt>Until</dt><dd>'+(d.until&&String(d.until).indexOf('2038')!==0?ISO(d.until):'no end date')+'</dd>':'')+(d.reason?'<dt>Reason</dt><dd>'+esc(d.reason)+'</dd>':'')+'</dl>'},
+ full:function(d){if(!d.off_limit){var h=d.history||[];return h.length?R.off_limit.sum(d)+sec('History')+tbl([['Status',function(x){return esc(x.status_label)}],['Reason',function(x){return esc(x.reason||'—')}],['Ends',function(x){return x.end_date?ISO(x.end_date):'—'}],['Updated',function(x){return ISO(x.updated_on)}]],h):null}
+  return tbl([['Candidate',function(x){return esc(x.name)}],['Until',function(x){return x.until&&String(x.until).indexOf('2038')!==0?ISO(x.until):'no end date'}],['Reason',function(x){return esc(x.reason||'—')}]],d.off_limit)}},
+R.hotlist={title:function(){return 'Hotlists'},cap:function(d){return N(d.count)+' lists'},
+ sum:function(d){var h=d.hotlists||[];if(!h.length)return '<div class="note" style="margin-top:0">'+esc(d.message||'No hotlists.')+'</div>';var by={};h.forEach(function(x){by[x.type]=(by[x.type]||0)+1});
+  return tiles(Object.keys(by).map(function(k){return [esc(lab(k))+'s',N(by[k])]}))+list(h.slice(0,5),function(x){return '<span>'+esc(x.name)+'</span><span class="tag">'+esc(x.type)+(x.shared?' · shared':'')+'</span>'})},
+ full:function(d){return tbl([['Hotlist',function(x){return esc(x.name)}],['Of',function(x){return esc(x.type)}],['Shared',function(x){return x.shared?'Yes':'No'}]],d.hotlists||[])}},
+R.inbox={title:function(d){return d.body!=null?esc(d.subject||'Email'):'Inbox'},cap:function(d){return d.body!=null?ISO(d.received)+' '+HM(d.received):(d.since?'since '+ISO(d.since):'')},
+ sum:function(d){
+  if(d.body!=null)return '<dl class="kv"><dt>From</dt><dd>'+esc(d.from)+'</dd><dt>To</dt><dd>'+esc((d.to||[]).join(', '))+'</dd>'+((d.cc||[]).length?'<dt>Cc</dt><dd>'+esc(d.cc.join(', '))+'</dd>':'')+((d.attachments||[]).length?'<dt>Attachments</dt><dd>'+d.attachments.map(function(a){return esc(a.name||a.filename||'file')}).join(', ')+'</dd>':'')+'</dl>'+(d.category==='never'?'<div class="warn" style="margin-top:12px">Flagged '+esc(d.reason)+': a topic to handle yourself.</div>':'')+'<div class="body" id="b-body" style="margin-top:12px">'+esc(d.body)+'</div><button class="link" data-act="more:body">Show all</button>';
+  if(d.emails){var e=d.emails,o=['never','other','routine'];return tiles([['New',N(d.count)],['Handle yourself',N(e.filter(function(x){return x.category==='never'}).length)],['Routine',N(e.filter(function(x){return x.category==='routine'}).length)]])
+   +list(e.slice().sort(function(a,b){return o.indexOf(a.category)-o.indexOf(b.category)}).slice(0,5),function(x){return '<span>'+(x.is_read?'':'<b style="font-weight:500">')+esc(x.from_name||x.from_address)+(x.is_read?'':'</b>')+' <span style="color:var(--o-text-3)">'+esc(x.subject)+'</span></span><span class="tag">'+(x.category==='never'?'yourself':esc(x.category))+'</span>'})}
+  if(d.connected===false)return '<div class="note" style="margin-top:0">'+esc(d.message||'Your inbox is not connected.')+'</div>';
+  return tiles([['New',N(d.new_total)],['Handle yourself',N(d.never)],['Routine',N(d.routine)],['Other',N(d.other)]])+'<div class="note">Last checked '+ISO(d.last_checked)+' '+HM(d.last_checked)+'. '+N(d.automated)+' automated emails counted, not listed.</div>'},
+ full:function(d){if(!d.emails)return null;return tbl([['From',function(x){return esc(x.from_name||x.from_address)}],['Subject',function(x){return esc(x.subject)}],['Received',function(x){return ISO(x.received_at)+' '+HM(x.received_at)}],['Type',function(x){return x.category==='never'?'Handle yourself ('+esc(x.reason)+')':esc(x.category)}]],d.emails)}},
+R.push_tell={title:function(){return 'Push & Tell'},cap:function(d){return esc(d.consultant||'')+(d.window?' · '+esc(d.window).replace(/(\d{4})-(\d{2})-(\d{2})/g,'$3/$2/$1'):'')},
+ sum:function(d){var c=d.clients||[];if(!c.length)return '<div class="note" style="margin-top:0">No A or B grade open jobs to report on.</div>';
+  return list(c.slice(0,5),function(x){return '<span>'+esc(x.client)+' <span style="color:var(--o-text-3)">'+N(x.included.length)+' job'+(x.included.length===1?'':'s')+'</span></span><button class="btn btn-g" data-act="pt:'+esc(x.client)+'">Draft email</button>'})+more(c,5,'clients')+'<div class="note">A and B grade jobs are included. Open the full view to change which jobs go in.</div>'},
+ full:function(d){var c=d.clients||[];return c.map(function(x,ci){return sec(esc(x.client))+'<div class="li">'+x.included.map(function(j){var on=!(x._off&&x._off[j.job_id]);var act=Object.keys(j.last_7_days||{}).map(function(k){return N(j.last_7_days[k])+' '+esc(({cv_sent:'CV sent',interview_request:'interview request',first_interview:'1st interview',second_interview:'2nd interview',third_interview:'3rd interview',offered:'offered',placed:'placed',rejected_client:'rejected by client'})[k]||k.replace(/_/g,' '))}).join(', ');
+   return '<div class="row"><span><button class="chk'+(on?' on':'')+'" data-act="ptj:'+ci+':'+esc(j.job_id)+'" aria-pressed="'+on+'">'+(on?'✓':'')+'</button> '+esc(j.title)+' <span class="tag">'+esc(j.grade||'—')+'</span> <span class="m">'+(act||'no client-visible activity this week')+'</span></span><span class="m">'+(j.last_push_tell?'last sent '+ISO(j.last_push_tell):'never sent')+'</span></div>'}).join('')+'</div><div style="margin-top:8px"><button class="btn btn-p" data-act="pt:'+esc(x.client)+'">Draft email for '+esc(x.client)+'</button></div>'}).join('')+((d.other_open_jobs||[]).length?'<div class="note">'+N(d.other_open_jobs.length)+' C-grade or ungraded open jobs are left out. Ask to add any.</div>':'')}},
+R.eow_email={title:function(){return 'End of week'},cap:function(d){return win({from:d.window&&d.window.from,to:d.window&&d.window.to_exclusive})},
+ sum:function(d){var t=d.totals||{};return tiles([['CVs sent',N(t.cv_sent)],['Interview requests',N(t.interview_requests)],['Interviews',N(t.interviews)],['Offers',N(t.offers)],['BD calls',N(t.bd_calls)],['Jobs added',N(t.jobs_added)]])},
+ full:function(d){var so=d.shout_outs||{},sh=Object.keys(so).filter(function(k){return (so[k]||[]).length});return R.eow_email.sum(d)+(sh.length?sec('Shout-outs')+'<dl class="kv">'+sh.map(function(k){return '<dt>'+esc(lab(k))+'</dt><dd>'+so[k].map(function(x){return esc(typeof x==='object'?(x.name||JSON.stringify(x)):x)}).join(', ')+'</dd>'}).join('')+'</dl>':'')
+  +sec('Team')+tbl([['Consultant',nm],['Jobs',function(c){return N(c.jobs_added)},1],['Assigned',function(c){return N(c.candidates_assigned)},1],['CVs',function(c){return N(c.cv_sent)},1],['Int req',function(c){return N(c.interview_requests)},1],['Interviews',function(c){return N(c.interviews)},1],['Offers',function(c){return N(c.offers)},1],['BD calls',function(c){return N(c.bd_calls)},1]],rank(d.consultants||[],function(c){return c.cv_sent||0}))
+  +((d.jobs||[]).length?sec('New jobs')+tbl([['Role',function(j){return esc(j.title)}],['Client',function(j){return esc(j.company)}],['Contact',function(j){return esc(j.contact)}],['Owner',function(j){return esc(j.owner)}],['Added',function(j){return D(j.date_added)}]],d.jobs):'')+'<div class="note">Shout-outs: '+esc(d.thresholds||'')+'.</div>'}},
+R.manage_tokens={title:function(){return 'Connector access'},cap:function(d){return N(d.active_tokens)+' active tokens'},
+ sum:function(d){var t=d.tokens||[],lv=d.leavers_with_access||[];return tiles([['Active tokens',N(d.active_tokens)],['People',N(Object.keys(t.reduce(function(a,x){a[x.name]=1;return a},{})).length)],['Leavers still with access',N(lv.length)]])+(lv.length?'<div class="warn" style="margin-top:12px">'+N(lv.length)+' leaver(s) still hold access: '+lv.map(function(x){return esc(x.name)}).join(', ')+'. Ask Claude to revoke.</div>':'')},
+ full:function(d){return R.manage_tokens.sum(d)+tbl([['Person',nm],['Can write',function(x){return x.can_write?'Yes':'No'}],['Admin',function(x){return x.is_admin?'Yes':'No'}],['Created',function(x){return ISO(x.created)}],['Last used',function(x){return x.last_used?ISO(x.last_used):'never'}]],d.tokens||[])}},
+R.webhook_subscriptions={title:function(){return 'RecruitCRM webhooks'},cap:function(d){return N(d.count)+' subscriptions'},
+ sum:function(d){var s=d.subscriptions||[],by={};s.forEach(function(x){var k=String(x.event).split('.')[0];by[k]=(by[k]||0)+1});return tiles(Object.keys(by).sort().map(function(k){return [esc(lab(k)),N(by[k])]}))},
+ full:function(d){return tbl([['Event',function(x){return esc(x.event)}],['ID',function(x){return esc(x.id)},1]],(d.subscriptions||[]).slice().sort(function(a,b){return String(a.event).localeCompare(String(b.event))}))+'<div class="note">Target URLs are hidden.</div>'}};
+(function(){var B=window.OCT,ba=B.act;B.act=function(name,d,api){
+ if(name.indexOf('more:')===0){var el=document.getElementById('b-'+name.slice(5));if(el)el.classList.toggle('open');return}
+ if(name.indexOf('ptj:')===0){var p=name.split(':'),c=(d.clients||[])[Number(p[1])];if(c){c._off=c._off||{};c._off[p[2]]=!c._off[p[2]];api.set(d)}return}
+ if(name.indexOf('pt:')===0){var cl=name.slice(3),c2=(d.clients||[]).filter(function(x){return x.client===cl})[0];if(!c2)return;var ids=c2.included.filter(function(j){return !(c2._off&&c2._off[j.job_id])}).map(function(j){return j.job_id});
+  if(!ids.length)return;try{api.app.sendMessage({role:'user',content:[{type:'text',text:'Draft the Push & Tell email for '+cl+' covering job'+(ids.length===1?' ':'s ')+ids.join(', ')+'.'}]})}catch(e){}return}
+ return ba(name,d,api)}})();
+`;
+const MIXED_APP_JS = '(function(){' + CONFIRM_JS + '\nwindow.OCT_C=window.OCT;})();\n(function(){' + REPORT_JS + MIXED_JS + '\nwindow.OCT_R=window.OCT;})();\n' + String.raw`window.OCT={name:'octagon-mixed',title:'Octagon',full:true,
+accept:function(d){return !!(d&&(d._card?window.OCT_C.accept(d):window.OCT_R.accept(d)))},
+render:function(d,ctx){return d._card?window.OCT_C.render(d,ctx):window.OCT_R.render(d,ctx)},
+act:function(n,d,api){return d._card?window.OCT_C.act(n,d,api):window.OCT_R.act(n,d,api)}};`;
+
 function page(title: string, appJs: string): string {
   return '<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>' + title + '</title><style>' + THEME_CSS + '</style></head><body><div id="app" aria-live="polite"></div>'
     + '<script>(function(){' + EXT_APPS_JS + '\n})();</script>'
@@ -538,3 +598,4 @@ export const SCORECARD_WIDGET_HTML = page("Octagon scorecard", SCORECARD_JS);
 export const DASHBOARD_WIDGET_HTML = page("Octagon dashboard", DASHBOARD_JS);
 export const CONFIRM_WIDGET_HTML = page("Octagon preview", CONFIRM_JS);
 export const REPORT_WIDGET_HTML = page("Octagon report", REPORT_JS);
+export const MIXED_WIDGET_HTML = page("Octagon", MIXED_APP_JS);

@@ -23,11 +23,11 @@
 // Connector URL: https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { graph, graphConfigured, mbx } from "../_shared/graph.ts";
-import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, DASHBOARD_WIDGET_HTML, SCORECARD_WIDGET_HTML, CONFIRM_WIDGET_HTML, REPORT_WIDGET_HTML, WIDGET_RESOURCE_META, DASHBOARD_WIDGET_LINKED } from "./widgets.ts";
+import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHBOARD_WIDGET_HTML, SCORECARD_WIDGET_HTML, CONFIRM_WIDGET_HTML, REPORT_WIDGET_HTML, MIXED_WIDGET_HTML, WIDGET_RESOURCE_META, DASHBOARD_WIDGET_LINKED } from "./widgets.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.66.0" };
+const SERVER = { name: "octagon-analytics", version: "3.67.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -488,6 +488,22 @@ const REPORT_TOOLS = new Set(["my_day", "stalled_report", "cold_jobs", "awaiting
   "invoices_report", "notes_kpi", "time_to_fill", "match_candidates", "job_pipeline", "find_candidate", "candidate_profile",
   "cv_pack", "job_spec", "notes_read", "pitch_history", "files_list", "platform_health", "usage_report", "team_insights"]);
 for (const t of TOOLS as any[]) if (REPORT_TOOLS.has(t.name)) t._meta = { ui: { resourceUri: REPORT_UI, visibility: ["model", "app"] } };
+// ---- Mixed read/write tools (3.67.0) -------------------------------------------------------------
+// One widget for both halves: a read action renders as a report view, a preview (or a confirmed
+// change) as the confirm card. They get card_nonce like the card tools.
+const MIXED_TOOLS = new Set(["off_limit", "hotlist", "inbox", "push_tell", "eow_email", "manage_tokens", "webhook_subscriptions"]);
+for (const t of TOOLS as any[]) if (MIXED_TOOLS.has(t.name)) {
+  t.inputSchema = { ...t.inputSchema, properties: { ...(t.inputSchema?.properties ?? {}), card_nonce: { type: "string", description: "Internal: copy it from _card.confirm_args when confirming a preview. Never invent one." } } };
+  t._meta = { ui: { resourceUri: MIXED_UI, visibility: ["model", "app"] } };
+}
+function mixedWrap(name: string, args: any, out: any) {
+  const t = out?.content?.[0]?.text; if (typeof t !== "string") return out;
+  let d: any; try { d = JSON.parse(t); } catch { return out; }
+  if (!d || typeof d !== "object" || Array.isArray(d)) return out;
+  const w = (d.mode === "preview" || d.preview === true || args?.confirm) ? cardWrap(name, args, out) : viewWrap(name, out);
+  if (w !== out && w?._meta?.ui) w._meta.ui.resourceUri = MIXED_UI;
+  return w;
+}
 function viewWrap(name: string, out: any) {
   const t = out?.content?.[0]?.text; if (typeof t !== "string") return out;
   let d: any; try { d = JSON.parse(t); } catch { return out; }
@@ -777,7 +793,7 @@ async function callTool(name: string, args: any, req: Request) {
   if (!auth.ok) return toolText({ error: auth.reason });
   const actor = auth.actor;
   try {
-    if (CARD_TOOLS.has(name) && args?.card_nonce) {
+    if ((CARD_TOOLS.has(name) || MIXED_TOOLS.has(name)) && args?.card_nonce) {
       const nonce = String(args.card_nonce).slice(0, 80);
       args = { ...args }; delete args.card_nonce;
       if (args.confirm) {
@@ -785,7 +801,7 @@ async function callTool(name: string, args: any, req: Request) {
         if (error) {
           const dup = error.code === "23505";
           logCall(actor.id, name, false);
-          return cardWrap(name, args, toolText({ error: dup ? "already_applied" : "card_check_failed",
+          return (MIXED_TOOLS.has(name) ? mixedWrap : cardWrap)(name, { ...args, confirm: true }, toolText({ error: dup ? "already_applied" : "card_check_failed",
             message: dup ? "This change was already applied from this preview, so nothing was changed again. Ask for a fresh preview to make another change."
                          : "Could not check this confirmation, so nothing was changed. Try again in a moment." }));
         }
@@ -795,6 +811,7 @@ async function callTool(name: string, args: any, req: Request) {
     if (name !== "record_content_use") logCall(actor.id, name, resultOk(out));
     if (CARD_TOOLS.has(name)) out = cardWrap(name, args, out);
     else if (REPORT_TOOLS.has(name)) out = viewWrap(name, out);
+    else if (MIXED_TOOLS.has(name)) out = mixedWrap(name, args, out);
     return out;
   } catch (e) {
     logCall(actor.id, name, false);
@@ -2647,12 +2664,14 @@ async function handle(m: any, req: Request): Promise<any> {
     { uri: SCORE_UI, name: "octagon_scorecard", mimeType: MCP_APP_MIME, _meta: WIDGET_RESOURCE_META },
     { uri: CONFIRM_UI, name: "octagon_confirm", mimeType: MCP_APP_MIME, _meta: WIDGET_RESOURCE_META },
     { uri: REPORT_UI, name: "octagon_report", mimeType: MCP_APP_MIME, _meta: WIDGET_RESOURCE_META },
+    { uri: MIXED_UI, name: "octagon_mixed", mimeType: MCP_APP_MIME, _meta: WIDGET_RESOURCE_META },
   ] });
   if (method === "resources/read") {
     if (params?.uri === DASH_UI) return rpc(id, { contents: [{ uri: DASH_UI, mimeType: MCP_APP_MIME, text: DASHBOARD_WIDGET_HTML, _meta: WIDGET_RESOURCE_META }] });
     if (params?.uri === SCORE_UI) return rpc(id, { contents: [{ uri: SCORE_UI, mimeType: MCP_APP_MIME, text: SCORECARD_WIDGET_HTML, _meta: WIDGET_RESOURCE_META }] });
     if (params?.uri === CONFIRM_UI) return rpc(id, { contents: [{ uri: CONFIRM_UI, mimeType: MCP_APP_MIME, text: CONFIRM_WIDGET_HTML, _meta: WIDGET_RESOURCE_META }] });
     if (params?.uri === REPORT_UI) return rpc(id, { contents: [{ uri: REPORT_UI, mimeType: MCP_APP_MIME, text: REPORT_WIDGET_HTML, _meta: WIDGET_RESOURCE_META }] });
+    if (params?.uri === MIXED_UI) return rpc(id, { contents: [{ uri: MIXED_UI, mimeType: MCP_APP_MIME, text: MIXED_WIDGET_HTML, _meta: WIDGET_RESOURCE_META }] });
     return rpcErr(id, -32602, "Unknown resource: " + params?.uri);
   }
   if (typeof method === "string" && method.startsWith("notifications/")) return null;
