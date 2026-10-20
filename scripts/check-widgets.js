@@ -11,7 +11,7 @@ const path = require('node:path');
 const w = await import(pathToFileURL(path.join(__dirname, '..', 'supabase', 'functions', 'octagon-mcp', 'widgets.ts')).href);
 let failed = 0;
 
-for (const name of ['DASHBOARD_WIDGET_HTML', 'SCORECARD_WIDGET_HTML']) {
+for (const name of ['DASHBOARD_WIDGET_HTML', 'SCORECARD_WIDGET_HTML', 'CONFIRM_WIDGET_HTML']) {
   const html = w[name];
   if (typeof html !== 'string' || !html.startsWith('<!doctype html>')) { console.log('FAIL ' + name + ': not an HTML document'); failed++; continue; }
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);

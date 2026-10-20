@@ -19,6 +19,7 @@ import { EXT_APPS_JS } from "./ext_apps_bundle.ts";
 export const MCP_APP_MIME = "text/html;profile=mcp-app";
 export const DASH_UI = "ui://octagon/dashboard";
 export const SCORE_UI = "ui://octagon/scorecard";
+export const CONFIRM_UI = "ui://octagon/confirm";
 
 // get_dashboard links to its widget (on from 3.64.0, once the SDK runtime was live via weekly_kpis /
 // billing). octagon-dashboard 0.5.0 stopped redrawing the bare dashboard with visualize at the same
@@ -111,6 +112,18 @@ td.met{color:var(--o-success);font-weight:var(--font-weight-medium,500)}
 .sk{background:var(--o-track);border-radius:var(--o-r-sm);height:12px;animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.5}}
 @media (prefers-reduced-motion:reduce){.sk{animation:none}}
+.kv{display:grid;grid-template-columns:minmax(90px,max-content) 1fr;gap:8px 16px;margin:0}
+.kv dt{color:var(--o-text-3)}.kv dd{margin:0;overflow-wrap:anywhere}
+.kv dd .from{color:var(--o-text-3)}.kv dd .arrow{color:var(--o-text-3);margin:0 6px}.kv dd .to{font-weight:var(--font-weight-medium,500)}
+.body{white-space:pre-wrap;background:var(--o-bg-2);border-radius:var(--o-r-md);padding:12px 14px;font-size:13px;line-height:1.5;max-height:9.5em;overflow:hidden;position:relative}
+.body.open{max-height:none}
+.link{font:inherit;font-size:12px;background:none;border:0;padding:4px 0;color:var(--o-text-2);text-decoration:underline;cursor:pointer}
+.danger{margin:0 0 14px;padding:8px 12px;border-radius:var(--o-r-md);background:var(--color-background-danger,#F7ECEC);color:var(--color-text-danger,#7F2C28);font-size:13px}
+:root[data-theme=dark] .danger{background:var(--color-background-danger,#602A28);color:var(--color-text-danger,#EE8884)}
+.state{display:flex;align-items:center;gap:8px;font-size:13px}
+.state.ok{color:var(--o-success)}.state.bad{color:var(--color-text-danger,#7F2C28)}
+:root[data-theme=dark] .state.bad{color:var(--color-text-danger,#EE8884)}
+.btn[disabled]{opacity:.5;cursor:default}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 `;
 
@@ -130,13 +143,13 @@ function head(title,cap){return '<div class="head"><img class="logo lt" src="dat
 function skeleton(){return '<div class="head"><div class="sk" style="width:20px;height:20px;border-radius:6px"></div><div class="sk" style="width:120px"></div></div><div class="kpis">'+[70,55,62,40,48].map(function(w){return '<div><div class="sk" style="width:'+w+'%;margin-bottom:8px"></div><div class="sk" style="height:6px"></div></div>'}).join('')+'</div>'}
 (function(){
 var M=window.McpApps,O=window.OCT,root=document.getElementById('app');
-var DATA=null,MODE='inline',FULL=false,FAILED=false;
+var DATA=null,MODE='inline',FULL=false,FAILED=false,CAN_TOOLS=false;
 root.innerHTML=skeleton();
 function fail(msg){if(DATA)return;FAILED=true;root.innerHTML=head(O.title||'Octagon')+'<div class="note">'+esc(msg)+'</div>'}
 if(!M||!M.App){fail('The widget could not start. Ask again, and if it keeps happening, ping Ollie on Slack.');return}
 var app=new M.App({name:O.name,version:'2.0.0'},{availableDisplayModes:O.full?['inline','fullscreen']:['inline']},{autoResize:true});
 function draw(){if(!DATA)return;document.documentElement.classList.toggle('full',MODE==='fullscreen');
-try{root.innerHTML=O.render(DATA,{mode:MODE,canFull:FULL})}catch(e){root.innerHTML=head(O.title||'Octagon')+'<div class="note">Could not draw this view: '+esc(e&&e.message)+'</div>'}}
+try{root.innerHTML=O.render(DATA,{mode:MODE,canFull:FULL,canTools:CAN_TOOLS})}catch(e){root.innerHTML=head(O.title||'Octagon')+'<div class="note">Could not draw this view: '+esc(e&&e.message)+'</div>'}}
 function applyCtx(c){if(!c)return;
 try{if(c.theme)M.applyDocumentTheme(c.theme);if(c.styles&&c.styles.variables)M.applyHostStyleVariables(c.styles.variables);if(c.styles&&c.styles.css&&c.styles.css.fonts)M.applyHostFonts(c.styles.css.fonts)}catch(e){}
 if(c.availableDisplayModes)FULL=!!O.full&&c.availableDisplayModes.indexOf('fullscreen')>=0;
@@ -148,9 +161,11 @@ if(!sc||!O.accept(sc)){fail('No data came back for this view. Ask again in a mom
 DATA=sc;FAILED=false;draw()};
 app.ontoolcancelled=function(){fail('Cancelled.')};
 app.onhostcontextchanged=applyCtx;
-document.addEventListener('click',function(ev){var b=ev.target.closest&&ev.target.closest('[data-mode]');if(!b)return;
+document.addEventListener('click',function(ev){var a=ev.target.closest&&ev.target.closest('[data-act]');
+if(a&&O.act){ev.preventDefault();O.act(a.getAttribute('data-act'),DATA,{app:app,set:function(d){DATA=d;draw()},draw:draw});return}
+var b=ev.target.closest&&ev.target.closest('[data-mode]');if(!b)return;
 app.requestDisplayMode({mode:b.getAttribute('data-mode')}).then(function(r){if(r&&r.mode){MODE=r.mode;draw()}}).catch(function(){})});
-app.connect().then(function(){applyCtx(app.getHostContext())}).catch(function(){fail('Could not connect to Claude. Reconnect the Octagon Analytics connector and ask again.')});
+app.connect().then(function(){var hc=app.getHostCapabilities&&app.getHostCapabilities();CAN_TOOLS=!!(hc&&hc.serverTools);applyCtx(app.getHostContext());draw()}).catch(function(){fail('Could not connect to Claude. Reconnect the Octagon Analytics connector and ask again.')});
 setTimeout(function(){if(!DATA&&!FAILED)fail('This is taking longer than usual. Ask again, and if it keeps happening, ping Ollie on Slack.')},10000);
 })();
 `;
@@ -237,6 +252,69 @@ render:function(d,ctx){var v=d.viewer||{},me=!!(v.name&&!v.is_admin),full=ctx.mo
 return me?(full?meFull(d,v,ctx):meSummary(d,v,ctx)):(full?firmFull(d,ctx):firmSummary(d,ctx))}};
 `;
 
+// ---- Confirm card: preview → confirm for the two-step write tools -------------------------------
+const CONFIRM_JS = String.raw`
+// Preview card for the two-step write tools. The server wraps every preview / result of these
+// tools as { ...the tool's own JSON, _card: { tool, kind, confirm_args, draft_args } }.
+var T={update_hiring_stage:['Move stage','Move stage'],assign_candidate:['Assign candidate','Assign'],manage_assignment:['Change assignment','Apply'],
+add_note:['Add note','Add note'],create_candidate:['New candidate','Create candidate'],update_candidate:['Edit candidate','Save changes'],
+create_job:['New job','Create job'],update_job:['Edit job','Save changes'],create_deal:['New deal','Create deal'],update_deal:['Edit deal','Save changes'],
+log_activity:['Log activity','Log it'],manage_client:['Client record','Save'],pitch_candidate:['Record pitch','Record pitch'],
+job_dpe:['Record DPE','Record DPE'],post_digest:['Post digest','Post to Slack'],delete_record:['Delete record',''],
+send_email:['Email','Save draft'],draft_reply:['Reply draft','Save to Outlook Drafts'],dpe_email:['DPE email','Save to Outlook Drafts']};
+var HIDE=/^(mode|action|instruction|acting_as|preview|_card|card_note|carried_forward|untouched|what_happens|reason_prompt|note|opted_out_check)$|(_slug|^slug|status_id|stage_id)$/;
+var LONG=/^(body|email_text|note_preview|would_post|summary)$/;
+var WARN=/^(warning|caution|billing_note)$/;
+function lab(k){k=String(k).replace(/_/g,' ');return k.charAt(0).toUpperCase()+k.slice(1)}
+function val(v){if(v==null||v==='')return '<span style="color:var(--o-text-3)">—</span>';if(typeof v==='boolean')return v?'Yes':'No';
+if(Array.isArray(v))return esc(v.map(function(x){return typeof x==='object'?Object.values(x).join(' '):x}).join(', '));
+if(typeof v==='object'){if('name' in v||'label' in v||'title' in v)return esc(v.name||v.label||v.title);return Object.keys(v).filter(function(k){return !HIDE.test(k)}).map(function(k){return esc(lab(k))+': '+val(v[k])}).join(' · ')}
+return esc(v)}
+function diff(b,a){var ks=Object.keys(a||{});return ks.filter(function(k){return !HIDE.test(k)}).map(function(k){return '<dt>'+esc(lab(k))+'</dt><dd><span class="from">'+val(b&&b[k])+'</span><span class="arrow">→</span><span class="to">'+val(a[k])+'</span></dd>'}).join('')}
+function fields(d){var o='',longs='',warns='';
+if(d.current_stage||d.proposed_stage)o+='<dt>Stage</dt><dd><span class="from">'+val(d.current_stage&&(d.current_stage.label||d.current_stage.name))+'</span><span class="arrow">→</span><span class="to">'+val(d.proposed_stage&&d.proposed_stage.name)+'</span></dd>';
+if(d.before&&d.after)o+=diff(d.before,d.after);
+Object.keys(d).forEach(function(k){var v=d[k];if(v==null||HIDE.test(k)||k==='before'||k==='after'||k==='current_stage'||k==='proposed_stage')return;
+if(WARN.test(k)){warns+='<div class="'+(d._card&&d._card.tool==='delete_record'?'danger':'warn')+'">'+esc(v)+'</div>';return}
+if(LONG.test(k)&&typeof v==='string'){longs+='<div class="sec" style="margin:14px 0 8px;font-size:13px">'+esc(lab(k==='note_preview'?'note':k==='email_text'?'email':k))+'</div><div class="body" id="b-'+k+'">'+esc(v)+'</div>'+(v.split('\n').length>6||v.length>420?'<button class="link" data-act="more:'+k+'">Show all</button>':'');return}
+if(typeof v==='object'&&!Array.isArray(v)&&!('name' in v||'label' in v||'title' in v)&&(k==='will_create'||k==='fields'||k==='changes'||k==='job'||k==='dpe_sent_date')){Object.keys(v).forEach(function(j){if(!HIDE.test(j)&&v[j]!=null&&v[j]!=='')o+='<dt>'+esc(lab(j))+'</dt><dd>'+val(v[j])+'</dd>'});return}
+o+='<dt>'+esc(lab(k))+'</dt><dd>'+val(v)+'</dd>'});
+return warns+(o?'<dl class="kv">'+o+'</dl>':'')+longs}
+function foot(c,d,ctx){var t=c.tool,st=c.state;
+if(st==='busy')return '<div class="foot"><span class="hint">Applying…</span></div>';
+if(st==='done')return '<div class="foot"><div class="state ok">✓ '+esc(c.done_msg||'Done. Applied in RecruitCRM.')+'</div></div>';
+if(st==='cancel')return '<div class="foot"><div class="state">Cancelled. Nothing was changed.</div></div>';
+if(st==='fail')return '<div class="foot"><div class="state bad">'+esc(c.fail_msg||'That did not go through.')+'</div></div>';
+if(t==='delete_record')return '<div class="foot"><span class="hint">Deleting is permanent. To go ahead, type the record\'s name back in the chat.</span><button class="btn btn-g" data-act="cancel">Cancel</button></div>';
+if(!ctx.canTools||!c.confirm_args)return '<div class="foot"><span class="hint">Reply in the chat to confirm or change this.</span></div>';
+var label=(T[t]||[])[1]||'Confirm',hint='Nothing changes until you confirm';
+if(t==='send_email'){if(d.action==='send_email'){label='Save as draft instead';hint='To send it, confirm in the chat'}else hint='Saves a draft in RecruitCRM. Nothing is sent'}
+if(t==='update_deal'&&d.after&&String(d.after.stage||'').toLowerCase()==='won')label='Mark as Won';
+if(t==='draft_reply'||t==='dpe_email')hint='Saved as a draft. Nothing is sent';
+if(t==='post_digest')hint='Posts to Slack and cannot be unsent';
+return '<div class="foot"><span class="hint">'+hint+'</span><button class="btn btn-g" data-act="cancel">Cancel</button><button class="btn btn-p" data-act="'+(t==='send_email'?'draft':'confirm')+'">'+esc(label)+'</button></div>'}
+window.OCT={name:'octagon-confirm',title:'Octagon',full:false,
+accept:function(d){return !!(d&&d._card)},
+render:function(d,ctx){var c=d._card,t=c.tool,title=(T[t]||[lab(t)])[0];
+if(c.kind==='error'){var already=d.error==='already_applied';return head(title)+'<div class="'+(already?'note':'warn')+'" style="margin-top:0">'+esc(d.message||d.error||'Something went wrong.')+'</div>'}
+if(c.kind==='done')return head(title,'<span class="ok">Done</span>')+fields(d)+'<div class="foot"><div class="state ok">✓ Applied in RecruitCRM.</div></div>';
+return head(title,'<span class="chip">Preview</span>')+fields(d)+foot(c,d,ctx)},
+act:function(name,d,api){var c=d._card;
+if(name.indexOf('more:')===0){var el=document.getElementById('b-'+name.slice(5));if(el)el.classList.toggle('open');return}
+if(c.state==='busy'||c.state==='done')return;
+var tell=function(text){try{api.app.updateModelContext({content:[{type:'text',text:text}]})}catch(e){}};
+if(name==='cancel'){c.state='cancel';api.set(d);tell('The recruiter pressed Cancel on the '+c.tool+' preview card. Nothing was applied. Do not apply this change unless they ask again.');return}
+var args=name==='draft'?c.draft_args:c.confirm_args;if(!args)return;
+c.state='busy';api.set(d);
+api.app.callServerTool({name:c.tool,arguments:args}).then(function(r){var sc=r&&r.structuredContent,txt=r&&r.content&&r.content[0]&&r.content[0].text,res=sc||null;
+if(!res&&txt){try{res=JSON.parse(txt)}catch(e){res={message:txt}}}
+var err=r&&r.isError||(res&&res.error);
+if(err){c.state='fail';c.fail_msg=(res&&(res.message||res.error))||'That did not go through.';api.set(d);tell('The recruiter pressed confirm on the '+c.tool+' preview card, but it failed: '+JSON.stringify(res||txt).slice(0,1200)+'. Nothing was applied.');return}
+c.state='done';c.done_msg=name==='draft'?'Draft saved. Nothing was sent.':(c.tool==='post_digest'?'Posted to Slack.':(c.tool==='draft_reply'||c.tool==='dpe_email')?'Saved to your Outlook Drafts.':'Done. Applied in RecruitCRM.');api.set(d);
+tell('The recruiter confirmed the '+c.tool+' change with the preview card button and it has ALREADY BEEN APPLIED'+(name==='draft'?' (saved as a draft, not sent)':'')+'. Result: '+JSON.stringify(res).slice(0,1500)+'. Do not call '+c.tool+' with confirm=true again for this change.')})
+.catch(function(e){c.state='fail';c.fail_msg='Could not reach the connector. Nothing was changed.';api.set(d)})}};
+`;
+
 function page(title: string, appJs: string): string {
   return '<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>' + title + '</title><style>' + THEME_CSS + '</style></head><body><div id="app" aria-live="polite"></div>'
     + '<script>' + EXT_APPS_JS + '</script>'
@@ -246,3 +324,4 @@ function page(title: string, appJs: string): string {
 
 export const SCORECARD_WIDGET_HTML = page("Octagon scorecard", SCORECARD_JS);
 export const DASHBOARD_WIDGET_HTML = page("Octagon dashboard", DASHBOARD_JS);
+export const CONFIRM_WIDGET_HTML = page("Octagon preview", CONFIRM_JS);
