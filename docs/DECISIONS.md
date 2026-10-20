@@ -157,3 +157,28 @@ of their chat. Before more recruiters connect, a short DPIA entry should record 
 
 **Status:** **Decided & built 13/10/2026** (octagon-mcp 3.46.0). Not live until the Microsoft 365 app
 registration and secrets are in place; see docs/wiki/Inbox.md.
+
+---
+
+## Call notes and Devyce AI summaries: read live, never mirrored
+
+**Decision.** Call notes (including the Devyce AI call summary) stay out of the mirror. The sync keeps
+dropping `call_notes` from `call_activity`. `call_notes` (octagon-mcp 3.70.0) reads them live from
+RecruitCRM's `/call-logs/search`, for one candidate or one contact per call, and writes an
+`audit_log` row (`read_call_notes`) for every read. `candidate_intake` now pulls the latest Devyce
+summary itself instead of asking for a paste, and can save the finished intake as a
+"Candidate - Internal Interview" note through `add_note` (`note_type: internal_interview`), preview
+then confirm.
+
+**Why.** Probe on 20/10/2026, which returned no call content: all 50 recent call logs had
+`call_notes` set, as HTML (median 571 characters), and 38 were marked Devyce. Recruiters were still
+pasting transcripts into chat. A live, single-person read gives the same help without holding
+call content at rest. Only `/call-logs/search` honours `related_to`. The plain `/call-logs` list
+ignores it and returns everyone's calls, so the tool re-filters on `related_to` and fails closed.
+
+**Not decided.** The internal interviews KPI counts whatever is filed as that note type, so saving
+an intake under it is opt-in per call and the recruiter is asked first. `note_type_id` on
+`POST /notes` has not been tested live yet: check the first internal-interview save in RecruitCRM.
+Suggesting Devyce call tags from the summary is a later step.
+
+**Status:** **Built 20/10/2026** (octagon-mcp 3.70.0, migration 0104). Not live until deployed.
