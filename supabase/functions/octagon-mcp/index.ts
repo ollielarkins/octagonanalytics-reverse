@@ -27,7 +27,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, DASHBOARD_WIDGET_HTML, SCORECARD_WIDGE
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.63.0" };
+const SERVER = { name: "octagon-analytics", version: "3.64.0" };
 
 async function crm(method: string, path: string, body?: any) {
   const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
@@ -397,7 +397,7 @@ const AUTH_ARG = { auth_token: { type: "string", description: "Octagon access to
 // MCP Apps widgets (dashboard + scorecard) live in widgets.ts.
 
 const TOOLS = [
-  { name: "get_dashboard", description: "Live Octagon dashboard, scoped to who is asking. A recruiter gets their OWN desk: week vs weekly targets, quarterly billing vs target, their 2026 funnel, and their attention list (aging offers, stalled candidates, cold open roles) — this part names candidates, so it is internal-only, not client-facing. Admins get firm KPIs, the 2026 funnel, deal pipeline and the whole-team breakdown. Managers (viewer.sees_team) get both: their own desk AND the whole-team breakdown. Always includes sync health. Call at the start of a conversation and for overviews. Returns JSON only — the octagon-dashboard skill renders it.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, ...(DASHBOARD_WIDGET_LINKED ? { _meta: { ui: { resourceUri: DASH_UI, visibility: ["model", "app"] } } } : {}) },
+  { name: "get_dashboard", description: "Live Octagon dashboard, scoped to who is asking. A recruiter gets their OWN desk: week vs weekly targets, quarterly billing vs target, their 2026 funnel, and their attention list (aging offers, stalled candidates, cold open roles) — this part names candidates, so it is internal-only, not client-facing. Admins get firm KPIs, the 2026 funnel, deal pipeline and the whole-team breakdown. Managers (viewer.sees_team) get both: their own desk AND the whole-team breakdown. Always includes sync health. Call at the start of a conversation and for overviews. Renders as an inline dashboard widget (a summary card that opens to a full-screen view) — do not restate it.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, ...(DASHBOARD_WIDGET_LINKED ? { _meta: { ui: { resourceUri: DASH_UI, visibility: ["model", "app"] } } } : {}) },
   { name: "funnel_report", description: "Recruitment funnel + conversion ratios for a date window, optionally filtered to one consultant (partial name match) or team. Use for 'how did Keelan do in Q2', 'the tech team last month', 'firm funnel this year'. Dates ISO (YYYY-MM-DD); 'to' is exclusive. Defaults to 2026 YTD. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "client_report", description: "Per-client (account) activity for a window: CVs sent, first interviews, placements, open/total jobs, and CV->placed rate, ranked by volume. Use for 'how is <client> doing', 'our busiest accounts this year'. Covers ~99.8% of jobs; a handful with no company on the record are omitted. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, client: { type: "string", description: "client name, partial match" }, limit: { type: "integer" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "time_to_fill", description: "Time-to-fill in days (job created -> first placement) for jobs placed in the window: firm avg/median/min/max plus a per-consultant breakdown. Owner-attributed. Use for 'how long are we taking to fill roles', 'time to fill by consultant'. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -798,10 +798,9 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     }
     const inLine = inboxLine(data.viewer.inbox);
     if (inLine) summary = `${summary} ${inLine}`;
-    // The mount failures were the widget's hand-rolled handshake (no ui/initialize completion, no
-    // size report), not the host. The SDK-based widget in widgets.ts fixes that; the link stays off
-    // until it is confirmed rendering in Claude, while the octagon-dashboard skill keeps drawing
-    // from structuredContent. See DASHBOARD_WIDGET_LINKED.
+    // The old mount failures were the widget's hand-rolled handshake (no ui/initialize completion,
+    // no size report), not the host. The SDK-based widget in widgets.ts fixed that (3.63.0) and the
+    // link is on from 3.64.0. See DASHBOARD_WIDGET_LINKED.
     if (DASHBOARD_WIDGET_LINKED) return widgetResult(data, DASH_UI, summary);
     return { content: [{ type: "text", text: summary }], structuredContent: data };
   }

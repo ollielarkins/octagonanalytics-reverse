@@ -20,10 +20,10 @@ export const MCP_APP_MIME = "text/html;profile=mcp-app";
 export const DASH_UI = "ui://octagon/dashboard";
 export const SCORE_UI = "ui://octagon/scorecard";
 
-// get_dashboard's link to its widget stays off until the new widget has been seen rendering in
-// Claude via weekly_kpis / billing (same runtime). While off, /dashboard keeps drawing through the
-// octagon-dashboard skill. Turning it on and retiring the skill's visualize path is one change.
-export const DASHBOARD_WIDGET_LINKED = false;
+// get_dashboard links to its widget (on from 3.64.0, once the SDK runtime was live via weekly_kpis /
+// billing). octagon-dashboard 0.5.0 stopped redrawing the bare dashboard with visualize at the same
+// time — set this false again only together with reverting that skill, or the dashboard vanishes.
+export const DASHBOARD_WIDGET_LINKED = true;
 
 // Returned with every resources/read. Everything is inline, so the sandbox needs no external
 // origins at all; prefersBorder lets Claude draw its own card border round the widget, which is
