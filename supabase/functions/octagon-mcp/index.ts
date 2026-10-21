@@ -377,6 +377,7 @@ const MEETING_TYPE_WORDS: Array<[RegExp, string]> = [
 ];
 async function meetingTypeList(): Promise<{ id: number; label: string }[]> {
   const r = await crm("GET", "/meeting-types");
+  if (!r.ok) throw new Error(`meeting_types_unavailable ${r.status}`);
   const inner = r.json?.data ?? r.json;
   const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
   return list.map((t: any) => ({ id: Number(t.id), label: String(t.label ?? t.name ?? "").trim() })).filter((t: any) => t.id && t.label);
@@ -392,6 +393,9 @@ async function resolveMeetingType(q: any, list?: { id: number; label: string }[]
   if (exact) return exact;
   for (const [re, label] of MEETING_TYPE_WORDS) if (re.test(s)) return types.find((t) => t.label === label) ?? null;
   return null;
+}
+function meetingTypeOf(m: any): string | null {
+  return m?.meeting_type?.label ?? (typeof m?.meeting_type === "string" && m.meeting_type ? m.meeting_type : null);
 }
 // RecruitCRM's meeting "owner" is a user id on the search endpoint (activity_report read owner.name
 // until 3.71.0, so every meeting showed no owner). Accept an id, an object or a name.
@@ -419,9 +423,10 @@ async function meetingsSearch(qs: URLSearchParams, maxPages = 10) {
     if (!r.ok) return { ok: false, status: r.status, detail: r.text?.slice(0, 200), rows, more: false };
     const inner = r.json?.data ?? r.json;
     const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
-    rows.push(...list);
+    const before = rows.length;
+    for (const x of list) if (!rows.some((y) => y?.id != null && y.id === x?.id)) rows.push(x);
     more = !!r.json?.next_page_url;
-    if (!more || !list.length) break;
+    if (!more || !list.length || rows.length === before) break;   // no new ids: the page param is being ignored
   }
   return { ok: true, rows, more: more && page > maxPages };
 }
@@ -1105,7 +1110,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         const res = await meetingsSearch(new URLSearchParams({ starting_from: new Date(Date.now() - 14 * 86400_000).toISOString().slice(0, 10), starting_to: new Date(Date.now() + 86400_000).toISOString().slice(0, 10), owner_id: String(actor.id) }), 2);
         if (res.ok) {
           const ownerKnown = res.rows.some((m: any) => /^\d+$/.test(String(meetingOwnerId(m) ?? "")));
-          const mine = res.rows.filter((m: any) => (!ownerKnown || meetingOwnerId(m) === String(actor.id)) && !(m?.meeting_type?.label));
+          const mine = res.rows.filter((m: any) => (!ownerKnown || meetingOwnerId(m) === String(actor.id)) && !meetingTypeOf(m));
           const { data: sk } = mine.length ? await db.from("meeting_type_skips").select("meeting_id").in("meeting_id", mine.map((m: any) => Number(m.id))) : { data: [] as any[] };
           meetings_needing_type = mine.length - (sk ?? []).length;
         }
@@ -1939,9 +1944,10 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
       const inner = r.json?.data ?? r.json;
       const items = Array.isArray(inner) ? inner : (inner?.records ?? inner?.data ?? []);
-      all.push(...(Array.isArray(items) ? items : []));
+      const before = all.length;
+      for (const x of (Array.isArray(items) ? items : [])) if (x?.id == null || !all.some((y) => y?.id === x.id)) all.push(x);
       more = !!r.json?.next_page_url;
-      if (!more || !items.length) break;
+      if (!more || !items.length || all.length === before) break;
     }
     const rows = all.map((x: any) => ({
       title: x.title ?? x.name ?? null,
@@ -1999,7 +2005,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const from = String(args?.from ?? qStart);
     const to = String(args?.to ?? new Date(Date.now() + 86400_000).toISOString().slice(0, 10));
     const names = await consultantNameMap();
-    const types = await meetingTypeList();
+    let types: { id: number; label: string }[];
+    try { types = await meetingTypeList(); } catch (e) { return toolText({ error: "recruitcrm_error", detail: String(e).slice(0, 120), message: "Could not read RecruitCRM's meeting types. Try again in a moment." }); }
 
     if (action === "list") {
       let ownerId = actor.id != null ? String(actor.id) : null, who = "you";
@@ -2018,17 +2025,19 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       const mine = ownerKnown ? res.rows.filter((m: any) => meetingOwnerId(m) === ownerId) : res.rows;
       const { data: skips } = await db.from("meeting_type_skips").select("meeting_id").in("meeting_id", mine.map((m: any) => Number(m.id)).filter(Boolean));
       const skipped = new Set((skips ?? []).map((s: any) => Number(s.meeting_id)));
-      const typeOf = (m: any) => m?.meeting_type?.label ?? (typeof m?.meeting_type === "string" ? m.meeting_type : null);
+      const typeOf = meetingTypeOf;
       const companies = await companyMatchers();
       const untyped = mine.filter((m: any) => !typeOf(m) && !skipped.has(Number(m.id)))
         .sort((a: any, b: any) => String(b.start_date ?? "").localeCompare(String(a.start_date ?? "")));
       const clientMeetings = mine.filter((m: any) => typeOf(m) === "Client Meeting");
       const nowStr = now.toISOString().slice(0, 16).replace("T", " ");
-      const held = clientMeetings.filter((m: any) => String(m.start_date ?? "").slice(0, 16).replace("T", " ") <= nowStr).length;
+      const startOf = (m: any) => String(m.start_date ?? "").slice(0, 16).replace("T", " ");
+      const held = clientMeetings.filter((m: any) => startOf(m) && startOf(m) <= nowStr).length;
+      const bookedAhead = clientMeetings.filter((m: any) => startOf(m) > nowStr).length;
       return toolText({
         consultant: who, window: { from, to_exclusive: to },
         meetings: mine.length, untyped: untyped.length, skipped: skipped.size,
-        client_meetings: { total: clientMeetings.length, held, booked_ahead: clientMeetings.length - held, quarter_minimum: 2 },
+        client_meetings: { total: clientMeetings.length, held, booked_ahead: bookedAhead, quarter_minimum: 2 },
         items: untyped.slice(0, 40).map((m: any) => ({
           meeting_id: m.id, title: m.title ?? null, start: String(m.start_date ?? "").slice(0, 16),
           linked_to: m.related_to_type ?? null, suggestion: suggestMeetingType(m, companies) })),
@@ -2064,7 +2073,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       for (const p of plan) {
         if (p.skip) {
           const { error } = await db.from("meeting_type_skips").upsert({ meeting_id: p.id, consultant_recruitcrm_id: actor.id ?? null });
-          results.push({ meeting_id: p.id, ok: !error, result: error ? error.message : "skipped" });
+          results.push({ meeting_id: p.id, ok: !error, result: error ? "could not record the skip" : "skipped" });
+          if (error) break;
           continue;
         }
         // Change ONLY the type. do_not_send_calendar_invites so attendees get no update email. Then
@@ -2073,10 +2083,13 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         const r = await crm("POST", `/meetings/${p.id}`, { meeting_type_id: p.type.id, updated_by: actor.id, do_not_send_calendar_invites: 1 });
         if (!r.ok) { results.push({ meeting_id: p.id, ok: false, result: `recruitcrm_error ${r.status}`, detail: String(r.json?.message ?? r.text ?? "").slice(0, 160) }); break; }
         const back = await crm("GET", `/meetings/${p.id}`);
+        if (!back.ok) { results.push({ meeting_id: p.id, ok: false, result: `written, but could not read it back to verify (${back.status})` }); break; }
         const b = back.json?.data ?? back.json ?? {};
-        const same = (k: string) => String(b?.[k] ?? "") === String(p.m?.[k] ?? "");
-        const drift = ["title", "start_date", "end_date", "related_to", "related_to_type"].filter((k) => !same(k));
-        if (meetingOwnerId(b) !== meetingOwnerId(p.m)) drift.push("owner");
+        // Compare EVERY field the meeting had, except the type itself and RecruitCRM's own
+        // bookkeeping, so a full-replace edit that blanked attendees, links or the description is caught.
+        const ignore = /^(meeting_type|meeting_type_id|updated_on|updated_by|modified|modified_on|last_modified)$/;
+        const norm = (v: any) => (v == null || v === "" ? "" : typeof v === "object" ? JSON.stringify(v) : String(v));
+        const drift = Object.keys(p.m ?? {}).filter((k) => !ignore.test(k) && norm(b?.[k]) !== norm(p.m?.[k]));
         const typed = (b?.meeting_type?.label ?? null) === p.type.label || Number(b?.meeting_type?.id ?? b?.meeting_type_id ?? NaN) === p.type.id;
         await audit({ actor: String(actor.id), action: "set_meeting_type", entity: "meeting", entity_id: String(p.id), before: { meeting_type: p.current }, after: { meeting_type: p.type.label, drift }, via: "claude" });
         results.push({ meeting_id: p.id, ok: typed && !drift.length, result: typed ? (drift.length ? "typed, but other fields changed" : "typed") : "type did not stick", changed_fields: drift.length ? drift : undefined });
@@ -2099,7 +2112,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     // 3.71.0: a meeting must carry a type, or a client visit can't be counted.
     let mtype: { id: number; label: string } | null = null;
     if (kind === "meeting") {
-      const types = await meetingTypeList();
+      let types: { id: number; label: string }[];
+      try { types = await meetingTypeList(); } catch (e) { return toolText({ error: "recruitcrm_error", detail: String(e).slice(0, 120), message: "Could not read RecruitCRM's meeting types, so nothing was logged. Try again in a moment." }); }
       mtype = await resolveMeetingType(args.meeting_type ?? args.type_id, types);
       if (!mtype) return toolText({ error: "meeting_type_required", message: "Ask the recruiter what kind of meeting this is. Client visits only count toward the 2-per-quarter minimum when typed Client Meeting.", options: types.map((t) => t.label) });
     }
