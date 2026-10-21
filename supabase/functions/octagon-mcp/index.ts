@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.71.0" };
+const SERVER = { name: "octagon-analytics", version: "3.72.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -460,6 +460,99 @@ function suggestMeetingType(m: any, companies: { re: RegExp; name: string }[]): 
   return null;
 }
 
+// ---- Schedule from RecruitCRM (3.72.0) -----------------------------------------------------------
+// Bhav, 20/10/2026: most interviews and client meetings never reach Outlook, so prompts have to read
+// the dates from RecruitCRM itself: prep the day before an interview, chase feedback the day after,
+// flag client visits coming up. Interviews are RecruitCRM meetings typed "Candidate - ... Interview"
+// (created from the hiring stage), linked to the candidate and usually the job.
+// RecruitCRM returns UTC ISO times ("2026-10-21T13:00:00.000000Z"); a bare time is treated as UTC.
+function crmTime(v: any): Date | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s.replace(" ", "T") + "Z";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d;
+}
+const londonFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const londonDay = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London" }).format(d); // YYYY-MM-DD
+function assocSlugs(v: any): string[] {
+  if (v == null || v === "") return [];
+  if (Array.isArray(v)) return v.map((x: any) => (typeof x === "object" && x ? (x.slug ?? x.id) : x)).filter((x: any) => x != null && x !== "").map(String);
+  return String(v).split(",").map((s) => s.trim()).filter(Boolean);
+}
+const isInterviewType = (t: string | null) => !!t && /interview/i.test(t) && /^candidate/i.test(t);
+async function scheduleFor(ownerId: string, opts: { daysAhead: number; daysBack: number }) {
+  const now = new Date();
+  const from = londonDay(new Date(now.getTime() - opts.daysBack * 86400_000));
+  const to = londonDay(new Date(now.getTime() + (opts.daysAhead + 1) * 86400_000));
+  const res = await meetingsSearch(new URLSearchParams({ starting_from: from, starting_to: to, owner_id: ownerId }), 5);
+  if (!res.ok) return { ok: false as const, status: (res as any).status, detail: (res as any).detail };
+  const ownerKnown = res.rows.some((m: any) => /^\d+$/.test(String(meetingOwnerId(m) ?? "")));
+  const mine = res.rows.filter((m: any) => !ownerKnown || meetingOwnerId(m) === ownerId);
+  // Names from the mirror, in three batched reads.
+  const candSlugs = new Set<string>(), jobSlugs = new Set<string>();
+  for (const m of mine) {
+    assocSlugs(m.associated_candidates).forEach((s) => candSlugs.add(s));
+    if (m.related_to_type === "candidate" && m.related_to) candSlugs.add(String(m.related_to));
+    assocSlugs(m.associated_jobs).forEach((s) => jobSlugs.add(s));
+  }
+  const [{ data: cands }, { data: jobs }] = await Promise.all([
+    candSlugs.size ? db.from("candidates").select("slug,name").in("slug", [...candSlugs]) : Promise.resolve({ data: [] as any[] }),
+    jobSlugs.size ? db.from("jobs").select("slug,title,company_slug").in("slug", [...jobSlugs]) : Promise.resolve({ data: [] as any[] }),
+  ]);
+  const cName = new Map((cands ?? []).map((c: any) => [c.slug, c.name]));
+  const jInfo = new Map((jobs ?? []).map((j: any) => [j.slug, j]));
+  const coSlugs = [...new Set((jobs ?? []).map((j: any) => j.company_slug).filter(Boolean))];
+  const { data: cos } = coSlugs.length ? await db.from("clients").select("company_slug,company_name").in("company_slug", coSlugs) : { data: [] as any[] };
+  const coName = new Map((cos ?? []).map((c: any) => [c.company_slug, c.company_name]));
+
+  const today = londonDay(now);
+  const tomorrow = new Date(Date.parse(today + "T12:00:00Z") + 86400_000).toISOString().slice(0, 10);   // calendar day, safe across the clocks change
+  const items = mine.map((m: any) => {
+    const start = crmTime(m.start_date), type = meetingTypeOf(m);
+    const cs = m.related_to_type === "candidate" && m.related_to ? String(m.related_to) : assocSlugs(m.associated_candidates)[0] ?? null;
+    const js = assocSlugs(m.associated_jobs)[0] ?? null;
+    const job = js ? jInfo.get(js) : null;
+    const end = crmTime(m.end_date) ?? (start ? new Date(start.getTime() + 3_600_000) : null);
+    return { m, start, end, type, day: start ? londonDay(start) : null, candidate_slug: cs, job_slug: js,
+      candidate: cs ? cName.get(cs) ?? null : null, job: job?.title ?? null, client: job?.company_slug ? coName.get(job.company_slug) ?? null : null };
+  }).filter((x: any) => x.start);
+  const view = (x: any) => ({ meeting_id: x.m.id, when: londonFmt.format(x.start), type: x.type, title: x.m.title ?? null,
+    candidate: x.candidate, job: x.job, client: x.client });
+
+  const interviews = items.filter((x: any) => isInterviewType(x.type));
+  const upcoming = interviews.filter((x: any) => x.start >= now).sort((a: any, b: any) => a.start - b.start);
+  // Feedback due: an interview that has happened, with nothing logged since its start time: no
+  // feedback-tagged call, no note on the candidate, no stage move. Same signals as
+  // awaiting_feedback_report, but timed from the ACTUAL interview, not from the stage change.
+  // Only once the interview has ended plus a 2-hour grace, so a 09:00 interview isn't "feedback due" at 09:01.
+  const past = interviews.filter((x: any) => x.candidate_slug && x.end && now.getTime() > x.end.getTime() + 2 * 3_600_000);
+  const feedback_due: any[] = [];
+  await Promise.all(past.slice(0, 40).map(async (x: any) => {
+    const since = x.start.toISOString();
+    const [calls, notes, moves] = await Promise.all([
+      db.from("call_activity").select("recruitcrm_id", { count: "exact", head: true }).eq("related_to", x.candidate_slug).ilike("custom_call_type", "%feedback%").gte("call_started_on", since),
+      db.from("notes").select("recruitcrm_id", { count: "exact", head: true }).eq("related_to", x.candidate_slug).gte("created_on", since),
+      (x.job_slug
+        ? db.from("candidate_stage_events").select("id", { count: "exact", head: true }).eq("candidate_slug", x.candidate_slug).eq("job_slug", x.job_slug).gt("event_timestamp", since.slice(0, 19))
+        : db.from("candidate_stage_events").select("id", { count: "exact", head: true }).eq("candidate_slug", x.candidate_slug).gt("event_timestamp", since.slice(0, 19))),
+    ]);
+    if (calls.error || notes.error || moves.error) return;   // can't tell: never flag on a failed read
+    if (!(calls.count ?? 0) && !(notes.count ?? 0) && !(moves.count ?? 0))
+      feedback_due.push({ ...view(x), hours_since: Math.round((now.getTime() - x.start.getTime()) / 3_600_000) });
+  }));
+  const clientUpcoming = items.filter((x: any) => x.type === "Client Meeting" && x.start >= now).sort((a: any, b: any) => a.start - b.start);
+  return { ok: true as const,
+    window: { from, to_exclusive: to },
+    interviews_today: interviews.filter((x: any) => x.day === today).sort((a: any, b: any) => a.start - b.start).map((x: any) => ({ ...view(x), status: x.start > now ? "upcoming" : "held" })),
+    prep_due_tomorrow: upcoming.filter((x: any) => x.day === tomorrow).map(view),
+    interviews_later: upcoming.filter((x: any) => x.day !== today && x.day !== tomorrow).map(view),
+    feedback_due: feedback_due.sort((a, b) => b.hours_since - a.hours_since),
+    client_meetings_upcoming: clientUpcoming.map(view),
+    untyped_upcoming: items.filter((x: any) => !x.type && x.start >= now).length,
+    truncated: res.more };
+}
+
 async function audit(entry: any) { try { await db.from("audit_log").insert(entry); } catch (_e) {} }
 
 // ---- Closure reasons -------------------------------------------------------
@@ -588,6 +681,7 @@ const TOOLS = [
   { name: "activity_report", description: "Meetings or tasks logged in RecruitCRM for a date window, optionally for one consultant. Meetings are where CLIENT VISITS live — the activity the business asks about that no other tool here reports. Tasks are the to-do layer. Defaults to the last 30 days and to YOU; pass consultant to see someone else, or all=true for the firm. kind: meetings | tasks. Read-only.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meetings or tasks" }, from: { type: "string", description: "YYYY-MM-DD, default 30 days ago" }, to: { type: "string", description: "YYYY-MM-DD, default today" }, consultant: { type: "string", description: "consultant name; omit for yourself" }, all: { type: "boolean", description: "true = whole firm" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "post_digest", description: "Post one of the Octagon digests to Slack on demand: 'morning' (what needs chasing today, plus the previous working day), 'evening' (a complete day: stage activity, calls, placements, new jobs) or 'weekly' (last week's funnel, cold roles, job order forms). These normally post on a schedule — 07:30 and 17:30 weekdays, 08:00 Monday — so use this only when someone explicitly asks for one NOW, e.g. before a meeting. WRITE, two-step, EXPLICIT-ONLY and OUTWARD-FACING: it posts into a Slack channel other people read and cannot be unsent. Call without confirm for a preview of the headline, then confirm=true. The posts name candidates, so the channel must be internal.", inputSchema: { type: "object", properties: { kind: { description: "morning | evening | weekly", type: "string" }, confirm: { description: "false/omitted = preview only; true = actually post", type: "boolean" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "log_activity", description: "Log a meeting (e.g. a client visit) or a task in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Link it to a client, job or candidate so it shows against that record. Meetings need a start and end; tasks need only a start. Times are 'YYYY-MM-DD HH:MM'. Created by and owned by you. Use for 'log my visit to X yesterday', 'remind me to chase Y on Friday'.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meeting or task" }, title: { type: "string" }, start: { type: "string", description: "YYYY-MM-DD HH:MM" }, end: { type: "string", description: "YYYY-MM-DD HH:MM — meetings only" }, description: { type: "string" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, candidate: { type: "string", description: "candidate name to link" }, type_id: { type: "integer", description: "task type id (reference_list kind=task_types), or a meeting type id" }, meeting_type: { type: "string", description: "REQUIRED for a meeting: client, internal, video interview, f2f interview or phone interview (or the exact RecruitCRM label). Ask the recruiter if it isn't clear; never guess. Client visits only count toward the 2-per-quarter minimum when typed Client Meeting." }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind", "title", "start"], additionalProperties: false } },
+  { name: "schedule", description: "Your interviews and client meetings straight from RecruitCRM (most never reach Outlook): interviews today, interviews tomorrow to prep for, later interviews, interviews already held with no feedback logged since (no feedback call, candidate note or stage move after the interview time), and client meetings coming up. Defaults: the next 7 days, and interviews back to 3 days ago for feedback. Times are UK time. Managers can pass consultant. Candidate names are internal PII. Read-only.", inputSchema: { type: "object", properties: { days_ahead: { type: "integer", description: "default 7, max 21" }, days_back: { type: "integer", description: "how far back to look for feedback due, default 3, max 14" }, consultant: { type: "string", description: "managers only" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "meeting_review", description: "Your meetings in RecruitCRM that have no meeting type, each with a suggested type to confirm, so client visits count toward the minimum of 2 per consultant per quarter. action=list (default, read-only): your untyped meetings for a window (default this quarter to date), plus how many Client Meetings you have this quarter. action=set: give the meetings to change as items [{meeting_id, type}] (type: client, internal, video interview, f2f interview, phone interview, or skip for a personal/calendar entry that isn't work), up to 25. WRITE, two-step: preview, then confirm=true. Only your own meetings. Never set a type the recruiter didn't choose: present the suggestions and let them pick.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list or set" }, from: { type: "string", description: "YYYY-MM-DD, default start of this quarter" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, consultant: { type: "string", description: "managers only: review someone else's (list only)" }, items: { type: "array", description: "for set: [{meeting_id, type}]", items: { type: "object", properties: { meeting_id: { type: "integer" }, type: { type: "string" } }, required: ["meeting_id", "type"] } }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "update_deal", description: "Change a deal in RecruitCRM — most importantly moving it to Won and entering the value, which IS how billing is recorded at Octagon. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the deal by its numeric ID, slug, or part of its name. stage accepts a stage name (Won, Lost, Open, CV Sent, Interview Request, 1st/2nd/3rd Interview, Offered, Declined, Job Lead) resolved against the live pipeline. Note RecruitCRM requires name, value, stage and close_date on every edit, so the tool reads the deal first and preserves anything you don't change.", inputSchema: { type: "object", properties: { deal: { type: "string", description: "deal ID, slug, or part of the name" }, stage: { type: "string", description: "target stage name" }, value: { type: "number", description: "deal value (the fee)" }, name: { type: "string", description: "rename the deal" }, close_date: { type: "string", description: "YYYY-MM-DD" }, reason: { type: "string", description: "why the deal was lost - only for stage Lost/Declined. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["deal"], additionalProperties: false } },
   { name: "create_deal", description: "Create a deal in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Requires a name, a value, a stage and a close date. Optionally link it to a job, client or candidate. Billing is Won deal value, so a deal is how revenue enters the system — created owned by and attributed to you.", inputSchema: { type: "object", properties: { name: { type: "string", description: "deal name" }, value: { type: "number", description: "deal value (the fee)" }, stage: { type: "string", description: "stage name, e.g. Open or Job Lead" }, close_date: { type: "string", description: "YYYY-MM-DD" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["name", "value", "stage", "close_date"], additionalProperties: false } },
@@ -637,7 +731,7 @@ const REPORT_TOOLS = new Set(["my_day", "stalled_report", "cold_jobs", "awaiting
   "new_jobs_report", "activity_report", "funnel_report", "consultant_leaderboard", "client_report", "bd_report",
   "rejection_report", "call_activity", "call_hours_report", "fee_analysis", "placements_report", "placements_with_fees",
   "invoices_report", "notes_kpi", "time_to_fill", "match_candidates", "job_pipeline", "find_candidate", "candidate_profile",
-  "cv_pack", "job_spec", "notes_read", "call_notes", "pitch_history", "files_list", "platform_health", "usage_report", "team_insights"]);
+  "cv_pack", "job_spec", "notes_read", "call_notes", "schedule", "pitch_history", "files_list", "platform_health", "usage_report", "team_insights"]);
 for (const t of TOOLS as any[]) if (REPORT_TOOLS.has(t.name)) t._meta = { ui: { resourceUri: REPORT_UI, visibility: ["model", "app"] } };
 // ---- Mixed read/write tools (3.67.0) -------------------------------------------------------------
 // One widget for both halves: a read action renders as a report view, a preview (or a confirmed
@@ -1117,6 +1211,21 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       } catch (_e) { meetings_needing_type = null; }
     }
     const extra: any = meetings_needing_type ? { meetings_needing_type, meetings_line: `${meetings_needing_type} of your meetings from the last 14 days have no type - run meeting_review to pick them, so client visits count.` } : {};
+    // 3.72.0: today's and tomorrow's interviews and feedback due, from the RecruitCRM schedule.
+    if (!args?.consultant && actor.id) {
+      try {
+        // Never let the schedule hold up the start of a chat: 3 seconds, then my_day goes without it.
+        const s: any = await Promise.race([scheduleFor(String(actor.id), { daysAhead: 1, daysBack: 3 }),
+          new Promise((r) => setTimeout(() => r({ ok: false, timeout: true }), 3000))]);
+        if (s?.ok) {
+          extra.schedule = { interviews_today: s.interviews_today, prep_due_tomorrow: s.prep_due_tomorrow, feedback_due: s.feedback_due, client_meetings_upcoming: s.client_meetings_upcoming };
+          const parts = [s.interviews_today.length ? `${s.interviews_today.length} interview(s) today` : null,
+            s.prep_due_tomorrow.length ? `${s.prep_due_tomorrow.length} tomorrow to prep for` : null,
+            s.feedback_due.length ? `${s.feedback_due.length} awaiting feedback` : null].filter(Boolean);
+          if (parts.length) extra.schedule_line = `From RecruitCRM: ${parts.join(", ")}.`;
+        }
+      } catch (_e) { /* the schedule never blocks my_day */ }
+    }
     if (!inbox) return toolText(data && typeof data === "object" && !Array.isArray(data) ? { ...data, ...extra } : data);
     // my_day comes back as {error: "consultant not found"} for the admin token; the inbox is still theirs.
     return toolText({ ...(data && typeof data === "object" ? data : { result: data }), ...extra, inbox, inbox_line: inboxLine(inbox) });
@@ -1998,6 +2107,25 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const { data, error } = await db.rpc("post_digest", { p_kind: kind });
     return toolText(error ? { error: error.message } : data);
   }
+  if (name === "schedule") {
+    const names = await consultantNameMap();
+    let ownerId = actor.id != null ? String(actor.id) : null, who = "you";
+    if (args?.consultant) {
+      if (!actor.sees_team) return toolText({ error: "manager_only", message: "Only managers can see someone else's schedule." });
+      const want = String(args.consultant).toLowerCase();
+      const hit = [...names.entries()].filter(([, n]) => String(n).toLowerCase().includes(want));
+      if (hit.length !== 1) return toolText({ error: hit.length ? "ambiguous_consultant" : "consultant_not_found", matches: hit.map(([, n]) => n) });
+      ownerId = hit[0][0]; who = hit[0][1];
+    }
+    if (!ownerId || ownerId === "0") return toolText({ error: "no_consultant", message: "This token has no consultant record; pass consultant=<name>." });
+    const s = await scheduleFor(ownerId, { daysAhead: Math.min(Math.max(Number(args?.days_ahead) || 7, 1), 21), daysBack: Math.min(Math.max(Number(args?.days_back ?? 3) || 0, 0), 14) });
+    if (!s.ok) return toolText({ error: "recruitcrm_error", status: s.status, detail: s.detail });
+    return toolText({ consultant: who, ...s,
+      note: "Interviews and meetings as logged in RecruitCRM, owned by this consultant. Feedback due = nothing logged since the interview time; that is silence in the system, not proof feedback wasn't given."
+        + (s.untyped_upcoming ? ` ${s.untyped_upcoming} upcoming meeting(s) have no type, so they can't be sorted; meeting_review fixes that.` : "")
+        + (s.truncated ? " More meetings than were read; narrow days_ahead." : "") });
+  }
+
   if (name === "meeting_review") {
     const action = String(args?.action ?? "list").toLowerCase();
     const now = new Date();
