@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.70.2" };
+const SERVER = { name: "octagon-analytics", version: "3.71.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -362,6 +362,99 @@ async function noteTypeByLabel(label: string): Promise<{ id: number; label: stri
   return hit?.id ? { id: Number(hit.id), label: String(hit.label ?? hit.name).trim() } : null;
 }
 
+// ---- Meeting types and owners (3.71.0) -----------------------------------------------------------
+// Client visits are a reported KPI (minimum 2 per consultant per quarter), but most RecruitCRM
+// meetings carry no type: on 21/10/2026, of 100 meetings this month only the interviews (typed
+// automatically from the hiring stage) and one client visit were typed. The rest are mostly Outlook
+// calendar entries synced in. So: a meeting logged through Claude must have a type, and
+// meeting_review lists the consultant's untyped meetings with a suggested type to confirm.
+const MEETING_TYPE_WORDS: Array<[RegExp, string]> = [
+  [/^client|^visit|^bd|^prospect/i, "Client Meeting"],
+  [/^internal|^team|^1.?2.?1|^one.?to.?one/i, "Internal Meeting"],
+  [/video|teams|zoom/i, "Candidate - Video Interview"],
+  [/f2f|face|in.?person|on.?site/i, "Candidate - F2F Interview"],
+  [/phone|call/i, "Candidate - Phone Interview"],
+];
+async function meetingTypeList(): Promise<{ id: number; label: string }[]> {
+  const r = await crm("GET", "/meeting-types");
+  const inner = r.json?.data ?? r.json;
+  const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
+  return list.map((t: any) => ({ id: Number(t.id), label: String(t.label ?? t.name ?? "").trim() })).filter((t: any) => t.id && t.label);
+}
+// Resolve "client", "Client Meeting", "f2f" or a numeric id to a live meeting type. Never a
+// hardcoded id: types are configuration and can change in RecruitCRM.
+async function resolveMeetingType(q: any, list?: { id: number; label: string }[]) {
+  const types = list ?? await meetingTypeList();
+  const s = String(q ?? "").trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return types.find((t) => t.id === Number(s)) ?? null;
+  const exact = types.find((t) => t.label.toLowerCase() === s.toLowerCase());
+  if (exact) return exact;
+  for (const [re, label] of MEETING_TYPE_WORDS) if (re.test(s)) return types.find((t) => t.label === label) ?? null;
+  return null;
+}
+// RecruitCRM's meeting "owner" is a user id on the search endpoint (activity_report read owner.name
+// until 3.71.0, so every meeting showed no owner). Accept an id, an object or a name.
+function meetingOwner(x: any, names: Map<string, string>): string | null {
+  const o = x?.owner ?? x?.owner_id;
+  if (o == null || o === "") return null;
+  if (typeof o === "object") return o.name ?? ([o.first_name, o.last_name].filter(Boolean).join(" ") || (o.id != null ? names.get(String(o.id)) ?? null : null));
+  return names.get(String(o)) ?? (/^\d+$/.test(String(o)) ? `user ${o}` : String(o));
+}
+function meetingOwnerId(x: any): string | null {
+  const o = x?.owner ?? x?.owner_id;
+  if (o == null || o === "") return null;
+  return typeof o === "object" ? (o.id != null ? String(o.id) : null) : String(o);
+}
+async function consultantNameMap(): Promise<Map<string, string>> {
+  const { data } = await db.from("consultants").select("recruitcrm_id,name");
+  return new Map((data ?? []).map((c: any) => [String(c.recruitcrm_id), c.name]));
+}
+// Meetings search pages (current_page / next_page_url). Up to maxPages pages.
+async function meetingsSearch(qs: URLSearchParams, maxPages = 10) {
+  const rows: any[] = []; let page = 1; let more = false;
+  for (; page <= maxPages; page++) {
+    qs.set("page", String(page));
+    const r = await crm("GET", `/meetings/search?${qs}`);
+    if (!r.ok) return { ok: false, status: r.status, detail: r.text?.slice(0, 200), rows, more: false };
+    const inner = r.json?.data ?? r.json;
+    const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
+    rows.push(...list);
+    more = !!r.json?.next_page_url;
+    if (!more || !list.length) break;
+  }
+  return { ok: true, rows, more: more && page > maxPages };
+}
+// Company names worth matching in a meeting title: clients, engaged, passive and prospects, minus
+// legal suffixes, at least 5 characters, never Octagon itself. Cached per isolate.
+let companyMatchCache: { at: number; list: { re: RegExp; name: string }[] } | null = null;
+async function companyMatchers() {
+  if (companyMatchCache && Date.now() - companyMatchCache.at < 10 * 60_000) return companyMatchCache.list;
+  const { data } = await db.from("clients").select("company_name,company_status").is("deleted_at", null)
+    .in("company_status", ["Client", "Engaged", "Passive", "Prospect"]);
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const list = (data ?? []).map((c: any) => {
+    const core = String(c.company_name ?? "").replace(/\b(ltd|limited|plc|llp|inc|group|uk|gmbh|holdings)\b\.?/gi, "").replace(/[(),]/g, " ").replace(/\s+/g, " ").trim();
+    return { core, name: c.company_name };
+  }).filter((c: any) => c.core.length >= 5 && !/octagon/i.test(c.core))
+    .map((c: any) => ({ re: new RegExp(`(^|[^a-z0-9])${esc(c.core.toLowerCase())}([^a-z0-9]|$)`), name: c.name }));
+  companyMatchCache = { at: Date.now(), list };
+  return list;
+}
+// A suggestion, never a decision: the consultant confirms every type.
+function suggestMeetingType(m: any, companies: { re: RegExp; name: string }[]): { type: string; why: string } | null {
+  const title = String(m?.title ?? "").toLowerCase();
+  const rt = String(m?.related_to_type ?? "");
+  const hasAssoc = (k: string) => (Array.isArray(m?.[k]) ? m[k].length > 0 : !!m?.[k]);
+  if (rt === "company" || rt === "contact" || hasAssoc("associated_companies") || hasAssoc("associated_contacts"))
+    return { type: "Client Meeting", why: "linked to a client or contact" };
+  const hit = companies.find((c) => c.re.test(title));
+  if (hit) return { type: "Client Meeting", why: `title mentions ${hit.name}` };
+  if (/\b(1-2-1|121|1:1)(?![\d:])|\b(one to one|team meeting|stats|training|kpi|resourc|monthly catch)/i.test(title))
+    return { type: "Internal Meeting", why: "looks like an internal meeting" };
+  return null;
+}
+
 async function audit(entry: any) { try { await db.from("audit_log").insert(entry); } catch (_e) {} }
 
 // ---- Closure reasons -------------------------------------------------------
@@ -489,7 +582,8 @@ const TOOLS = [
   { name: "update_candidate", description: "Edit an existing candidate in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: before/after preview, then confirm=true. Identify them by name or slug. Only the fields you pass change — but note RecruitCRM demands first_name on every edit, so the tool reads the record first and carries it forward rather than risking a blank. Candidate details are PII: internal only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name, slug or RecruitCRM candidate ID" }, first_name: { type: "string" }, last_name: { type: "string" }, email: { type: "string" }, phone: { type: "string" }, position: { type: "string" }, employer: { type: "string" }, skills: { type: "string" }, city: { type: "string" }, country: { type: "string" }, linkedin: { type: "string" }, current_salary: { type: "string" }, salary_expectation: { type: "string" }, notice_period: { type: "integer" }, summary: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "activity_report", description: "Meetings or tasks logged in RecruitCRM for a date window, optionally for one consultant. Meetings are where CLIENT VISITS live — the activity the business asks about that no other tool here reports. Tasks are the to-do layer. Defaults to the last 30 days and to YOU; pass consultant to see someone else, or all=true for the firm. kind: meetings | tasks. Read-only.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meetings or tasks" }, from: { type: "string", description: "YYYY-MM-DD, default 30 days ago" }, to: { type: "string", description: "YYYY-MM-DD, default today" }, consultant: { type: "string", description: "consultant name; omit for yourself" }, all: { type: "boolean", description: "true = whole firm" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "post_digest", description: "Post one of the Octagon digests to Slack on demand: 'morning' (what needs chasing today, plus the previous working day), 'evening' (a complete day: stage activity, calls, placements, new jobs) or 'weekly' (last week's funnel, cold roles, job order forms). These normally post on a schedule — 07:30 and 17:30 weekdays, 08:00 Monday — so use this only when someone explicitly asks for one NOW, e.g. before a meeting. WRITE, two-step, EXPLICIT-ONLY and OUTWARD-FACING: it posts into a Slack channel other people read and cannot be unsent. Call without confirm for a preview of the headline, then confirm=true. The posts name candidates, so the channel must be internal.", inputSchema: { type: "object", properties: { kind: { description: "morning | evening | weekly", type: "string" }, confirm: { description: "false/omitted = preview only; true = actually post", type: "boolean" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
-  { name: "log_activity", description: "Log a meeting (e.g. a client visit) or a task in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Link it to a client, job or candidate so it shows against that record. Meetings need a start and end; tasks need only a start. Times are 'YYYY-MM-DD HH:MM'. Created by and owned by you. Use for 'log my visit to X yesterday', 'remind me to chase Y on Friday'.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meeting or task" }, title: { type: "string" }, start: { type: "string", description: "YYYY-MM-DD HH:MM" }, end: { type: "string", description: "YYYY-MM-DD HH:MM — meetings only" }, description: { type: "string" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, candidate: { type: "string", description: "candidate name to link" }, type_id: { type: "integer", description: "meeting/task type id — see reference_list" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind", "title", "start"], additionalProperties: false } },
+  { name: "log_activity", description: "Log a meeting (e.g. a client visit) or a task in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Link it to a client, job or candidate so it shows against that record. Meetings need a start and end; tasks need only a start. Times are 'YYYY-MM-DD HH:MM'. Created by and owned by you. Use for 'log my visit to X yesterday', 'remind me to chase Y on Friday'.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meeting or task" }, title: { type: "string" }, start: { type: "string", description: "YYYY-MM-DD HH:MM" }, end: { type: "string", description: "YYYY-MM-DD HH:MM — meetings only" }, description: { type: "string" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, candidate: { type: "string", description: "candidate name to link" }, type_id: { type: "integer", description: "task type id (reference_list kind=task_types), or a meeting type id" }, meeting_type: { type: "string", description: "REQUIRED for a meeting: client, internal, video interview, f2f interview or phone interview (or the exact RecruitCRM label). Ask the recruiter if it isn't clear; never guess. Client visits only count toward the 2-per-quarter minimum when typed Client Meeting." }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind", "title", "start"], additionalProperties: false } },
+  { name: "meeting_review", description: "Your meetings in RecruitCRM that have no meeting type, each with a suggested type to confirm, so client visits count toward the minimum of 2 per consultant per quarter. action=list (default, read-only): your untyped meetings for a window (default this quarter to date), plus how many Client Meetings you have this quarter. action=set: give the meetings to change as items [{meeting_id, type}] (type: client, internal, video interview, f2f interview, phone interview, or skip for a personal/calendar entry that isn't work), up to 25. WRITE, two-step: preview, then confirm=true. Only your own meetings. Never set a type the recruiter didn't choose: present the suggestions and let them pick.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list or set" }, from: { type: "string", description: "YYYY-MM-DD, default start of this quarter" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, consultant: { type: "string", description: "managers only: review someone else's (list only)" }, items: { type: "array", description: "for set: [{meeting_id, type}]", items: { type: "object", properties: { meeting_id: { type: "integer" }, type: { type: "string" } }, required: ["meeting_id", "type"] } }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "update_deal", description: "Change a deal in RecruitCRM — most importantly moving it to Won and entering the value, which IS how billing is recorded at Octagon. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the deal by its numeric ID, slug, or part of its name. stage accepts a stage name (Won, Lost, Open, CV Sent, Interview Request, 1st/2nd/3rd Interview, Offered, Declined, Job Lead) resolved against the live pipeline. Note RecruitCRM requires name, value, stage and close_date on every edit, so the tool reads the deal first and preserves anything you don't change.", inputSchema: { type: "object", properties: { deal: { type: "string", description: "deal ID, slug, or part of the name" }, stage: { type: "string", description: "target stage name" }, value: { type: "number", description: "deal value (the fee)" }, name: { type: "string", description: "rename the deal" }, close_date: { type: "string", description: "YYYY-MM-DD" }, reason: { type: "string", description: "why the deal was lost - only for stage Lost/Declined. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["deal"], additionalProperties: false } },
   { name: "create_deal", description: "Create a deal in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Requires a name, a value, a stage and a close date. Optionally link it to a job, client or candidate. Billing is Won deal value, so a deal is how revenue enters the system — created owned by and attributed to you.", inputSchema: { type: "object", properties: { name: { type: "string", description: "deal name" }, value: { type: "number", description: "deal value (the fee)" }, stage: { type: "string", description: "stage name, e.g. Open or Job Lead" }, close_date: { type: "string", description: "YYYY-MM-DD" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["name", "value", "stage", "close_date"], additionalProperties: false } },
   { name: "pitch_history", description: "Speculative pitches recorded in RecruitCRM — who has been pitched to whom, and when. This is the 'pitched candidates' activity the business asks about; it lives in RecruitCRM's pitch feature, which nothing else in this platform reads. Give a candidate (name or slug) to see everywhere they've been pitched, or a contact slug to see everyone pitched to them, or both for that pair's history. Returns candidate and contact names (PII). Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name, slug or RecruitCRM candidate ID" }, contact_slug: { type: "string", description: "contact slug" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -543,7 +637,7 @@ for (const t of TOOLS as any[]) if (REPORT_TOOLS.has(t.name)) t._meta = { ui: { 
 // ---- Mixed read/write tools (3.67.0) -------------------------------------------------------------
 // One widget for both halves: a read action renders as a report view, a preview (or a confirmed
 // change) as the confirm card. They get card_nonce like the card tools.
-const MIXED_TOOLS = new Set(["off_limit", "hotlist", "inbox", "push_tell", "eow_email", "manage_tokens", "webhook_subscriptions", "client_status"]);
+const MIXED_TOOLS = new Set(["meeting_review", "off_limit", "hotlist", "inbox", "push_tell", "eow_email", "manage_tokens", "webhook_subscriptions", "client_status"]);
 for (const t of TOOLS as any[]) if (MIXED_TOOLS.has(t.name)) {
   t.inputSchema = { ...t.inputSchema, properties: { ...(t.inputSchema?.properties ?? {}), card_nonce: { type: "string", description: "Internal: copy it from _card.confirm_args when confirming a preview. Never invent one." } } };
   t._meta = { ui: { resourceUri: MIXED_UI, visibility: ["model", "app"] } };
@@ -1004,9 +1098,23 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (error) return toolText({ error: error.message });
     // Your own inbox rides along on your own day only; another consultant's mail is never shown.
     const inbox = args?.consultant ? null : await inboxSummary(actor.id);
-    if (!inbox) return toolText(data);
+    // 3.71.0: own day only - how many of your meetings in the last 14 days still need a type.
+    let meetings_needing_type: number | null = null;
+    if (!args?.consultant && actor.id) {
+      try {
+        const res = await meetingsSearch(new URLSearchParams({ starting_from: new Date(Date.now() - 14 * 86400_000).toISOString().slice(0, 10), starting_to: new Date(Date.now() + 86400_000).toISOString().slice(0, 10), owner_id: String(actor.id) }), 2);
+        if (res.ok) {
+          const ownerKnown = res.rows.some((m: any) => /^\d+$/.test(String(meetingOwnerId(m) ?? "")));
+          const mine = res.rows.filter((m: any) => (!ownerKnown || meetingOwnerId(m) === String(actor.id)) && !(m?.meeting_type?.label));
+          const { data: sk } = mine.length ? await db.from("meeting_type_skips").select("meeting_id").in("meeting_id", mine.map((m: any) => Number(m.id))) : { data: [] as any[] };
+          meetings_needing_type = mine.length - (sk ?? []).length;
+        }
+      } catch (_e) { meetings_needing_type = null; }
+    }
+    const extra: any = meetings_needing_type ? { meetings_needing_type, meetings_line: `${meetings_needing_type} of your meetings from the last 14 days have no type - run meeting_review to pick them, so client visits count.` } : {};
+    if (!inbox) return toolText(data && typeof data === "object" && !Array.isArray(data) ? { ...data, ...extra } : data);
     // my_day comes back as {error: "consultant not found"} for the admin token; the inbox is still theirs.
-    return toolText({ ...(data && typeof data === "object" ? data : { result: data }), inbox, inbox_line: inboxLine(inbox) });
+    return toolText({ ...(data && typeof data === "object" ? data : { result: data }), ...extra, inbox, inbox_line: inboxLine(inbox) });
   }
   if (name === "match_candidates") { const { data, error } = await db.rpc("match_candidates", { p_skills: Array.isArray(args?.skills) ? args.skills : [], p_location: args?.location ?? null, p_limit: args?.limit ?? 20, p_include_off_limit: !!args?.include_off_limit }); return toolText(error ? { error: error.message } : data); }
   if (name === "call_activity") { const { data, error } = await db.rpc("call_activity_report", { p_from: args?.from ?? "2026-01-01", p_to: args?.to ?? "2100-01-01", p_consultant: args?.consultant ?? null, p_team: args?.team ?? null }); return toolText(error ? { error: error.message } : data); }
@@ -1820,26 +1928,37 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     else if (args?.consultant) { qs.set("owner_name", String(args.consultant)); scope = String(args.consultant); }
     else if (actor.id) { qs.set("owner_id", String(actor.id)); }
 
-    const r = await crm("GET", `/${kind === "meeting" ? "meetings" : "tasks"}/search?${qs}`);
-    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
-    const inner = r.json?.data ?? r.json;
-    const items = Array.isArray(inner) ? inner : (inner?.records ?? inner?.data ?? []);
-    const rows = (Array.isArray(items) ? items : []).map((x: any) => ({
+    // 3.71.0: the search endpoints DO page (current_page / next_page_url), so walk up to 10 pages
+    // instead of reporting "at least 100". And owner is a user id, not an object: it read owner.name
+    // before, so every meeting showed no owner.
+    const names = await consultantNameMap();
+    const all: any[] = []; let page = 1, more = false;
+    for (; page <= 10; page++) {
+      qs.set("page", String(page));
+      const r = await crm("GET", `/${kind === "meeting" ? "meetings" : "tasks"}/search?${qs}`);
+      if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
+      const inner = r.json?.data ?? r.json;
+      const items = Array.isArray(inner) ? inner : (inner?.records ?? inner?.data ?? []);
+      all.push(...(Array.isArray(items) ? items : []));
+      more = !!r.json?.next_page_url;
+      if (!more || !items.length) break;
+    }
+    const rows = all.map((x: any) => ({
       title: x.title ?? x.name ?? null,
       start: (x.start_date ?? x.starting_date ?? "").toString().slice(0, 16),
       type: x.meeting_type?.label ?? x.task_type?.label ?? null,
       related_to: x.related_to_type ? `${x.related_to_type}:${x.related_to}` : null,
-      owner: x.owner?.name ?? x.owner_id ?? null,
+      owner: meetingOwner(x, names),
     }));
-    // The search endpoints take no page/limit parameter and stop at 100, so a full result set is
-    // indistinguishable from a truncated one. Say so rather than reporting 100 as a total.
-    const capped = rows.length >= 100;
+    const capped = more && page > 10;
+    const byType: Record<string, number> = {};
+    for (const x of rows) { const k = x.type ?? "(no type)"; byType[k] = (byType[k] ?? 0) + 1; }
     const notes = [
-      kind === "meeting" ? "Meetings are the closest thing to a client-visit record; only visits actually logged in RecruitCRM appear here." : null,
-      capped ? "RecruitCRM returned the maximum 100 results and offers no paging on this endpoint — the real total is AT LEAST this. Narrow the window for an exact count." : null,
+      kind === "meeting" ? "Client visits count only when typed Client Meeting; meeting_review lists untyped meetings with a suggested type." : null,
+      capped ? "More than 10 pages of results; narrow the window for an exact count." : null,
     ].filter(Boolean);
     return toolText({ kind: kind + "s", window: { from, to }, scope,
-      count: rows.length, count_is_capped: capped, items: rows,
+      count: rows.length, count_is_capped: capped, by_type: byType, items: rows,
       note: notes.length ? notes.join(" ") : undefined });
   }
 
@@ -1873,6 +1992,103 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const { data, error } = await db.rpc("post_digest", { p_kind: kind });
     return toolText(error ? { error: error.message } : data);
   }
+  if (name === "meeting_review") {
+    const action = String(args?.action ?? "list").toLowerCase();
+    const now = new Date();
+    const qStart = new Date(Date.UTC(now.getUTCFullYear(), Math.floor(now.getUTCMonth() / 3) * 3, 1)).toISOString().slice(0, 10);
+    const from = String(args?.from ?? qStart);
+    const to = String(args?.to ?? new Date(Date.now() + 86400_000).toISOString().slice(0, 10));
+    const names = await consultantNameMap();
+    const types = await meetingTypeList();
+
+    if (action === "list") {
+      let ownerId = actor.id != null ? String(actor.id) : null, who = "you";
+      if (args?.consultant) {
+        if (!actor.sees_team) return toolText({ error: "manager_only", message: "Only managers can review someone else's meetings." });
+        const want = String(args.consultant).toLowerCase();
+        const hit = [...names.entries()].filter(([, n]) => String(n).toLowerCase().includes(want));
+        if (hit.length !== 1) return toolText({ error: hit.length ? "ambiguous_consultant" : "consultant_not_found", matches: hit.map(([, n]) => n) });
+        ownerId = hit[0][0]; who = hit[0][1];
+      }
+      if (!ownerId || ownerId === "0") return toolText({ error: "no_consultant", message: "This token has no consultant record; pass consultant=<name>." });
+      const res = await meetingsSearch(new URLSearchParams({ starting_from: from, starting_to: to, owner_id: ownerId }));
+      if (!res.ok) return toolText({ error: "recruitcrm_error", status: (res as any).status, detail: (res as any).detail });
+      // owner_id filters server-side; re-check it here only if the records carry an owner id at all.
+      const ownerKnown = res.rows.some((m: any) => /^\d+$/.test(String(meetingOwnerId(m) ?? "")));
+      const mine = ownerKnown ? res.rows.filter((m: any) => meetingOwnerId(m) === ownerId) : res.rows;
+      const { data: skips } = await db.from("meeting_type_skips").select("meeting_id").in("meeting_id", mine.map((m: any) => Number(m.id)).filter(Boolean));
+      const skipped = new Set((skips ?? []).map((s: any) => Number(s.meeting_id)));
+      const typeOf = (m: any) => m?.meeting_type?.label ?? (typeof m?.meeting_type === "string" ? m.meeting_type : null);
+      const companies = await companyMatchers();
+      const untyped = mine.filter((m: any) => !typeOf(m) && !skipped.has(Number(m.id)))
+        .sort((a: any, b: any) => String(b.start_date ?? "").localeCompare(String(a.start_date ?? "")));
+      const clientMeetings = mine.filter((m: any) => typeOf(m) === "Client Meeting");
+      const nowStr = now.toISOString().slice(0, 16).replace("T", " ");
+      const held = clientMeetings.filter((m: any) => String(m.start_date ?? "").slice(0, 16).replace("T", " ") <= nowStr).length;
+      return toolText({
+        consultant: who, window: { from, to_exclusive: to },
+        meetings: mine.length, untyped: untyped.length, skipped: skipped.size,
+        client_meetings: { total: clientMeetings.length, held, booked_ahead: clientMeetings.length - held, quarter_minimum: 2 },
+        items: untyped.slice(0, 40).map((m: any) => ({
+          meeting_id: m.id, title: m.title ?? null, start: String(m.start_date ?? "").slice(0, 16),
+          linked_to: m.related_to_type ?? null, suggestion: suggestMeetingType(m, companies) })),
+        type_options: [...types.map((t) => t.label), "skip (personal / not work)"],
+        note: (untyped.length > 40 ? `Showing the 40 most recent of ${untyped.length}. ` : "") + (res.more ? "More than 10 pages of meetings; narrow the window. " : "")
+          + "Suggestions are guesses from the title and links. The recruiter picks each type; set them with action=set.",
+      });
+    }
+
+    if (action === "set") {
+      if (!actor.can_write) return toolText({ error: "Your token is read-only. Changing meetings requires a write-enabled token." });
+      const items = Array.isArray(args?.items) ? args.items : [];
+      if (!items.length) return toolText({ error: "missing_items", message: "Give the meetings to change as items [{meeting_id, type}]." });
+      if (items.length > 25) return toolText({ error: "too_many", message: "Up to 25 meetings per confirmation." });
+      const plan: any[] = [];
+      for (const it of items) {
+        const id = Number(it?.meeting_id);
+        const skip = /^skip|personal|not work/i.test(String(it?.type ?? ""));
+        const t = skip ? null : await resolveMeetingType(it?.type, types);
+        if (!id || (!skip && !t)) return toolText({ error: "bad_item", meeting_id: it?.meeting_id ?? null, message: `Unknown type '${it?.type}'.`, options: types.map((x) => x.label) });
+        const cur = await crm("GET", `/meetings/${id}`);
+        const m = cur.ok ? (cur.json?.data ?? cur.json) : null;
+        if (!m?.id) return toolText({ error: "meeting_not_found", meeting_id: id });
+        const oid = meetingOwnerId(m);
+        const mineById = oid === String(actor.id) || (meetingOwner(m, names) ?? "") === (names.get(String(actor.id)) ?? "\u0000");
+        if (!actor.is_admin && !mineById) return toolText({ error: "not_your_meeting", meeting_id: id, message: "You can only change your own meetings." });
+        plan.push({ id, m, skip, type: t, current: m?.meeting_type?.label ?? null });
+      }
+      if (!args.confirm) return toolText({ mode: "preview", action: "set_meeting_types", count: plan.length,
+        changes: plan.map((p) => ({ meeting_id: p.id, title: p.m.title ?? null, start: String(p.m.start_date ?? "").slice(0, 16), current_type: p.current, new_type: p.skip ? "(skip: not a work meeting)" : p.type.label })),
+        instruction: "Show this to the recruiter. To apply, call again with confirm=true and the same items." });
+      const results: any[] = [];
+      for (const p of plan) {
+        if (p.skip) {
+          const { error } = await db.from("meeting_type_skips").upsert({ meeting_id: p.id, consultant_recruitcrm_id: actor.id ?? null });
+          results.push({ meeting_id: p.id, ok: !error, result: error ? error.message : "skipped" });
+          continue;
+        }
+        // Change ONLY the type. do_not_send_calendar_invites so attendees get no update email. Then
+        // read the meeting back: if anything besides the type moved, stop and say so, because
+        // RecruitCRM's edit semantics (patch vs replace) are not confirmed for meetings.
+        const r = await crm("POST", `/meetings/${p.id}`, { meeting_type_id: p.type.id, updated_by: actor.id, do_not_send_calendar_invites: 1 });
+        if (!r.ok) { results.push({ meeting_id: p.id, ok: false, result: `recruitcrm_error ${r.status}`, detail: String(r.json?.message ?? r.text ?? "").slice(0, 160) }); break; }
+        const back = await crm("GET", `/meetings/${p.id}`);
+        const b = back.json?.data ?? back.json ?? {};
+        const same = (k: string) => String(b?.[k] ?? "") === String(p.m?.[k] ?? "");
+        const drift = ["title", "start_date", "end_date", "related_to", "related_to_type"].filter((k) => !same(k));
+        if (meetingOwnerId(b) !== meetingOwnerId(p.m)) drift.push("owner");
+        const typed = (b?.meeting_type?.label ?? null) === p.type.label || Number(b?.meeting_type?.id ?? b?.meeting_type_id ?? NaN) === p.type.id;
+        await audit({ actor: String(actor.id), action: "set_meeting_type", entity: "meeting", entity_id: String(p.id), before: { meeting_type: p.current }, after: { meeting_type: p.type.label, drift }, via: "claude" });
+        results.push({ meeting_id: p.id, ok: typed && !drift.length, result: typed ? (drift.length ? "typed, but other fields changed" : "typed") : "type did not stick", changed_fields: drift.length ? drift : undefined });
+        if (!typed || drift.length) break;
+      }
+      const failed = results.filter((x) => !x.ok);
+      return toolText({ mode: "applied", changed: results.filter((x) => x.ok).length, failed: failed.length, not_attempted: plan.length - results.length, results,
+        note: failed.length ? "Stopped at the first problem so nothing else was touched. Check that meeting in RecruitCRM." : "Every change was read back from RecruitCRM and checked." });
+    }
+    return toolText({ error: "action must be list or set" });
+  }
+
   if (name === "log_activity") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Logging activity requires a write-enabled token (an admin sets can_write)." });
     const kind = String(args.kind ?? "").toLowerCase().replace(/s$/, "");
@@ -1880,6 +2096,13 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const start = String(args.start ?? "").trim();
     if (!/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2})?$/.test(start)) return toolText({ error: "start must be 'YYYY-MM-DD HH:MM' (or just the date)." });
     if (kind === "meeting" && !args.end) return toolText({ error: "A meeting needs an end time as well as a start." });
+    // 3.71.0: a meeting must carry a type, or a client visit can't be counted.
+    let mtype: { id: number; label: string } | null = null;
+    if (kind === "meeting") {
+      const types = await meetingTypeList();
+      mtype = await resolveMeetingType(args.meeting_type ?? args.type_id, types);
+      if (!mtype) return toolText({ error: "meeting_type_required", message: "Ask the recruiter what kind of meeting this is. Client visits only count toward the 2-per-quarter minimum when typed Client Meeting.", options: types.map((t) => t.label) });
+    }
 
     // Resolve the things it hangs off, so the entry appears against the right record.
     const links: Record<string, any> = {};
@@ -1910,12 +2133,12 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       reminder: -1,                       // -1 = no reminder; the field is required
       owner_id: actor.id, created_by: actor.id, updated_by: actor.id, ...links,
     };
-    if (kind === "meeting") { body.end_date = String(args.end); if (args.type_id != null) body.meeting_type_id = args.type_id; }
+    if (kind === "meeting") { body.end_date = String(args.end); body.meeting_type_id = mtype!.id; }
     else if (args.type_id != null) body.task_type_id = args.type_id;
 
     if (!args.confirm) {
       return toolText({ mode: "preview", action: `create_${kind}`, will_create: {
-        kind, title: body.title, start, end: body.end_date ?? undefined,
+        kind, title: body.title, start, end: body.end_date ?? undefined, type: mtype?.label ?? undefined,
         linked_to: linkDesc.length ? linkDesc.join(", ") : "nothing", owner: "you", reminder: "none" },
         instruction: `This creates a real ${kind} in RecruitCRM. Show it to the recruiter. To apply, call again with confirm=true.` });
     }
