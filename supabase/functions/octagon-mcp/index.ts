@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.70.1" };
+const SERVER = { name: "octagon-analytics", version: "3.70.2" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -510,7 +510,7 @@ const TOOLS = [
   { name: "dpe_email", description: "Draft the DPE email for a job: Octagon's FIXED template, written by the server so it is identical every time, confirming the brief to the client after the briefing call (location, salary, day-to-day, ideal background, interview stages, interviewers, timescales, next steps). Missing facts read 'To be confirmed'. Scores and Job Grade never appear. Needs first_cvs_by (YYYY-MM-DD), the date the consultant commits to sending the first CVs. Recipient is the job's RecruitCRM contact (or contact_slug); opted-out contacts are refused. WRITE, two-step, OUTWARD-FACING draft: without confirm returns a preview; confirm=true saves it to the consultant's Outlook Drafts (never sent) and sets DPE Sent to today.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, first_cvs_by: { type: "string", description: "YYYY-MM-DD" }, contact_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "job_dpe", description: "Record a job's DPE in RecruitCRM: the six scores the CONSULTANT gives (urgency, cooperation, track_record, commitment, process_quality, positioning, each 1-5 - never estimate one), then Total Score (out of 30) is calculated and written back with the Job Grade. The grade bands (A 25-30, B 19-24, C under 19) SUGGEST a grade; the consultant decides: pass grade=A/B/C to keep or override. If the job already has a grade that differs from the suggestion and no grade is passed, the tool returns grade_choice_needed instead of overwriting it. Plus optional findability (1-3, not in the total), briefing_call_date and dpe_sent_date (YYYY-MM-DD). WRITE, two-step, EXPLICIT-ONLY: call without confirm for a current-vs-new preview, get approval, then confirm=true with the same values. The write is read back from RecruitCRM and verified.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, urgency: { type: "integer" }, cooperation: { type: "integer" }, track_record: { type: "integer" }, commitment: { type: "integer" }, process_quality: { type: "integer" }, positioning: { type: "integer" }, grade: { type: "string", description: "A, B or C: the consultant's grade; omit to use the banded suggestion" }, findability: { type: "integer" }, briefing_call_date: { type: "string" }, dpe_sent_date: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
-  { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string" }, job_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
+  { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token. The preview checks both records first: candidate_slug takes the slug or RecruitCRM candidate ID (from find_candidate); job_slug takes the job's slug, its RecruitCRM job ID, or an exact title. A candidate or job that does not resolve to exactly one record, or a job that is not Open, is reported at preview, so a bad identifier never reaches the confirm. A candidate already on the job comes back as no_change, not an error.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string", description: "candidate slug or RecruitCRM candidate ID" }, job_slug: { type: "string", description: "job slug, RecruitCRM job ID, or exact job title" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
   { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, note_type: { type: "string", enum: ["internal_interview"], description: "optional. internal_interview files the note as 'Candidate - Internal Interview', which counts toward the internal interviews KPI: use it only when the call WAS an internal interview, and only on a candidate." }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
 ];
 
@@ -2735,12 +2735,47 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
 
   if (name === "assign_candidate") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Assigning candidates requires a write-enabled token (an admin sets can_write)." });
-    if (!args.confirm) return toolText({ mode: "preview", action: "assign_candidate", candidate_slug: args.candidate_slug, job_slug: args.job_slug, acting_as: actor.id, instruction: "Show this to the recruiter. To apply, call again with confirm=true." });
-    const r = await crm("POST", `/candidates/${args.candidate_slug}/assign?job_slug=${encodeURIComponent(args.job_slug)}&updated_by=${encodeURIComponent(String(actor.id))}`);
-    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
-    await audit({ actor: String(actor.id), action: "assign_candidate", entity: "candidate", entity_id: args.candidate_slug, before: null, after: { job_slug: args.job_slug }, via: "claude" });
-    const refreshed = await refreshCandidate(args.candidate_slug);
-    return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, mirror_events_refreshed: refreshed, note: "Candidate assigned in RecruitCRM and mirror refreshed." });
+    // 3.70.2: resolve and check both records BEFORE the preview. Until now the raw arguments went
+    // straight to RecruitCRM, so a wrong job identifier sailed through the preview and failed on every
+    // confirm - 25 in a row for Keelan on 21/10/2026, who then had to redo the whole batch.
+    const cq = String(args.candidate_slug ?? "").trim(), jq = String(args.job_slug ?? "").trim();
+    if (!cq || !jq) return toolText({ error: "missing_argument", message: "Give both the candidate and the job." });
+    const cbase = () => db.from("candidates").select("slug,name,recruitcrm_id").is("deleted_at", null);
+    let { data: cands } = await cbase().eq("slug", cq).limit(2);
+    if (!cands?.length && /^\d{1,18}$/.test(cq)) ({ data: cands } = await cbase().eq("recruitcrm_id", cq).limit(2));
+    if (!cands?.length && !/^\d{1,18}$/.test(cq)) {
+      // Not mirrored yet (the incremental sync runs every 15 minutes): check RecruitCRM itself.
+      const live = await crm("GET", `/candidates/${encodeURIComponent(cq)}`);
+      const rec = live.ok ? (live.json?.data ?? live.json) : null;
+      if (rec?.slug) cands = [{ slug: String(rec.slug), name: [rec.first_name, rec.last_name].filter(Boolean).join(" ") || String(rec.slug), recruitcrm_id: rec.id }];
+    }
+    if (!cands?.length) return toolText({ error: "candidate_not_found", message: "No candidate has that slug or ID. Look them up with find_candidate and use the slug it returns." });
+    const cand = cands[0];
+    let jobs = (await resolveJob(jq)) as any[];
+    const exact = jobs.filter((j: any) => j.slug === jq || String(j.recruitcrm_id) === jq || String(j.title ?? "").trim().toLowerCase() === jq.toLowerCase());
+    if (exact.length) jobs = exact;
+    if (!jobs.length && !/^\d{1,18}$/.test(jq)) {
+      const live = await crm("GET", `/jobs/${encodeURIComponent(jq)}`);
+      const rec = live.ok ? (live.json?.data ?? live.json) : null;
+      if (rec?.slug) jobs = [{ slug: String(rec.slug), title: rec.name ?? rec.title ?? String(rec.slug), recruitcrm_id: rec.id, status: rec.job_status?.label ?? rec.job_status ?? null }];
+    }
+    if (!jobs.length) return toolText({ error: "job_not_found", message: "No job matches. Use job_pipeline or the job's RecruitCRM ID." });
+    if (jobs.length > 1) return toolText({ error: "ambiguous_job", message: "More than one job matches; ask which one.", matches: jobs.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, status: j.status })) });
+    const job = jobs[0];
+    if (String(job.status ?? "").toLowerCase() !== "open") return toolText({ error: "job_not_open", message: `${job.title} is ${job.status}, not Open. Reopen it first if this assignment is wanted.`, job_id: job.recruitcrm_id });
+    // No "already on the job" check against candidate_assignments: it is an assignment history and
+    // keeps rows after an unassign, so it would wrongly block a re-assignment. RecruitCRM's own 422 is
+    // the authority, handled below as no_change.
+    if (!args.confirm) return toolText({ mode: "preview", action: "assign_candidate", candidate: cand.name, job: job.title, job_id: job.recruitcrm_id, candidate_slug: cand.slug, job_slug: job.slug, acting_as: actor.id, instruction: "Show this to the recruiter. To apply, call again with confirm=true and the same candidate_slug and job_slug." });
+    const r = await crm("POST", `/candidates/${encodeURIComponent(cand.slug)}/assign?job_slug=${encodeURIComponent(job.slug)}&updated_by=${encodeURIComponent(String(actor.id))}`);
+    if (!r.ok) {
+      const msg = String(r.json?.message ?? r.json?.error ?? r.text ?? "").slice(0, 200);
+      if (r.status === 422 && /already/i.test(msg)) return toolText({ mode: "no_change", already_on_job: true, candidate: cand.name, job: job.title, note: `RecruitCRM says ${cand.name} is already on ${job.title}.` });
+      return toolText({ error: "recruitcrm_error", status: r.status, detail: msg, retried_after_rate_limit: r.retried ?? 0 });
+    }
+    await audit({ actor: String(actor.id), action: "assign_candidate", entity: "candidate", entity_id: cand.slug, before: null, after: { job_slug: job.slug }, via: "claude" });
+    const refreshed = await refreshCandidate(cand.slug);
+    return toolText({ mode: "applied", candidate: cand.name, job: job.title, candidate_slug: cand.slug, job_slug: job.slug, mirror_events_refreshed: refreshed, note: "Candidate assigned in RecruitCRM and mirror refreshed." });
   }
   if (name === "record_content_use") {
     const kinds = ["advert", "boolean", "spec_pitch", "interview_prep", "client_pitch", "inmail", "email_copy", "job_kickoff", "other"];
