@@ -28,12 +28,23 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.70.0" };
+const SERVER = { name: "octagon-analytics", version: "3.70.1" };
 
+// 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
+// rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
+// the sync, so a recruiter confirming a batch of assigns can hit the limit through no fault of theirs.
 async function crm(method: string, path: string, body?: any) {
-  const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
-  const text = await res.text(); let json: any = null; try { json = JSON.parse(text); } catch {}
-  return { ok: res.ok, status: res.status, json, text };
+  const payload = body ? JSON.stringify(body) : undefined;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${BASE}${path}`, { method, headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json", "Content-Type": "application/json" }, body: payload });
+    const text = await res.text(); let json: any = null; try { json = JSON.parse(text); } catch {}
+    if (res.status === 429 && attempt < 2) {
+      const ra = Number(res.headers.get("retry-after"));
+      await new Promise((r) => setTimeout(r, Math.min(Number.isFinite(ra) && ra > 0 ? ra * 1000 : 1500 * (attempt + 1), 5000)));
+      continue;
+    }
+    return { ok: res.ok, status: res.status, json, text, retried: attempt };
+  }
 }
 // The job write endpoints take multipart/form-data, NOT JSON — posting JSON to them returns an
 // empty 422 that looks like "endpoint doesn't exist". Undefined/null fields are dropped so an edit
@@ -394,8 +405,20 @@ async function recordClosureReason(kind: "job" | "deal", slug: string, recordNam
 const JOB_CLOSING = ["closed", "cancelled", "canceled", "on hold", "on-hold", "onhold"];
 const DEAL_LOSING = ["lost", "declined"];
 // Fire-and-forget usage telemetry (no PII args) — feeds admin_digest()/the Slack bot.
-function logCall(actorId: any, tool: string, ok = true) {
-  db.from("mcp_call_log").insert({ consultant_recruitcrm_id: actorId ?? null, tool, ok }).then(() => {}, () => {});
+// 3.70.1: a failed call also records WHY, as a short code plus the HTTP status (e.g.
+// "recruitcrm_error 422"). Until then failures were a bare ok=false and could not be diagnosed.
+// Only snake_case error codes are kept: free-text errors can carry a name ("No candidate matches
+// 'Jane Smith'"), so those are stored as "message" and never as their text. No args, ever.
+function errorCode(out: any): string | null {
+  const t = out?.content?.[0]?.text;
+  if (typeof t !== "string" || !t.startsWith('{"error"')) return null;
+  let j: any = null; try { j = JSON.parse(t); } catch { return "unparsed"; }
+  const code = typeof j?.error === "string" && /^[a-z_]{2,40}$/.test(j.error) ? j.error : "message";
+  const st = Number.isInteger(j?.status) ? ` ${j.status}` : "";
+  return (code + st).slice(0, 60);
+}
+function logCall(actorId: any, tool: string, ok = true, error: string | null = null) {
+  db.from("mcp_call_log").insert({ consultant_recruitcrm_id: actorId ?? null, tool, ok, ...(error ? { error } : {}) }).then(() => {}, () => {});
 }
 
 // ---- Auth ------------------------------------------------------------------
@@ -829,7 +852,7 @@ async function callTool(name: string, args: any, req: Request) {
         const { error } = await db.from("mcp_card_confirms").insert({ nonce, tool: name, consultant_recruitcrm_id: actor.id });
         if (error) {
           const dup = error.code === "23505";
-          logCall(actor.id, name, false);
+          logCall(actor.id, name, false, dup ? "already_applied" : "card_check_failed");
           return (MIXED_TOOLS.has(name) ? mixedWrap : cardWrap)(name, { ...args, confirm: true }, toolText({ error: dup ? "already_applied" : "card_check_failed",
             message: dup ? "This change was already applied from this preview, so nothing was changed again. Ask for a fresh preview to make another change."
                          : "Could not check this confirmation, so nothing was changed. Try again in a moment." }));
@@ -837,13 +860,13 @@ async function callTool(name: string, args: any, req: Request) {
       }
     }
     let out = await runTool(name, args, req, actor);
-    if (name !== "record_content_use") logCall(actor.id, name, resultOk(out));
+    if (name !== "record_content_use") logCall(actor.id, name, resultOk(out), errorCode(out));
     if (CARD_TOOLS.has(name)) out = cardWrap(name, args, out);
     else if (REPORT_TOOLS.has(name)) out = viewWrap(name, out);
     else if (MIXED_TOOLS.has(name)) out = mixedWrap(name, args, out);
     return out;
   } catch (e) {
-    logCall(actor.id, name, false);
+    logCall(actor.id, name, false, "exception");
     throw e;
   }
 }
