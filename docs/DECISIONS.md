@@ -187,3 +187,23 @@ a Devyce summary exists, never the text, so it needs no audit row. The `/intake`
 (octagon-reporting 0.1.5) and `/interviewprep` read the summary through `call_notes`.
 
 **Status:** **Built 20/10/2026** (octagon-mcp 3.70.0, migration 0104). Not live until deployed.
+
+---
+
+## Placements and Won deals: one deal per placement
+
+**Decision.** A placement is worth one Won deal. `placement_deal_match()` (migration 0109) pairs
+each placement with at most one Won deal on the same job, and each deal with at most one placement:
+the candidate's name in the deal name first (a first name that a consultant also has does not
+count), then the deal created nearest the placement date. Any other Won deal is a separate fee,
+listed by `placements_with_fees` as unmatched and never added to a placement. A placement with no
+Won deal 14 days after placing is flagged overdue.
+
+**Why.** Deals carry a job but no candidate, so each placement took the job's latest Won deal: on
+26/10/2026 that let two placements share one deal and ignored the rest on jobs with several Won
+deals (retainer stages, contract invoices). The "£0 billed" Bhav saw for Corintech and Moonshot on
+19/10/2026 was `placements_report` counting Won revenue by close date (31/12/2026); it now also
+gives `placed_value`.
+
+**Status:** **Built 26/10/2026** (octagon-mcp 3.74.0, octagon-reporting 0.1.6). 2026 to date: 90 of
+92 placements matched, 2 overdue, 39 unmatched Won deals (£164,864).
