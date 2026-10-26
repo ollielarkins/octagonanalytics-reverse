@@ -91,6 +91,10 @@ to a client.
 
 ### Day 1 — your desk
 
+If you're in the action queue pilot, your day starts in Slack: at 08:30 a DM lists your calls for
+today, ranked. Ask Claude **prep my queue** (or type `/queue`) and the admin for each one is drafted for
+you to check. Press **Done** on a call in Slack and it logs a note in RecruitCRM once you confirm.
+
 > show me my dashboard
 
 You get, in order: your headline cards, your week against target, your quarterly billing against

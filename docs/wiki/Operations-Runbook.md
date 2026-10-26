@@ -125,7 +125,22 @@ Daily action queue settings, in `app_settings`:
 | `action_queue_shadow_email` | where shadow DMs go |
 
 Each consultant is found in Slack by their RecruitCRM email. `select last_run_at, last_status from
-sync_state where entity = 'action_queue'` shows the last run.
+sync_state where entity = 'action_queue'` shows the last run. The cron job is `daily-action-queue`
+(`30 7,8 * * 1-5`, sends at 08:30 UK through `action_queue_if_due(8)`).
+
+**Done buttons.** The Team Briefs app's Interactivity Request URL points at the `slack-actions`
+function, which checks Slack's signature with the `SLACK_BRIEFS_SIGNING_SECRET` secret. Socket Mode
+must be off, or Slack won't call the URL. Done items are kept in `action_queue_done`, each with a
+`hide_until` date by kind; every confirmed Done is in `audit_log`.
+
+**Manager exceptions DM**, Mondays with the queue:
+
+| Key | Meaning |
+|---|---|
+| `manager_exceptions_emails` | Comma-separated work emails that get the Monday DM. 26/10/2026: Oliver only |
+| `exceptions_exclude_ids` | RecruitCRM ids left out of `team_exceptions`. 26/10/2026: Dale Barnett |
+
+The team figures in it are for managers only: never point it at a channel.
 
 ## Tokens and access
 

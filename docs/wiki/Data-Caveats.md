@@ -10,10 +10,10 @@ Everything here is measured, not estimated. Figures as at 10/08/2026.
 ## Call categorisation
 
 > [!CAUTION]
-> **This is the biggest soft spot in the platform, and it is getting worse.** BD and client call
-> KPIs count only *categorised* Devyce calls. Categorisation has fallen from 26% to 9% since May.
+> **This is the biggest soft spot in the platform.** BD and client call KPIs count only
+> *categorised* Devyce calls. Categorisation fell from 26% in May to 9% in September; October is 12%.
 
-Only 1,850 of 10,331 calls carry a `custom_call_type` — 17.9% overall, and the trend is the story:
+From May to 26/10/2026, 2,482 of 16,028 calls carry a `custom_call_type`: 15.5%. By month:
 
 | Month | Calls | Tagged | Rate |
 |---|---|---|---|
@@ -21,38 +21,27 @@ Only 1,850 of 10,331 calls carry a `custom_call_type` — 17.9% overall, and the
 | June | 2,029 | 530 | 26.1% |
 | July | 2,066 | 484 | 23.4% |
 | August | 3,625 | 476 | 13.1% |
-| September (to 15th) | 1,882 | 169 | **9.0%** |
+| September | 3,996 | 370 | **9.3%** |
+| October (to 26th) | 3,585 | 433 | 12.1% |
 
 Call volume nearly doubled from July to August while tagging halved. Weekly targets are 5 BD and 5
-client calls; at a 9% tag rate a recruiter making ten real BD calls records about one. **The KPI is
-now roughly a tenth of reality, and falling.**
+client calls; at a 12% tag rate a recruiter making ten real BD calls records about one.
 
-Per consultant since 01/08/2026:
+Per consultant, 01/10/2026 to 25/10/2026 (10 people with 30 or more calls): two desks tag about
+half their calls, five tag between 11% and 15%, and three tag under 9%. **The busiest desks tag
+least**: the two biggest callers tag 5% and 2%. Never coach off a BD or client call number without
+checking that person's tagging rate beside it. Per-person rates are for managers, in
+`call_tagging_rates()` and the Day End brief, not this page.
 
-| Consultant | Calls | Tagged | Rate |
-|---|---|---|---|
-| Bhavesh Patel | 128 | 53 | 41.4% |
-| Adam Barnett | 388 | 72 | 18.6% |
-| Scott Newcomen | 605 | 112 | 18.5% |
-| Tarah Williams | 385 | 67 | 17.4% |
-| Keelan Riley | 633 | 101 | 16.0% |
-| Will Drake | 403 | 62 | 15.4% |
-| Steve Bernat | 145 | 18 | 12.4% |
-| Jennifer Seress | 822 | 73 | 8.9% |
-| Dale Barnett | 129 | 10 | 7.8% |
-| Georgia Cook | 1,449 | 75 | 5.2% |
-| Chloe Edwards | 361 | 2 | **0.6%** |
-| Lewis Hay | 59 | 0 | **0%** |
+What exists to fix it, since 26/10/2026: `/tagcalls` lists each person's untagged calls with a
+suggested category to accept or change, and the Day End brief shows everyone's untagged count and
+weekly tagging rate. Nothing is tagged automatically: numbers are shared and some people are both
+candidates and clients, so each call is the consultant's call.
 
-The shape from the original analysis still holds — **the busiest desks tag least**. Georgia makes the
-most calls of anyone and tags one in twenty. Chloe has tagged twice since August. Never coach off a
-BD or client call number without checking the tagging rate beside it.
-
-Only four categories carry real volume: Contact – Prospect (BD) 800, Contact – Client 540,
+As of 15/09/2026, only four categories carried real volume: Contact – Prospect (BD) 800, Contact – Client 540,
 Candidate – Job Pitch/Qualifying 238, Interview Feedback 160. Everything else is negligible.
 
-The recruiter dashboard shows each person their own rate beside the KPI. The fix is behavioural, not
-technical — but at 9% the metric is arguably not worth reporting until tagging recovers.
+The recruiter dashboard shows each person their own rate beside the KPI.
 
 ---
 
@@ -189,10 +178,10 @@ is the only route to a per-placement fee.
 
 ## Adoption
 
-17 tool calls in the last 30 days from two identities. Nine of eleven recruiter tokens have never
-been used. `audit_log` is empty — no write has ever been made.
+As of 26/10/2026: 2,345 tool calls in the last 30 days from 7 people, and 361 audited writes. 11
+people hold an active token. The action queue DM reaches a pilot of four.
 
-Any conclusion drawn from usage data is drawn from almost no usage.
+Usage is now real but concentrated: read any team-wide conclusion from usage data with that in mind.
 
 ---
 

@@ -134,7 +134,13 @@ is the stable "whose desk is this" key and matches how the firm thinks about per
 **Consequence.** `updated_by` is still captured and set on **write-back** (so RecruitCRM's own
 activity log attributes the acting consultant), but it is never the reporting attribution key.
 
-**Status:** **Decided & as-built 2026-08-04.**
+**Status:** **Decided & as-built 2026-08-04. Superseded for activity metrics 02/09/2026** (migration
+0066): funnel activity, `kpis_report` and `consultant_leaderboard` now credit whoever moved the stage,
+falling back to the job owner. Against RecruitCRM's January report that matched 20 of 27
+per-consultant figures, where job owner scattered (one desk 184 against their 105) and credited people
+with activity on jobs they inherited later. The `updated_by` problem above was handled by counting
+distinct candidate-job pairs (0065). Desk views (`cold_jobs`, `stalled_report`, `time_to_fill`,
+`placements_report`, `rejection_report`) stay owner-attributed: they answer "whose desk is this".
 
 ---
 
@@ -186,7 +192,7 @@ recruiters to it. `candidate_profile` (3.73.0) now returns `latest_call`: date, 
 a Devyce summary exists, never the text, so it needs no audit row. The `/intake` skill
 (octagon-reporting 0.1.5) and `/interviewprep` read the summary through `call_notes`.
 
-**Status:** **Built 20/10/2026** (octagon-mcp 3.70.0, migration 0104). Not live until deployed.
+**Status:** **Live** since 26/10/2026 (octagon-mcp 3.73.1, migration 0104).
 
 ---
 
@@ -205,5 +211,96 @@ deals (retainer stages, contract invoices). The "£0 billed" Bhav saw for Corint
 19/10/2026 was `placements_report` counting Won revenue by close date (31/12/2026); it now also
 gives `placed_value`.
 
-**Status:** **Built 26/10/2026** (octagon-mcp 3.74.0, octagon-reporting 0.1.6). 2026 to date: 90 of
+**Status:** **Live 26/10/2026** (octagon-mcp 3.74.0, octagon-reporting 0.1.6, migration 0109). 2026 to date: 90 of
 92 placements matched, 2 overdue, 39 unmatched Won deals (£164,864).
+
+---
+
+## The daily action queue: ranked calls in Slack, drafting in your own Claude
+
+**Decision.** An 08:30 Slack DM per consultant lists up to 10 ranked calls (`action_queue()`, migration
+0115; thresholds in [Metrics](wiki/Metrics-and-Definitions.md#daily-action-queue)). The DM carries no
+drafts: "prep my queue" in the consultant's own Claude writes the prep notes, chase and booking emails,
+Booleans and InMails. Each call has a Done button (`slack-actions`, 0118) that previews the note it
+will log in RecruitCRM, writes it as the consultant only on Confirm, and hides the item for a set
+number of days by kind. New jobs, client rejections and Friday Push & Tell joined the queue in 0121
+as triggers for drafts (priority 7), on the same rule: nothing is sent until the consultant approves.
+
+**Why.** The 13/10/2026 rule of no server-side AI: candidate and client data stays inside each
+person's own Claude. Older offers (over 21 days) and requests (over 14 days) go to one clean-up line,
+so stale stages don't crowd out today's calls (0116).
+
+**Status:** **Live 26/10/2026** for a pilot of four: Will Drake, Keelan Riley, Adam Barnett and
+Bhavesh Patel (`action_queue_pilot`), shadow mode off.
+
+---
+
+## Weekly plan worked back from billing
+
+**Decision.** Each person's weekly CVs, interview requests and interviews are worked back from their
+quarterly billing target at a run-rate over 13 weeks, using their own 6-month ratios blended towards
+the firm's when the sample is small, and never below the flat minimums (`weekly_plan()`, 0119).
+Nobody without a billing target gets a plan from billing; they get the flat minimums.
+
+**Why.** Catch-up to the quarter end would only spike late, and a CV sent in December rarely bills by
+31/12. For the one consultant with no target, the firm median gave 26 CVs a week: about 13 times their
+own rate.
+
+**Status:** **Live 26/10/2026** (0119, 0120). Monday plan line in the DM; Friday actuals against plan
+in the end-of-week email.
+
+---
+
+## Manager exceptions: only real outliers
+
+**Decision.** `team_exceptions()` (0121) shows managers only the people with something to act on,
+as a Monday DM to `manager_exceptions_emails` and through `/exceptions`. Off plan means below half the
+plan on **both** CVs and interviews in the last full week (0122); backlog means 25+ calls queued or 3+
+stages out of date; ratios must fall more than 30% with enough volume.
+
+**Why.** At 70% of plan and 10+ calls every consultant was flagged, and at half the plan on any one
+metric six of eight were. A list that names everyone isn't a list of exceptions.
+
+**Status:** **Live 26/10/2026.** The first Monday DM is due 02/11/2026.
+
+---
+
+## Slack: the admin bot carries sync alerts only
+
+**Decision.** The analytics-admin bot (`alert_webhook_url`) posts sync and cron alerts only. The
+briefs post from the "(Claude) - Team Briefs" app to #claude-teambriefs (`digest_webhook_url`), and
+the DMs use that app's bot token (0114).
+
+**Why.** Decided 26/10/2026, when the briefs moved to their own channel: the admin bot should only
+ever carry alerts, so nothing else can bury one. Since 0114 nothing else holds its URL.
+
+**Status:** **Live 26/10/2026.**
+
+---
+
+## RecruitCRM is changed through the connector, never a browser
+
+**Decision.** Claude changes RecruitCRM only through Octagon tools. If no tool can make a change, it
+says so and gives the manual step. It never opens a browser panel to do it. The connector's
+instructions carry the rule, and `update_job` and `add_note` gained the job order form so the case
+that triggered it is covered (3.77.0).
+
+**Why.** On 26/10/2026, asked to fill in a job order form, Claude opened RecruitCRM in a browser panel.
+Signing in there logged the user out of RecruitCRM.
+
+**Status:** **Live 26/10/2026.**
+
+---
+
+## Internal Job Descriptions are read from the file
+
+**Decision.** `job_spec` reads the Internal Job Description file attached to a job (a job custom
+field, which `files_list` does not see) and returns its text: PDF, Word, old .doc and Excel. A broken
+link says so and asks for a re-upload. Scanned PDFs and files over 10 MB are not read; Claude says to
+open them in RecruitCRM.
+
+**Why.** "Add the Internal JD to the job description" stopped working because the file lives in a
+custom field, not the job's files. `internal_jd_check` across the 113 open-job Internal JDs set what
+to build.
+
+**Status:** **Live 26/10/2026** (octagon-mcp 3.75.4 and 3.75.5).
