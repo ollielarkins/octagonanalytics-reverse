@@ -102,6 +102,31 @@ This exists because on 10/09/2026 the cron entries vanished and nothing noticed 
 watchdog that should have caught it had been deleted too. If you add a permanent job, add it to
 `cron_manifest` in the same migration or the watchdog will correctly flag it as undeclared.
 
+## Slack
+
+Two Slack apps post for the platform:
+
+- **The analytics-admin bot**, a webhook into Ollie's DM, carries **sync alerts only**:
+  `alert_webhook_url`, read by `check_sync_health`, `check_cron_manifest` and `sync_health_digest`.
+  Since 0114 nothing else holds its URL. Keep it that way.
+- **"(Claude) - Team Briefs"** (shown as "Ollie's Team Briefs"):
+  - Its webhook (`digest_webhook_url`) posts the morning, Day End and Week Ahead briefs to
+    #claude-teambriefs. With it unset, the briefs don't post.
+  - Its bot token (the `SLACK_BOT_TOKEN` function secret) sends the 08:30 action queue DMs from
+    `daily-queue`. Scopes: `chat:write`, `im:write`, `users:read`, `users:read.email`. It must be the
+    plain `xoxb-` value; a malformed one is recorded in `sync_state` as `action_queue`.
+
+Daily action queue settings, in `app_settings`:
+
+| Key | Meaning |
+|---|---|
+| `action_queue_pilot` | RecruitCRM ids that get a DM. 26/10/2026: Will Drake, Keelan Riley, Adam Barnett |
+| `action_queue_shadow` | `true` sends every DM to `action_queue_shadow_email` instead, labelled. Set to `false` on 26/10/2026, so the pilots get their own |
+| `action_queue_shadow_email` | where shadow DMs go |
+
+Each consultant is found in Slack by their RecruitCRM email. `select last_run_at, last_status from
+sync_state where entity = 'action_queue'` shows the last run.
+
 ## Tokens and access
 
 `mcp_tokens` holds SHA-256 hashes — never the token itself. Per token: `consultant_recruitcrm_id`,

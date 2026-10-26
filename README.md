@@ -226,8 +226,9 @@ values (encode(digest('<plaintext>','sha256'),'hex'), <recruitcrm_id>, 'Name (Re
 update mcp_tokens set active = false where label = '…';
 ```
 
-Optional Slack webhooks live in `app_settings`: `alert_webhook_url` (sync alerts),
-`admin_webhook_url` (daily digest), `standup_webhook_url` (weekday standup).
+Slack webhooks live in `app_settings`: `alert_webhook_url` (sync alerts only, the admin bot),
+`digest_webhook_url` (the briefs, #claude-teambriefs), `standup_webhook_url` (weekday standup, unset).
+The action queue DMs use the `SLACK_BOT_TOKEN` function secret. See the runbook's Slack section.
 
 ---
 
