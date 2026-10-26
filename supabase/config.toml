@@ -54,6 +54,11 @@ verify_jwt = true
 [functions.storage-upload]
 verify_jwt = true
 
+[functions.daily-queue]
+# The 08:30 action queue DMs (priority 4, migration 0115). Driven by pg_cron via action_queue_if_due(),
+# which presents app_settings.cron_bearer. Holds SLACK_BOT_TOKEN, so it stays locked.
+verify_jwt = true
+
 [functions.digest-email]
 # Renders and sends Ollie's scheduled digests. Driven by pg_cron via send_digest_if_due(), which
 # presents the bearer from app_settings.cron_bearer. Holds RESEND_API_KEY, so it stays locked.
