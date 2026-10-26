@@ -64,6 +64,13 @@ Deno.serve(async () => {
     await record("error:no SLACK_BOT_TOKEN");
     return Response.json({ sent: 0, reason: "SLACK_BOT_TOKEN is not set" });
   }
+  // 26/10/2026: the first run died inside fetch ("not a valid ByteString") before recording anything,
+  // because the stored token held a character that cannot go in a header. Check the shape first and
+  // say so, without ever echoing the token.
+  if (!/^xox[bp]-[!-~]+$/.test(BOT)) {
+    await record("error:SLACK_BOT_TOKEN is malformed (expected xoxb-..., plain ASCII, no quotes or ellipsis)");
+    return Response.json({ sent: 0, reason: "SLACK_BOT_TOKEN is malformed" });
+  }
   const { data: settings } = await db.from("app_settings").select("key,value")
     .in("key", ["action_queue_pilot", "action_queue_shadow", "action_queue_shadow_email"]);
   const s = new Map((settings ?? []).map((r: any) => [r.key, String(r.value ?? "").trim()]));
@@ -72,7 +79,9 @@ Deno.serve(async () => {
   const shadowEmail = s.get("action_queue_shadow_email") ?? "";
   if (!ids.length) { await record("ok:no pilot consultants"); return Response.json({ sent: 0, reason: "no pilot consultants" }); }
 
-  const shadowUser = shadow ? (shadowEmail ? await slackUserByEmail(shadowEmail) : null) : null;
+  let shadowUser: string | null = null;
+  try { shadowUser = shadow && shadowEmail ? await slackUserByEmail(shadowEmail) : null; }
+  catch (e) { await record(`error:Slack lookup failed: ${String(e).slice(0, 120)}`); return Response.json({ sent: 0, reason: "Slack lookup failed" }); }
   if (shadow && !shadowUser) { await record("error:shadow user not found in Slack"); return Response.json({ sent: 0, reason: "shadow user not found" }); }
 
   const { data: people } = await db.from("consultants").select("recruitcrm_id,name,email").in("recruitcrm_id", ids).is("deleted_at", null);
