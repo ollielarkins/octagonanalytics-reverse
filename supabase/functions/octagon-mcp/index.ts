@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.76.0" };
+const SERVER = { name: "octagon-analytics", version: "3.76.1" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -2479,7 +2479,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       plan.push({ id, c, type: t, current: c?.custom_call_type?.label ?? null, with: who?.name ?? c.related_to_type ?? null });
     }
     if (!args.confirm) return toolText({ mode: "preview", action: "set_call_types", count: plan.length,
-      changes: plan.map((p) => ({ call_id: p.id, when: String(p.c.call_started_on ?? "").slice(0, 16).replace("T", " "),
+      changes: plan.map((p) => ({ call_id: p.id, when: (() => { const t = crmTime(p.c.call_started_on); return t ? londonFmt.format(t) : null; })(),   // UK time, as action=list shows it
         caller: names.get(String(p.c.created_by)) ?? null, direction: p.c.call_type ?? null,
         minutes: Math.round((Number(p.c.duration) || 0) / 6) / 10, with: p.with,
         current_category: p.current, new_category: p.type.label })),
