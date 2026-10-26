@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.76.1" };
+const SERVER = { name: "octagon-analytics", version: "3.77.1" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -200,6 +200,18 @@ async function resolveJob(q: string) {
 const DPE_SCORES: Record<string, number> = { urgency: 45, cooperation: 46, track_record: 47, commitment: 48, process_quality: 49, positioning: 50 };
 const CF_TOTAL = 51, CF_GRADE = 13, CF_FINDABILITY = 52, CF_BRIEFING = 4, CF_DPE_SENT = 41, CF_PUSH_TELL = 44;
 const CF_DATES = new Set([CF_BRIEFING, CF_DPE_SENT, CF_PUSH_TELL]);
+// 3.77.0: job order form = the job's text and longtext custom fields (the client briefing questions)
+// plus the Job Categories and Job Industry pick-lists. DPE scores, grade, findability and dates stay
+// with job_dpe and push_tell, so update_job cannot overwrite them.
+const JOF_OWNED_ELSEWHERE = new Set([...Object.values(DPE_SCORES), CF_TOTAL, CF_GRADE, CF_FINDABILITY, CF_BRIEFING, CF_DPE_SENT, CF_PUSH_TELL]);
+const JOF_PICKLISTS = /^(job categories|job industry)$/i;
+
+// 26/10/2026: with no tool for a change (the job order form on job 6107), Claude opened the app's
+// browser panel to edit RecruitCRM, which logged the recruiter out. Sent at connect time and repeated
+// in write-tool results, because clients cache tool descriptions.
+const NO_BROWSER = "RecruitCRM changes go through Octagon tools only. Never open a browser, side panel or the RecruitCRM website to edit anything, and never ask the recruiter to log in there for you: if no tool can make a change, say so and tell them the manual step.";
+const SERVER_INSTRUCTIONS = "Octagon recruitment connector for RecruitCRM. " + NO_BROWSER +
+  " Every write previews first and applies only when the recruiter confirms. Candidate names are internal PII.";
 const dpeGrade = (total: number) => total >= 25 ? "A" : total >= 19 ? "B" : "C";
 
 async function jobFieldDefs() {
@@ -368,7 +380,7 @@ async function searchCallLogs(relTo: string, relType: string, maxPages = 3): Pro
     .sort((a: any, b: any) => String(b.call_started_on ?? "").localeCompare(String(a.call_started_on ?? "")));
   return { ok: true, calls, more: !!path };
 }
-const NOTE_TYPE_LABELS = { internal_interview: "Candidate - Internal Interview" } as const;
+const NOTE_TYPE_LABELS = { internal_interview: "Candidate - Internal Interview", job_order_form: "Job Order Form Complete" } as const;
 async function noteTypeByLabel(label: string): Promise<{ id: number; label: string } | null> {
   const r = await crm("GET", "/note-types");
   if (!r.ok) return null;
@@ -752,9 +764,9 @@ const TOOLS = [
   { name: "push_tell", description: "Push & Tell: the weekly client update email. action=list (read): the consultant's open jobs grouped by client, A and B grade included by default and C/ungraded listed separately, each with the last 7 days of client-visible activity (CVs sent, interviews, offers) and the candidates already submitted to that client, plus the last Push & Tell date. action=draft (WRITE, two-step, OUTWARD-FACING draft): job_ids for ONE client, subject and body; the recipient is the jobs' RecruitCRM contact (or contact_slug), opted-out contacts are refused; call without confirm for a preview, read it back, then confirm=true saves it to the consultant's Outlook Drafts (never sent) and sets the Push & Tell Email date to today on each job. Managers/admins may pass consultant for someone else's desk.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | draft" }, consultant: { type: "string" }, job_ids: { type: "array", items: { type: "integer" } }, contact_slug: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "dpe_email", description: "Draft the DPE email for a job: Octagon's FIXED template, written by the server so it is identical every time, confirming the brief to the client after the briefing call (location, salary, day-to-day, ideal background, interview stages, interviewers, timescales, next steps). Missing facts read 'To be confirmed'. Scores and Job Grade never appear. Needs first_cvs_by (YYYY-MM-DD), the date the consultant commits to sending the first CVs. Recipient is the job's RecruitCRM contact (or contact_slug); opted-out contacts are refused. WRITE, two-step, OUTWARD-FACING draft: without confirm returns a preview; confirm=true saves it to the consultant's Outlook Drafts (never sent) and sets DPE Sent to today.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, first_cvs_by: { type: "string", description: "YYYY-MM-DD" }, contact_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "job_dpe", description: "Record a job's DPE in RecruitCRM: the six scores the CONSULTANT gives (urgency, cooperation, track_record, commitment, process_quality, positioning, each 1-5 - never estimate one), then Total Score (out of 30) is calculated and written back with the Job Grade. The grade bands (A 25-30, B 19-24, C under 19) SUGGEST a grade; the consultant decides: pass grade=A/B/C to keep or override. If the job already has a grade that differs from the suggestion and no grade is passed, the tool returns grade_choice_needed instead of overwriting it. Plus optional findability (1-3, not in the total), briefing_call_date and dpe_sent_date (YYYY-MM-DD). WRITE, two-step, EXPLICIT-ONLY: call without confirm for a current-vs-new preview, get approval, then confirm=true with the same values. The write is read back from RecruitCRM and verified.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, urgency: { type: "integer" }, cooperation: { type: "integer" }, track_record: { type: "integer" }, commitment: { type: "integer" }, process_quality: { type: "integer" }, positioning: { type: "integer" }, grade: { type: "string", description: "A, B or C: the consultant's grade; omit to use the banded suggestion" }, findability: { type: "integer" }, briefing_call_date: { type: "string" }, dpe_sent_date: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
-  { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X'. status: open | closed | on hold | cancelled.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
+  { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X', and to fill in or change the JOB ORDER FORM (the client briefing answers) with job_order_form. status: open | closed | on hold | cancelled. RecruitCRM edits go through this tool, never a browser.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, state: { type: "string", description: "state / county / region" }, country: { type: "string" }, job_order_form: { type: "object", description: "job order form answers, as { question: answer }. The question is the field's name in RecruitCRM, or enough of it to be unique (e.g. 'Background of the ideal candidate', 'Timescales', 'Interviewers'), or its field id. Also Job Categories and Job Industry (comma-separated, from their options). Leave out anything the recruiter did not give you; never guess. An empty answer clears the field.", additionalProperties: { type: "string" } }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token. The preview checks both records first: candidate_slug takes the slug or RecruitCRM candidate ID (from find_candidate); job_slug takes the job's slug, its RecruitCRM job ID, or an exact title. A candidate or job that does not resolve to exactly one record, or a job that is not Open, is reported at preview, so a bad identifier never reaches the confirm. A candidate already on the job comes back as no_change, not an error.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string", description: "candidate slug or RecruitCRM candidate ID" }, job_slug: { type: "string", description: "job slug, RecruitCRM job ID, or exact job title" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
-  { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, note_type: { type: "string", enum: ["internal_interview"], description: "optional. internal_interview files the note as 'Candidate - Internal Interview', which counts toward the internal interviews KPI: use it only when the call WAS an internal interview, and only on a candidate." }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
+  { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, note_type: { type: "string", enum: ["internal_interview", "job_order_form"], description: "optional. internal_interview files the note as 'Candidate - Internal Interview' (counts toward the internal interviews KPI; only when the call WAS an internal interview, only on a candidate). job_order_form files it as 'Job Order Form Complete' (counts toward the job order forms KPI; only on a job, only when the form really was completed). To fill in the form's own fields use update_job with job_order_form." }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
 ];
 
 // ---- Preview cards (3.65.0) ---------------------------------------------------------------------
@@ -3337,7 +3349,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const fields: Record<string, any> = {
       name: args.title, job_description_text: args.description, number_of_openings: args.openings,
       min_annual_salary: args.salary_min, max_annual_salary: args.salary_max,
-      city: args.city, country: args.country, updated_by: actor.id,
+      city: args.city, state: args.state, country: args.country, updated_by: actor.id,
     };
     if (args.status != null) {
       const k = String(args.status).toLowerCase();
@@ -3345,7 +3357,46 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       fields.job_status = JOB_STATUS[k];
     }
     const changing = Object.entries(fields).filter(([k, v]) => k !== "updated_by" && v !== undefined && v !== null);
-    if (!changing.length) return toolText({ error: "Nothing to change — pass at least one field (status, title, description, openings, salary_min/max, city, country)." });
+    // Job order form answers: resolved against the live field definitions, checked, and compared with
+    // what the job holds now, so the preview shows current -> new for each question.
+    const jofChanges: Record<number, string> = {};
+    const jofPreview: any[] = [];
+    // A client with the pre-3.77.0 tool list cached does not know job_order_form is an object and sends
+    // it as a JSON string; accept both, and refuse anything else rather than silently dropping it.
+    let jof: any = args.job_order_form;
+    if (typeof jof === "string" && jof.trim()) {
+      try { jof = JSON.parse(jof); } catch { return toolText({ error: "bad_job_order_form", message: "job_order_form must be an object of { question: answer }." }); }
+    }
+    if (jof != null && (typeof jof !== "object" || Array.isArray(jof))) return toolText({ error: "bad_job_order_form", message: "job_order_form must be an object of { question: answer }." });
+    if (jof && Object.keys(jof).length) {
+      const defs = await jobFieldDefs();
+      const writable = [...defs.values()].filter((d: any) => !JOF_OWNED_ELSEWHERE.has(Number(d.field_id)) &&
+        (["text", "longtext"].includes(String(d.field_type)) || JOF_PICKLISTS.test(String(d.field_name ?? "").trim())));
+      const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      const live = await liveJobCustomFields(job.slug);
+      for (const [q, raw] of Object.entries(jof as Record<string, any>)) {
+        const key = String(q).trim();
+        let hits = /^\d+$/.test(key) ? writable.filter((d: any) => Number(d.field_id) === Number(key))
+          : writable.filter((d: any) => norm(String(d.field_name)) === norm(key));
+        if (!hits.length && !/^\d+$/.test(key)) hits = writable.filter((d: any) => norm(String(d.field_name)).includes(norm(key)));
+        if (hits.length !== 1) return toolText({ error: hits.length ? "ambiguous_question" : "unknown_question", question: key,
+          matches: hits.map((d: any) => d.field_name), options: hits.length ? undefined : writable.map((d: any) => d.field_name),
+          message: "Use the question's name as it appears in RecruitCRM. DPE scores and grade go through job_dpe." });
+        const def = hits[0], id = Number(def.field_id);
+        let value = String(raw ?? "").trim();
+        if (JOF_PICKLISTS.test(String(def.field_name).trim()) && value) {
+          const opts = String(def.default_value ?? "").split(",").map((o) => o.trim()).filter(Boolean);
+          const picked = value.split(",").map((v) => v.trim()).filter(Boolean).map((v) => opts.find((o) => o.toLowerCase() === v.toLowerCase()) ?? null);
+          if (picked.some((x) => x == null)) return toolText({ error: "not_an_option", question: def.field_name, given: value, options: opts });
+          value = (picked as string[]).join(",");
+        }
+        const current = live.fields.get(id) ?? null;
+        if (String(current ?? "") === value) continue;
+        jofChanges[id] = value;
+        jofPreview.push({ question: def.field_name, current, new: value || "(cleared)" });
+      }
+    }
+    if (!changing.length && !jofPreview.length) return toolText({ error: "Nothing to change — pass at least one field (status, title, description, openings, salary_min/max, city, state, country) or a job_order_form answer that differs from what the job already holds." });
 
     const jobClosing = args.status != null && JOB_CLOSING.includes(String(args.status).toLowerCase());
     let jobReason: string | null = null;
@@ -3361,7 +3412,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       return toolText({ mode: "preview", action: "update_job",
         job: { job_id: job.recruitcrm_id, title: job.title, current_status: job.status },
         changes: Object.fromEntries(changing.map(([k, v]) => [k === "job_status" ? "status" : k, k === "job_status" ? JOB_STATUS_NAME[v as number] : v])),
-        untouched: "every other field is left exactly as it is",
+        job_order_form: jofPreview.length ? jofPreview : undefined,
+        untouched: "every other field is left exactly as it is", rule: NO_BROWSER,
         ...(jobClosing ? (jobReason
           ? { closure_reason: jobReason, closure_reason_detail: jobDetail }
           : { closure_reason: null, reason_options: await closureReasonList("job"),
@@ -3369,9 +3421,19 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         instruction: "Show this to the recruiter. To apply, call again with confirm=true." });
     }
 
-    const r = await crmForm(`/jobs/${job.slug}`, fields);
-    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
-    await audit({ actor: String(actor.id), action: "update_job", entity: "job", entity_id: job.slug, before: { title: job.title, status: job.status }, after: fields, via: "claude" });
+    if (changing.length) {
+      const r = await crmForm(`/jobs/${job.slug}`, fields);
+      if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    }
+    // Job order form answers through the custom-field writer, which reads the job back and reports any
+    // answer that did not land and any other custom field that moved.
+    let jofResult: any = undefined;
+    if (jofPreview.length) {
+      const w = await writeJobCustomFields(job.slug, jofChanges, actor.id);
+      jofResult = { ok: w.ok, written: jofPreview.length - w.not_applied.length, not_applied: w.not_applied.length ? w.not_applied : undefined,
+        other_fields_changed: w.other_fields_changed.length ? w.other_fields_changed : undefined, detail: w.detail };
+    }
+    await audit({ actor: String(actor.id), action: "update_job", entity: "job", entity_id: job.slug, before: { title: job.title, status: job.status }, after: { ...fields, job_order_form: jofPreview.length ? jofPreview.map((x) => x.question) : undefined }, via: "claude" });
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=jobs`,
       { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
     let jobReasonResult: any = undefined;
@@ -3381,7 +3443,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         note: noteOk ? "Reason saved as a note on the job and logged for reporting."
                      : "Reason logged for reporting, but the note could not be written to RecruitCRM." };
     }
-    return toolText({ mode: "applied", job_id: job.recruitcrm_id, job_title: job.title, changed: Object.keys(Object.fromEntries(changing)), closure_reason: jobReasonResult, note: "Job updated in RecruitCRM and the mirror refreshed." });
+    return toolText({ mode: "applied", job_id: job.recruitcrm_id, job_title: job.title, changed: Object.keys(Object.fromEntries(changing)), job_order_form: jofResult, closure_reason: jobReasonResult,
+      note: jofResult && !jofResult.ok ? "Some job order form answers did not save: say which, and do not try another way such as a browser." : "Job updated in RecruitCRM and the mirror refreshed." });
   }
 
   if (name === "assign_candidate") {
@@ -3594,10 +3657,13 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     // closed - a note filed under the wrong type would miscount the internal interviews KPI.
     let noteType: { id: number; label: string } | null = null;
     if (args.note_type) {
-      if (args.note_type !== "internal_interview") return toolText({ error: "Unknown note_type. Only 'internal_interview' is supported." });
-      if (rt !== "candidate") return toolText({ error: "An internal interview note goes on a candidate, not a job." });
-      noteType = await noteTypeByLabel(NOTE_TYPE_LABELS.internal_interview);
-      if (!noteType) return toolText({ error: "note_type_unresolved", message: `Could not find the '${NOTE_TYPE_LABELS.internal_interview}' note type in RecruitCRM, so nothing was written.` });
+      const nt = String(args.note_type) as keyof typeof NOTE_TYPE_LABELS;
+      if (!(nt in NOTE_TYPE_LABELS)) return toolText({ error: "Unknown note_type. Use 'internal_interview' (on a candidate) or 'job_order_form' (on a job)." });
+      if (nt === "internal_interview" && rt !== "candidate") return toolText({ error: "An internal interview note goes on a candidate, not a job." });
+      // 3.77.0: a job order form logged as a note only counts toward the job order forms KPI under this type.
+      if (nt === "job_order_form" && rt !== "job") return toolText({ error: "A job order form note goes on a job, not a candidate." });
+      noteType = await noteTypeByLabel(NOTE_TYPE_LABELS[nt]);
+      if (!noteType) return toolText({ error: "note_type_unresolved", message: `Could not find the '${NOTE_TYPE_LABELS[nt]}' note type in RecruitCRM, so nothing was written.` });
     }
     if (!args.confirm) return toolText({ mode: "preview", action: "add_note", target_type: rt, target_slug: args.target_slug, note_type: noteType?.label ?? null, note_preview: String(args.note ?? "").slice(0, 300), acting_as: actor.id, instruction: "Show this to the recruiter. To apply, call again with confirm=true." });
     const body: any = { description: args.note, related_to: args.target_slug, related_to_type: rt, updated_by: actor.id };
@@ -3614,7 +3680,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
 
 async function handle(m: any, req: Request): Promise<any> {
   const { id, method, params } = m ?? {};
-  if (method === "initialize") return rpc(id, { protocolVersion: params?.protocolVersion || "2025-06-18", capabilities: { tools: {}, prompts: {}, resources: {}, extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [MCP_APP_MIME] } } }, serverInfo: SERVER });
+  if (method === "initialize") return rpc(id, { protocolVersion: params?.protocolVersion || "2025-06-18", capabilities: { tools: {}, prompts: {}, resources: {}, extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [MCP_APP_MIME] } } }, serverInfo: SERVER, instructions: SERVER_INSTRUCTIONS });
   if (method === "resources/list") return rpc(id, { resources: [
     { uri: DASH_UI, name: "octagon_dashboard", mimeType: MCP_APP_MIME, _meta: WIDGET_RESOURCE_META },
     { uri: SCORE_UI, name: "octagon_scorecard", mimeType: MCP_APP_MIME, _meta: WIDGET_RESOURCE_META },
