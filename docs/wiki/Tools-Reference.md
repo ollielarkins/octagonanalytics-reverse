@@ -28,7 +28,17 @@ This page is for knowing what's possible, and for debugging when an answer looks
 | `notes_kpi` | Leads, internal interviews and job-order-forms, by consultant and period | No |
 | `notes_read` | Notes already written against a candidate, job or client | Yes |
 | `pitch_history` | Where a candidate has been pitched, and to whom | Yes |
-| `candidate_profile` | Work history, education, every job they're in play on, and when they were last called (with or without a Devyce summary) | Yes |
+| `candidate_profile` | Work history, education, every job they're in play on, and when they were last called, with the Devyce summary when there is one | Yes |
+| `call_notes` | One candidate's or contact's recent call notes and Devyce AI summaries, read live and never stored. Behind `/intake` | Yes |
+| `job_spec` | A job's full spec read live, including the text of the Internal Job Description file (PDF, Word, .doc and Excel) | No |
+| `schedule` | Your interviews and client meetings from RecruitCRM: today, tomorrow to prep for, and held with no feedback since | Yes |
+| `cv_pack` | The data for a formatted coversheet CV, redacted by default. Refuses off-limit candidates | Yes |
+| `client_status` | A company's status and its contacts' stages (list); change the status (write) | Yes |
+| `new_jobs_report` | Jobs created in a window, and which have no Job Order Form Complete note | No |
+| `interview_requests_unbooked` | Interview requests never booked in | Yes |
+| `awaiting_feedback_report` | Interviewed, with nothing logged since | Yes |
+| `placements_with_fees` | Placements with their fee: each matched to at most one Won deal on the same job. Extra Won deals show as unmatched | Yes |
+| `call_hours_report` | Calls by hour of day, and evening calls after 17:00 | No |
 | `activity_report` | Meetings (client visits) or tasks for a window | Yes |
 | `files_list` | CVs and documents attached to a candidate, job or client | Yes |
 | `inbox` | Your own Outlook inbox: what's new, read one, connect or disconnect. See [Inbox](Inbox) | Yes |
@@ -36,6 +46,19 @@ This page is for knowing what's possible, and for debugging when an answer looks
 | `invoices_report` | Invoices raised — currently none exist in RecruitCRM | No |
 | `reference_list` | Any RecruitCRM dropdown list: currencies, stages, note/task/meeting types, teams | No |
 | `webhook_subscriptions` | **Admin only.** Which events RecruitCRM pushes to us; create and delete them | No |
+
+## Coaching
+
+The daily and weekly nudges. Drafting happens in your own Claude; the server never writes content.
+
+| Tool | Answers | PII |
+|---|---|---|
+| `action_queue` | Today's ranked calls, the same list as the 08:30 Slack DM: offers out 3+ days, interviews to prep for, feedback calls, unbooked requests, CV chases, cold jobs, BD, new jobs to kick off, client rejections to update the candidate on. Also this week's plan and, on Fridays, Push & Tell. Behind `/queue` | Yes |
+| `weekly_kpis` (plan) | This week's plan per person, worked back from their quarterly billing target and their own ratios, never below the flat minimums | No |
+| `client_visits` | Client visits this quarter against the minimum of 2, untyped meetings that can't count yet, and up to five clients to visit with reasons. Behind `/visitplan` | Yes |
+| `team_exceptions` | **Managers only.** Who is off plan (below half on both CVs and interviews last week), who has a backlog, whose ratios are falling, who is behind on visits. Behind `/exceptions` | No |
+| `call_tagging` (list) | Your untagged calls of 30 seconds or more, each with a suggested category and why. Behind `/tagcalls` | Yes |
+| `meeting_review` (list) | Your meetings with no type, each with a suggested type, so client visits count | Yes |
 
 Windows default to 2026 year to date, end exclusive. Dates are ISO on the way in, DD/MM/YYYY on the
 way out.
@@ -52,8 +75,37 @@ lands in `audit_log` with before and after.
 | `assign_candidate` | Adds a candidate to a job |
 | `manage_assignment` | Unassign, hide/show to the client, or record an application |
 | `add_note` | Adds a note to a candidate or job |
-| `create_job` / `update_job` | Raise a new vacancy, or change one (status, salary, title) |
+| `create_job` / `update_job` | Raise a new vacancy, or change one (status, salary, title, job order form answers) |
 | `create_deal` / `update_deal` | Raise a deal, or move it — **moving to Won is how billing is recorded** |
+| `create_candidate` / `update_candidate` | Add or edit a person. Refuses obvious duplicates |
+| `manage_client` | Create or edit a company or a contact |
+| `pitch_candidate` | Record a speculative pitch to a contact |
+| `log_activity` | Log a meeting (client visit) or a task |
+| `hotlist` | Create a talent pool, add or remove people |
+| `off_limit` (mark/release) | Bar a candidate from being approached, or lift it |
+| `send_email` | Email a candidate or contact, or save a draft. **Checks opt-out first** |
+| `draft_reply` | Save a reply to an email in your own Outlook inbox to Outlook Drafts. **Never sends.** See [Inbox](Inbox) |
+| `delete_record` | Permanently delete any of 12 record types. **No undo** |
+| `team_insights` | **Admin only.** Team overview: feature map, adoption, habits, onboarding progress, coaching suggestions |
+| `record_content_use` | Called silently by content commands; records that an advert, Boolean etc. was made, never the text |
+| `usage_report` | **Admin only.** How each person uses the platform: activity, features, changes made, never-started |
+| `manage_tokens` | **Admin only.** Who holds access; revoke a person's access (preview first) |
+| `platform_health` | **Admin only.** Sync per feed, scheduled jobs, inboxes, tool errors (7 days) |
+| `internal_jd_check` | **Admin only.** Whether each open job's Internal JD file can be read: type, size, text length. Counts only |
+| `call_tagging` (set) | Set the category on your Devyce calls, up to 25 at a time |
+| `meeting_review` (set) | Set the type on your meetings, so client visits count |
+| `client_status` (set) | Change a company's Company Status. Only when you ask for it explicitly |
+| `job_dpe` | Record a job's six DPE scores, Total Score, Job Grade and briefing call date. Never estimates a score |
+| `dpe_email` | Draft the DPE email from Octagon's fixed template, and set DPE Sent |
+| `push_tell` | List clients with A and B grade jobs, draft the weekly update, stamp the Push & Tell date. Drafts only |
+| `eow_email` | **Managers and admins.** The end-of-week team email with the against-plan table, drafted in Outlook |
+
+`update_job` also writes the job order form answers, and `add_note` can file a note as Job Order Form
+Complete or Candidate - Internal Interview, so both count toward the notes KPIs.
+
+**RecruitCRM is changed through these tools only, never through a browser.** Signing in through a
+browser panel logs you out of RecruitCRM. If no tool can make a change, Claude says so and tells you
+the manual step.
 
 ### Closing a job, losing a deal
 
@@ -69,20 +121,6 @@ both blank in every sample we hold), but whether its update endpoints accept one
 sending an unverified field risks a 400 that would break job closure itself.
 
 Edit the list in the `closure_reasons` table — no deploy needed.
-| `create_candidate` / `update_candidate` | Add or edit a person. Refuses obvious duplicates |
-| `manage_client` | Create or edit a company or a contact |
-| `pitch_candidate` | Record a speculative pitch to a contact |
-| `log_activity` | Log a meeting (client visit) or a task |
-| `hotlist` | Create a talent pool, add or remove people |
-| `off_limit` (mark/release) | Bar a candidate from being approached, or lift it |
-| `send_email` | Email a candidate or contact, or save a draft. **Checks opt-out first** |
-| `draft_reply` | Save a reply to an email in your own Outlook inbox to Outlook Drafts. **Never sends.** See [Inbox](Inbox) |
-| `delete_record` | Permanently delete any of 12 record types. **No undo** |
-| `team_insights` | **Admin only.** Team overview: feature map, adoption, habits, onboarding progress, coaching suggestions |
-| `record_content_use` | Called silently by content commands; records that an advert, Boolean etc. was made, never the text |
-| `usage_report` | **Admin only.** How each person uses the platform: activity, features, changes made, never-started |
-| `manage_tokens` | **Admin only.** Who holds access; revoke a person's access (preview first) |
-| `platform_health` | **Admin only.** Sync per feed, scheduled jobs, inboxes, tool errors (7 days) |
 
 Three carry extra weight:
 
@@ -101,9 +139,10 @@ refuses to apply if someone else moved the candidate in the meantime. Every appl
 Writes go to **RecruitCRM**, then the mirror is refreshed immediately so your dashboard is correct
 straight away rather than waiting for the next sync.
 
-## Slash commands
+## Prompts
 
-Type `/` to see them. Grouped by what they're for:
+The connector's 26 built-in prompts. In claude.ai the plugins' commands (see [Commands](Commands))
+are the usual way in; these are what sit underneath some of them. Grouped by what they're for:
 
 **Your numbers** — `/dashboard`, `/kpi`, `/weekly_kpis`, `/billing`, `/my_day`, `/day_plan`,
 `/weekly_team_review`, `/month_in_review`, `/my_cold_roles`, `/client_health`
@@ -131,6 +170,10 @@ their row; `get_dashboard` gives them the desk view with no team breakdown.
 
 Admins see the whole team. Identity comes from the token server-side.
 
+`action_queue`, `schedule`, `client_visits`, `call_tagging` and `meeting_review` work on your own desk;
+managers can pass a consultant. `team_exceptions` and `eow_email` are for managers only, and their
+output is individual performance data: never posted to a team channel.
+
 Everything else — `funnel_report`, `client_report`, `rejection_report`, `fee_analysis`,
 `consultant_leaderboard` — is unscoped for everyone, matching the firm's documented "all recruiters
 see all data" position.
@@ -138,7 +181,7 @@ see all data" position.
 ---
 
 > [!TIP]
-> Most of these are reachable as a slash command — see [Commands](Commands) for the 57 of them
+> Most of these are reachable as a slash command — see [Commands](Commands) for the 75 of them
 > grouped by task. This page is the layer underneath.
 
 **See also:** [Metrics and Definitions](Metrics-and-Definitions) for what each tool's numbers mean · [Data Caveats](Data-Caveats) for where they are soft · [Onboarding](Onboarding) for how to ask

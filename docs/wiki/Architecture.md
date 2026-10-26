@@ -15,12 +15,16 @@ immediately so the mirror doesn't lag behind a change you just made.
 
 | Component | What it is | Auth |
 |---|---|---|
-| `octagon-mcp` | Remote MCP server. 50 tools plus 26 prompts; returns data, not presentation | Open — per-user Octagon tokens + OAuth 2.1 bridge |
+| `octagon-mcp` | Remote MCP server. 72 tools plus 26 prompts; returns data, not presentation | Open — per-user Octagon tokens + OAuth 2.1 bridge |
 | `recruitcrm-sync` | The mirror. Modes: backfill, incremental, reconcile, history_recent, notes_recent, offlimit | Locked — Supabase JWT |
 | `recruitcrm-webhook` | Near-real-time change trigger from RecruitCRM | Open — external caller |
 | `feedback` | Issue/feedback box on the connect page | Open — validated, rate-limited |
 | `dashboard` / `dashboard-data` | Static dashboard page and its JSON | **Open — genuinely unauthenticated. See the warning below** |
 | `slack-command` | Slack entry point | Open — external caller |
+| `daily-queue` | The 08:30 action queue DMs and the Monday manager exceptions DM, via the Team Briefs bot token | Locked — `pg_cron` presents `cron_bearer` |
+| `slack-actions` | Slack interactivity: the queue's Done buttons. Opens a preview, writes the note to RecruitCRM as the consultant on Confirm | Open — verifies Slack's signature |
+| `digest-email` | Renders the scheduled digests | Locked — `pg_cron` |
+| `inbox-sync` | Polls connected Outlook inboxes via Microsoft Graph, metadata only | Locked — `pg_cron` |
 | `recruitcrm-probe` / `recruitcrm-discover` | Read-only API shape probes. Temporary | Locked |
 
 `verify_jwt` for every function is declared in `supabase/config.toml` so it travels with the repo
@@ -35,13 +39,15 @@ Page size 100, 100ms between pages.
 | Incremental sync (all entities) | Every 15 minutes |
 | Candidate stage history (recent) | Every minute |
 | Notes (re-walk newest pages) | Every 15 minutes |
-| Candidates deletion pass — starts | Hourly at :40 |
+| Candidates deletion pass — starts | 05:40 and 18:40 UTC |
 | Candidates deletion pass — drains | Every 3 minutes |
 | Reconcile — clients | Hourly at :05 |
 | Reconcile — jobs | Hourly at :12 |
 | Reconcile — deals | Hourly at :18 |
 | Reconcile — consultants | 03:00 daily |
-| Off-limit refresh | 03:25 daily |
+| Off-limit refresh | Hourly at :25 |
+| Assignment sweep | Hourly at :40 |
+| Meetings, this quarter and last | 06:10 daily |
 | Sync health watchdog | Every 5 minutes |
 | Cron manifest watchdog | Every 10 minutes |
 
@@ -159,7 +165,7 @@ dashboards are still drawn by that plugin from `structuredContent`.
 supabase/
   config.toml          verify_jwt per function
   functions/           edge functions
-  migrations/          0000–0052, sequential, replayable
+  migrations/          0000–0122, sequential, replayable
 docs/
   DECISIONS.md         design decisions with status and rationale
   wiki/                these pages
@@ -171,6 +177,8 @@ web/                   OAuth login handoff page
 
 - **No test suite and no CI.** Every change is verified by hand.
 - **Two throwaway probe functions still deployed** (`recruitcrm-probe`, `recruitcrm-discover`).
+- **Two cron jobs are not in `cron_manifest`**: `weekly-usage-slack` and `recruitcrm-assignment-sweep`.
+  The watchdog won't notice if either disappears.
 - **Unbounded selects** remain on `stage_lookup` and `consultants`. Both are far under the 1,000-row
   cap so they're safe today, but they should use the `allRows` helper — an unbounded select on
   `clients` is what caused the 40% orphaned-jobs bug.

@@ -11,15 +11,18 @@ always-current mirror of the firm's recruitment data — exposed as **dashboards
 > [!WARNING]
 > **`dashboard-data` is unauthenticated and this repository is public.** It returns firm revenue,
 > the full funnel and every consultant by name with their individual figures, to anyone with the
-> URL. Open as of 15/09/2026 — see [Data exposure](#data-exposure).
+> URL. Still open as of 26/10/2026 — see [Data exposure](#data-exposure).
 
 | | |
 |---|---|
-| Connector | `octagon-mcp` **3.44.0** — 50 tools, 26 prompts |
-| Commands | 57 slash commands, in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) |
-| Migrations | 0000–0081 |
-| Writes | Live — 44 in `audit_log`, first on 12/08/2026 |
-| Tool calls logged | 495 |
+| Connector | `octagon-mcp` **3.81.1** — 72 tools, 26 prompts |
+| Commands | 75 slash commands across four plugins, in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) |
+| Migrations | 0000–0122 |
+| Writes | Live — 412 in `audit_log`, first on 12/08/2026; 361 in the last 30 days |
+| Tool calls logged | 2,888 — 2,345 in the last 30 days, from 7 people |
+| Slack | Morning, Day End and Week Ahead briefs; the 08:30 action queue DM; the Monday manager exceptions DM |
+
+Figures as of 26/10/2026.
 
 **Documentation lives in the [wiki](https://github.com/ollielarkins/octagonanalytics-reverse/wiki).**
 Start there. This README covers the repository and how to operate it.
@@ -57,15 +60,18 @@ Start there. This README covers the repository and how to operate it.
 
 ## Live scale
 
+As of 26/10/2026.
+
 | Entity | Rows |
 |---|---|
-| candidates | 52,158 |
-| candidate_stage_events | 44,440 |
-| notes | 100,271 |
-| call_activity | 10,331 |
-| jobs | 6,025 (142 open) |
-| clients | 4,703 |
-| deals | 1,642 |
+| notes | 101,448 |
+| candidates | 53,007 |
+| candidate_stage_events | 46,366 |
+| call_activity | 16,030 |
+| jobs | 6,073 (137 open) |
+| clients | 4,817 |
+| deals | 1,673 |
+| meetings | 220 (this quarter and last; 0118) |
 | consultants | 22 |
 
 **2026 is the reliable reporting window.** Hiring-stage logging before 2026 is sparse, so firm
@@ -78,12 +84,15 @@ limitation.
 
 ```
 supabase/
-  migrations/           0000–0081 — schema, semantic layer, functions, cron
+  migrations/           0000–0122 — schema, semantic layer, functions, cron
   functions/
-    recruitcrm-sync/      the mirror: backfill | incremental | reconcile | history | notes | offlimit
+    recruitcrm-sync/      the mirror: backfill | incremental | reconcile | history | notes | offlimit | meetings
     recruitcrm-webhook/   near-live change trigger; tombstones on *.deleted events
-    octagon-mcp/          the MCP connector: 50 tools, 26 prompts, OAuth bridge
+    octagon-mcp/          the MCP connector: 72 tools, 26 prompts, OAuth bridge
     dashboard-data/       JSON API behind web/dashboard.html
+    daily-queue/          the 08:30 action queue DMs, and the Monday manager exceptions DM
+    slack-actions/        Slack interactivity: the queue's Done buttons, written back to RecruitCRM
+    inbox-sync/           polls connected Outlook inboxes (Microsoft Graph), metadata only
     slack-command/        Slack /dashboard entry point
     digest-email/         scheduled digests
     feedback/             issue capture from the connect page
@@ -94,7 +103,7 @@ web/dashboard.html      static page rendering dashboard-data
 docs/
   wiki/                 SOURCE OF TRUTH for the published wiki — edit here, then sync
   DECISIONS.md          design-decision log
-plugins/                pointer only; the 57 commands live in octagon-plugins
+plugins/                pointer only; the 75 commands live in octagon-plugins
 rollout/, scripts/      rollout material and repo checks
 ```
 
@@ -120,6 +129,9 @@ Postgres 17 · project name "Reporting for CRM"
 | `octagon-mcp` | false | Remote MCP server. Authenticates its own callers via `mcp_tokens` |
 | `recruitcrm-webhook` | false | RecruitCRM POSTs on change. Verifies `?key=`; routes by record shape; tombstones on `*.deleted` |
 | `dashboard-data` | false | **Unauthenticated JSON API.** See the warning above |
+| `daily-queue` | true | 08:30 action queue DMs, and the Monday exceptions DM to managers. Driven by `pg_cron` with `cron_bearer` |
+| `slack-actions` | false | Slack interactivity for the queue's Done buttons. Verifies the Slack signature; previews, then writes the note on Confirm |
+| `inbox-sync` | true | Polls connected Outlook inboxes every 5 minutes. Metadata only |
 | `slack-command` | false | Slack `/dashboard`; verifies the signing secret |
 | `digest-email`, `feedback` | mixed | Scheduled digests; connect-page issue capture |
 | `dashboard`, `recruitcrm-probe`, `recruitcrm-discover`, `storage-upload` | — | Defunct or throwaway. Safe to delete |
@@ -134,11 +146,22 @@ can't be flipped by a stray CLI flag.
 | every 15 min | incremental sync, all entities |
 | every 1 min | candidate stage history — the funnel's live feed |
 | every 15 min | notes re-walk |
-| hourly :40, draining every 3 min | candidates deletion pass (~520 pages, ~13 chunks) |
+| 05:40 and 18:40 UTC, draining every 3 min | candidates deletion pass (~520 pages, ~13 chunks) |
 | hourly :05 / :12 / :18 | reconcile clients / jobs / deals |
-| 03:00, 03:25 daily | reconcile consultants, off-limit refresh |
-| every 5 min | sync health watchdog |
+| 03:00 daily | reconcile consultants |
+| hourly :25 | off-limit refresh |
+| hourly :40 | assignment sweep |
+| 06:10 daily | meetings, this quarter and last (client visits) |
+| every 5 min | sync health watchdog; Outlook inbox poll |
 | every 10 min | **cron manifest watchdog** — are the jobs themselves still there? |
+| 07:30 weekdays | Slack morning brief |
+| 08:30 weekdays | the daily action queue DMs; on Mondays also the manager exceptions DM |
+| 17:30 weekdays | Slack Day End brief |
+| 08:00 Mondays | Slack Week Ahead brief |
+| 16:00 Fridays | weekly usage table |
+
+Times are UK. The Slack jobs are scheduled at two UTC hours and send only at the right UK time, so
+they survive the clock change. Plus a 07:30 daily sync-health digest to the admin bot.
 
 Plus **15 webhook subscriptions** for near-live change, including the four `*.deleted` events.
 
@@ -146,7 +169,8 @@ Plus **15 webhook subscriptions** for near-live change, including the four `*.de
 > The cron manifest watchdog exists because on 10/09/2026 the cron entries were deleted from the
 > database and nothing noticed for five days — the watchdog that would have reported it had been
 > deleted too, and staleness cannot distinguish a job that failed from one that no longer exists.
-> `cron_manifest` declares the expected 18; add new permanent jobs to it in the same migration.
+> `cron_manifest` declares 22 jobs; add new permanent jobs to it in the same migration. As of
+> 26/10/2026, `weekly-usage-slack` and `recruitcrm-assignment-sweep` run but are not declared in it.
 
 ### Authentication and write safety
 
@@ -173,6 +197,10 @@ Set in Supabase, never in the repo. `.gitignore` excludes `.env`, `*.key` and `s
 | `RECRUIT_CRM_API_TOKEN` | `recruitcrm-sync`, `octagon-mcp` — account-level RecruitCRM API token |
 | `WEBHOOK_SECRET` | `recruitcrm-webhook` — the `?key=` on every subscription callback |
 | `SLACK_SIGNING_SECRET` | `slack-command` |
+| `SLACK_BOT_TOKEN` | `daily-queue`, `slack-actions` — the Team Briefs app's bot token (`xoxb-`) |
+| `SLACK_BRIEFS_SIGNING_SECRET` | `slack-actions` — the Team Briefs app's signing secret |
+| `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` | `inbox-sync`, `octagon-mcp` — Microsoft Graph, for the Octagon inbox |
+| `RESEND_API_KEY`, `DIGEST_FROM`, `FEEDBACK_FROM`, `FEEDBACK_TO` | `digest-email`, `feedback` |
 
 Connector access is by per-user token in `mcp_tokens`, not a server secret. The old
 `OCTAGON_WRITE_KEY` shared gate was replaced in v3 and is unused.
@@ -241,9 +269,10 @@ Why the numbers are what they are. Fuller treatment in
    Chased to row level across five periods: 34 of 50 stage-months exact, total variance 30 rows in
    7,935. The residual is an event the API returns and their report omits, with no distinguishing
    property. Decision: match the API, which is reproducible, and never fudge the last 0.4%.
-2. **Call categorisation has collapsed from 26% to 9% since May**, while call volume nearly doubled.
-   BD and client call KPIs count only categorised calls, so they now understate reality roughly ten
-   to one. Behavioural, not technical — but the metric is barely worth reporting until it recovers.
+2. **Call categorisation fell from 26% in May to 9% in September**, while call volume nearly
+   doubled. BD and client call KPIs count only categorised calls, so they understate reality. October
+   is back up to 12%; `/tagcalls` (26/10/2026) suggests a category for every untagged call, and the
+   Day End brief shows each person's untagged count.
 3. **The spreadsheet is a validation reference, not a source of truth** ([D8](docs/DECISIONS.md)).
    Ratios match; absolute pre-2026 counts do not, because that activity was never logged in
    RecruitCRM.
@@ -269,9 +298,11 @@ Why the numbers are what they are. Fuller treatment in
 | M2 Ingestion / sync | ✅ Done — plus webhooks, delete events and a cron manifest watchdog |
 | M3 Semantic layer | ✅ Done |
 | M4 Dashboards | ✅ Done |
-| M5 Claude query layer | ✅ Done — 50 tools, 26 prompts, 57 commands, per-user auth |
-| M6 Claude action layer | ✅ Done — live, 44 audited writes since 12/08/2026 |
+| M5 Claude query layer | ✅ Done — 72 tools, 26 prompts, 75 commands, per-user auth |
+| M6 Claude action layer | ✅ Done — live, 412 audited writes since 12/08/2026 |
+| Coaching layer (Bhav's priorities 1–8, Oct 2026) | ✅ Done — diary, call tagging, Won deal per placement, daily action queue, client visits, weekly plan from billing, event-triggered drafts, manager exceptions |
 | M7 Hardening & rollout | ⚠️ Partial — auth, monitoring and a full command test done; `dashboard-data` exposure open, no CI, throwaway functions still deployed |
 
-**The honest headline is still adoption.** The platform is broad, tested and in use by a handful of
-people. Four tokens are in circulation. That, not capability, is what limits its value.
+**The honest headline is still adoption.** 11 people hold an active token and 7 used it in the last
+30 days. The action queue DM reaches four of them, as a pilot. That, not capability, is what limits
+its value.

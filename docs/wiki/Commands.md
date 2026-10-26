@@ -1,6 +1,6 @@
 # Commands
 
-57 slash commands. Type `/` in Cowork or a chat to see them, or just ask in plain
+75 slash commands, in four plugins. Type `/` in Cowork or a chat to see them, or just ask in plain
 English - every command is a shortcut for something you can phrase yourself.
 
 > [!NOTE]
@@ -13,7 +13,8 @@ Start here. These are the ones worth using daily.
 
 | Command | What it does |
 |---|---|
-| `/myday` | Your standup — what needs you today: aging offers, stalled candidates, cold roles |
+| `/queue` | Your ranked calls for today, the same list as the 08:30 Slack DM, with the admin for each one drafted for you to check |
+| `/myday` | Your standup — what needs you today: interviews to prep for, feedback due, aging offers, stalled candidates, cold roles |
 | `/dayplan` | Your day, laid out on Octagon's standard structure with your real priorities slotted in |
 | `/week` | Current week stats — actuals against weekly targets for every KPI, with the gap named |
 | `/eod` | End-of-day stats — today's activity so far against where the week needs to be |
@@ -37,6 +38,7 @@ How a desk, a person or the firm is actually doing.
 | `/bd` | BD progress — yesterday's prospect activity plus the current account-status pipeline |
 | `/noteskpi` | Notes KPIs — leads, internal interviews and job order forms logged, by consultant |
 | `/visits` | Client visits and meetings logged in RecruitCRM — the only place visits are recorded |
+| `/visitplan` | Plan your client visits for the quarter: where you stand against the minimum of 2, which clients and why, then the meeting request and a visit brief drafted |
 | `/evening` | Evening calls — who was on the phone after 17:00, by hour, independent of call tagging |
 
 ## Roles and pipeline
@@ -59,6 +61,7 @@ Finding people and seeing what is recorded about them.
 
 | Command | What it does |
 |---|---|
+| `/intake` | Candidate intake from their last call: the Devyce AI summary into Octagon's intake template, with the gaps to ask next time |
 | `/find` | Find a candidate — their slug, and every job they are on with the current stage |
 | `/candidate` | The full picture on one candidate — work history, education, every job and stage |
 | `/match` | Match candidates to a job description by skills. Off-limit candidates excluded automatically |
@@ -77,6 +80,7 @@ Drafting. It never invents a salary or a fact - you get a [placeholder] instead.
 | `/inmail` | Draft a personalised LinkedIn Recruiter InMail from a job and a candidate. You review and send it; it never sends |
 | `/specpitch` | Write a speculative pitch putting a candidate to a client — anonymised by default |
 | `/interviewprep` | Prep a candidate for an interview — the role, the client, and what to expect |
+| `/formattedcv` | Octagon's coversheet plus a redacted, reformatted CV for sending a candidate to a client |
 
 ## Changing records
 
@@ -102,7 +106,28 @@ Every one is two-step: preview, then your explicit confirm.
 | `/offlimit` **write** | Check, list, mark or release off-limit candidates — who must not be approached |
 | `/email` **write** | Draft or send an email to a candidate or contact. Outward-facing — draft is the default |
 | `/delete` **write** | Permanently delete a record in RecruitCRM. Irreversible — heavily guarded, two confirmations |
+| `/tagcalls` **write** | Tag your untagged Devyce calls, each with a suggested category to accept or change, so BD and client calls count |
+| `/dpe` **write** | Record a job's DPE scores, Total Score and Job Grade, then draft the DPE email from Octagon's fixed template |
+| `/pushtell` **write** | Push & Tell: draft the weekly update for each client with A and B grade jobs, and stamp the date on each job. Drafts only |
 | `/digest` **write** | Post one of the Octagon digests to Slack on demand — the morning brief, the day end or the weekly |
+
+## Managers and admins
+
+These need a manager or admin token. The team figures are individual performance data: for
+managers, never posted to a team channel.
+
+| Command | What it does |
+|---|---|
+| `/exceptions` | The team view, exceptions only: off plan, backlog, falling ratios, behind on client visits |
+| `/eow` | The end-of-week team email in Dale's format, with actuals against plan, drafted in Outlook to edit and send |
+| `/team` | One screen on how the team uses the platform: who's active, adoption, features, habits, onboarding |
+| `/usage` | How each person uses the platform: activity, features, changes made, who never started |
+| `/adoption` | Adoption trend: weekly active users, new starters, drop-offs |
+| `/habits` | When and how often each person uses it, and who starts the day with "your day" |
+| `/map` | Feature map: which parts each person uses, and what nobody uses |
+| `/coach` | Each person's KPI gaps next to the features that would help, and changes started but never confirmed |
+| `/health` | Is the platform working: sync per feed, scheduled jobs, inboxes, tool errors |
+| `/tokens` | Who holds access, and switching a person's access off |
 
 ## Dashboard and reference
 
@@ -121,9 +146,13 @@ expected, not a fault. Pass a name (`/myday Keelan Riley`) to look at someone el
 **Windows default to 2026 year to date**, end date exclusive. Most reporting commands take one -
 `/funnel Q2`, `/billing last month`, `/leaderboard July`.
 
-**BD and client call counts undercount badly.** They count only *categorised* Devyce calls, and
-categorisation is currently around 9%. Read [Data Caveats](Data-Caveats#call-categorisation) before
-drawing anything from `/week`, `/eod` or `/bd`.
+**BD and client call counts undercount.** They count only *categorised* Devyce calls, and
+categorisation was 12% in October. `/tagcalls` fixes your own in a minute. Read
+[Data Caveats](Data-Caveats#call-categorisation) before drawing anything from `/week`, `/eod` or `/bd`.
+
+**The 08:30 Slack DM and `/queue` are the same list.** The DM ranks the calls; each has a Done button,
+which previews the note it will log in RecruitCRM and writes it only when you confirm. The drafts
+(prep notes, chase and booking emails, Booleans, InMails) come from "prep my queue" in your own Claude.
 
 **Closing a role or losing a deal asks why.** `/editjob` and `/won` offer a reason list when
 the status goes to closed, cancelled, on hold, Lost or Declined. Optional - but it is the only way
@@ -136,8 +165,17 @@ people read; an email cannot be recalled, and will never go to someone who has o
 
 ## Where they live
 
-The commands are in the [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) repo under
-`plugins/octagon-dashboard/commands/` - **not** in this one. `plugins/octagon-analytics/` here
+The commands are in the [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) repo as
+skills, in four plugins - **not** in this one:
+
+| Plugin | Commands |
+|---|---|
+| `octagon-reporting` | 40: numbers, pipeline, candidates, content, your day |
+| `octagon-actions` | 23: everything that changes RecruitCRM, plus `/digest` and `/formattedcv` |
+| `octagon-admin` | 10: managers and admins |
+| `octagon-dashboard` | 2: `/dashboard`, `/kpi` |
+
+Each is `plugins/<plugin>/skills/<command>/SKILL.md`. `plugins/octagon-analytics/` here
 holds a pointer only. Two copies of a command drift, and the one that gets edited is never the one
 that ships.
 

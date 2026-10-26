@@ -1,10 +1,10 @@
 # The commands moved
 
-The 56 slash commands that used to live in `plugins/octagon-analytics/commands/` are now in the
-**octagon-plugins** repo, inside the `octagon-dashboard` plugin:
+The slash commands that used to live in `plugins/octagon-analytics/commands/` are now in the
+**octagon-plugins** repo, as skills in four plugins (75 commands as of 26/10/2026):
 
     github.com/ollielarkins/octagon-plugins
-    plugins/octagon-dashboard/commands/
+    plugins/<octagon-dashboard | octagon-reporting | octagon-actions | octagon-admin>/skills/<command>/SKILL.md
 
 **Edit them there, not here.** This directory no longer holds a copy, deliberately — two copies of
 the same command drift, and the one that gets edited is never the one that ships.

@@ -1,5 +1,10 @@
 # Octagon Analytics — getting set up with Claude
 
+> [!NOTE]
+> The maintained guide is the wiki's
+> [Onboarding](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Onboarding) page. This
+> file is the short version for admins rolling it out.
+
 This connects you to **live RecruitCRM analytics** inside Claude. You ask questions in plain English
 (or use slash commands) and get answers that match the dashboards exactly, because both read the
 same vetted metrics layer.
@@ -46,13 +51,14 @@ Keep the token private — treat it like a password.
    ```
    (To make it stick, add it to your shell profile / environment variables.)
 
-2. Install the plugin from the team marketplace:
+2. Install the plugins from the octagon-plugins marketplace:
    ```
-   /plugin marketplace add ollielarkins/octagonanalytics-reverse
-   /plugin install octagon-analytics@octagon
+   /plugin marketplace add ollielarkins/octagon-plugins
+   /plugin install octagon-dashboard@octagon-plugins
+   /plugin install octagon-reporting@octagon-plugins
    ```
-
-That bundles the connector, the `/kpi` and `/dashboard` commands, and a session-start dashboard.
+   Add `octagon-actions@octagon-plugins` only if you should write to RecruitCRM, and
+   `octagon-admin@octagon-plugins` only if you're a manager or admin.
 
 ---
 
@@ -60,11 +66,13 @@ That bundles the connector, the `/kpi` and `/dashboard` commands, and a session-
 
 - `/dashboard` — the full firm view
 - `/kpi` — headline numbers only
-- `/my_day` — what needs *your* attention today
+- `/myday` — what needs *your* attention today
+- `/queue` — today's ranked calls, with the admin drafted for you
 - Or just ask: *"how did Keelan do in Q2"*, *"which of my roles have gone cold"*,
   *"our busiest accounts this year"*, *"who's making the most calls this week"*.
 
-Performance is attributed to the **job owner**; date windows default to **2026 year-to-date**.
+Funnel activity is credited to **whoever moved the stage**, calls to the caller and billing to the
+deal owner; date windows default to **2026 year-to-date**.
 
 ---
 
@@ -72,9 +80,9 @@ Performance is attributed to the **job owner**; date windows default to **2026 y
 
 - Candidate names and notes are **PII** — don't paste them into other tools or share them outside
   the firm, and don't ask for bulk exports of them.
-- Reporting is **read-only**. The write actions (update hiring stage, assign candidate, add note)
-  need a write-enabled token and **always show you a preview first** — check it, then confirm. Never
-  approve a change you haven't read.
+- Reporting is **read-only**. Every write action (stages, jobs, deals, candidates, notes, calls,
+  emails, deletes) needs a write-enabled token and **always shows you a preview first** — check it,
+  then confirm. Never approve a change you haven't read.
 - If Claude says a question **can't** be answered from the data, trust that over a guessed number.
 
 ---
@@ -87,8 +95,8 @@ Do these once, in the **claude.ai Team admin console**:
    it **available to the whole organisation**. Teammates then only enable it + paste their own token.
 2. **Org instructions.** Paste the block from [`rollout/org-instructions.md`](rollout/org-instructions.md)
    into the org-level custom instructions so every chat knows the commands and the guardrails.
-3. **Plugin marketplace (Claude Code users).** The marketplace lives in this repo
-   (`.claude-plugin/marketplace.json`). Share the two `/plugin` commands from Path B, or add the
-   marketplace at project scope so it's shared automatically.
+3. **Plugin marketplace.** The marketplace is the
+   [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) repo; its `ADMIN-SETUP.md`
+   covers registering it org-wide and which plugin goes to whom.
 4. **Mint tokens.** Create one token per recruiter (read-only), and set `can_write` only for those
    who should be able to make changes.
