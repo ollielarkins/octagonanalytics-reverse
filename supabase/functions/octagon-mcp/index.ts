@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.75.1" };
+const SERVER = { name: "octagon-analytics", version: "3.75.3" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -742,6 +742,7 @@ const TOOLS = [
   { name: "team_insights", description: "ADMIN ONLY (admins and usage viewers). How the TEAM is using the platform. section: all (default, for an overview) | map (feature map: each person x feature area, used / tried / never; features nobody uses) | adoption (weekly active users, new starters, drop-offs, never started) | habits (when and how often each person uses it; daily / weekly / occasional; morning 'your day' starts) | coach (this week's KPI gaps next to unused features, changes started but not confirmed, up to 3 suggestions each) | onboarding (each person against the Day 1-5 onboarding plan, with their next step). Admin use excluded. Shows kinds of action, never record content. Default window: last 28 days.", inputSchema: { type: "object", properties: { section: { type: "string", description: "all | map | adoption | habits | coach | onboarding" }, from: { type: "string", description: "YYYY-MM-DD, default 28 days ago" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "usage_report", description: "ADMIN ONLY (admins and usage viewers). How each person is using the Octagon platform: tool calls, chats opened, active days, errors, writes made, top features, last used, and a status (active / connected, never used a tool / never connected / left with a token still active). Weekly trend included. Pass consultant for one person's detail: tools used, a day-by-day timeline and their writes by action type. Shows what kind of action and when, never record content or arguments. Default window: last 28 days.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "a name, or 'admin'; omit for everyone" }, from: { type: "string", description: "YYYY-MM-DD, default 28 days ago" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "manage_tokens", description: "ADMIN ONLY. Octagon connector access tokens. action: list (default) — who holds access, write/admin rights, last used, and leavers who still hold an active token; revoke — switch one person's access off (preview, then confirm=true; reversible only by minting a new token). Never shows token values.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | revoke" }, consultant: { type: "string", description: "for revoke: the person's name" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "internal_jd_check", description: "ADMIN ONLY. Checks whether the Internal Job Description file on each open job can be read: file type, size, pages and how much text comes out. Returns counts only, never the text. In batches: offset and limit (default 0 and 25); the result says the next offset. Read-only.", inputSchema: { type: "object", properties: { offset: { type: "integer" }, limit: { type: "integer", description: "default 25, max 40" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "platform_health", description: "ADMIN ONLY (admins and usage viewers). Is the platform working: sync health per feed, scheduled-job drift, connected inboxes and their last check, and tool errors in the last 7 days by tool. Read-only.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, hiring_stages (every candidate stage id+label across all pipelines, for update_hiring_stage), job_custom_fields (job custom field definitions: ids, types, dropdown options), enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
   { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
@@ -3355,6 +3356,35 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       return toolText({ mode: "applied", person: names[0], revoked: hits.length });
     }
     return toolText({ error: "action must be list or revoke." });
+  }
+
+  if (name === "internal_jd_check") {
+    // 3.75.2, 26/10/2026: sizes up how many Internal JDs job_spec cannot read (old .doc, scans, large
+    // files) before deciding whether to build readers for them. Text is measured and dropped here.
+    if (!actor.is_admin) return toolText({ error: "Admin only." });
+    const offset = Math.max(Number(args?.offset) || 0, 0), limit = Math.min(Math.max(Number(args?.limit) || 25, 1), 40);
+    // custom_fields is keyed by field id as a string; PostgREST reads ->3 as an array index, so filter here.
+    const { data: open, error } = await db.from("jobs").select("recruitcrm_id,custom_fields")
+      .is("deleted_at", null).eq("status", "Open").order("recruitcrm_id");
+    if (error) return toolText({ error: error.message });
+    const withJd = (open ?? []).filter((j: any) => String(j.custom_fields?.["3"]?.value ?? "").trim());
+    const count = withJd.length;
+    const jobs = withJd.slice(offset, offset + limit);
+    const rows: any[] = [];
+    for (const j of jobs ?? []) {
+      const f = { field_name: "Internal Job Description", value: j.custom_fields?.["3"]?.value };
+      const r: any = await jobCustomFile(f);
+      const ext = (String(r?.file_name ?? "").match(/\.([a-z0-9]{2,5})$/i)?.[1] ?? "").toLowerCase() || null;
+      rows.push({ job_id: j.recruitcrm_id, ext, type: r?.type ?? null, size_kb: r?.size_kb ?? null, pages: r?.pages ?? null,
+        text_chars: typeof r?.text === "string" ? r.text.length : 0,
+        outcome: r?.error ?? (r?.text ? "ok" : "no_text") });
+    }
+    const tally = (k: string) => rows.reduce((m: any, x: any) => { const v = String(x[k] ?? "unknown"); m[v] = (m[v] ?? 0) + 1; return m; }, {});
+    const next = offset + rows.length;
+    return toolText({ total_open_with_jd: count ?? null, batch: { offset, returned: rows.length }, next_offset: next < (count ?? 0) ? next : null,
+      by_outcome: tally("outcome"), by_ext: tally("ext"), largest_kb: Math.max(0, ...rows.map((x) => x.size_kb ?? 0)),
+      not_ok: rows.filter((x) => x.outcome !== "ok"), short_text: rows.filter((x) => x.outcome === "ok" && x.text_chars < 300),
+      note: "Counts only. The Internal JD text is measured and dropped, never returned." });
   }
 
   if (name === "platform_health") {
