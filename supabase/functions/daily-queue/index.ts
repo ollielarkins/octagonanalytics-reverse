@@ -35,7 +35,10 @@ const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g,
 
 function blocksFor(q: any, shadowFor: string | null) {
   const first = String(q.consultant ?? "").split(" ")[0];
-  const items: any[] = q.items ?? [];
+  // 0116: a closing "clean up these stages" line is not a call; keep it out of the numbering and counts.
+  const all: any[] = q.items ?? [];
+  const items = all.filter((x) => x.kind !== "cleanup");
+  const cleanup = all.find((x) => x.kind === "cleanup");
   const head = shadowFor
     ? `Preview for ${shadowFor}: ${items.length} of ${q.total} calls`
     : `Your calls today, ${first}: ${items.length} of ${q.total}`;
@@ -47,6 +50,7 @@ function blocksFor(q: any, shadowFor: string | null) {
     { type: "header", text: { type: "plain_text", text: head.slice(0, 150) } },
     { type: "section", text: { type: "mrkdwn", text: lines.join("\n\n").slice(0, 2900) || "_Nothing urgent today._" } },
   ];
+  if (cleanup) blocks.push({ type: "section", text: { type: "mrkdwn", text: `:broom: *${esc(cleanup.action)}*${cleanup.who ? `\n${esc(cleanup.who)}` : ""}`.slice(0, 2900) } });
   const more = Number(q.total) - items.length;
   blocks.push({ type: "context", elements: [{ type: "mrkdwn", text:
     (more > 0 ? `${more} more not shown, lowest priority first. ` : "") +
