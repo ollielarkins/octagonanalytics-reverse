@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.75.2" };
+const SERVER = { name: "octagon-analytics", version: "3.75.3" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -3363,12 +3363,13 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     // files) before deciding whether to build readers for them. Text is measured and dropped here.
     if (!actor.is_admin) return toolText({ error: "Admin only." });
     const offset = Math.max(Number(args?.offset) || 0, 0), limit = Math.min(Math.max(Number(args?.limit) || 25, 1), 40);
-    const { data: jobs, error } = await db.from("jobs").select("recruitcrm_id,custom_fields")
-      .is("deleted_at", null).eq("status", "Open").not("custom_fields->3->>value", "is", null).neq("custom_fields->3->>value", "")
-      .order("recruitcrm_id").range(offset, offset + limit - 1);
+    // custom_fields is keyed by field id as a string; PostgREST reads ->3 as an array index, so filter here.
+    const { data: open, error } = await db.from("jobs").select("recruitcrm_id,custom_fields")
+      .is("deleted_at", null).eq("status", "Open").order("recruitcrm_id");
     if (error) return toolText({ error: error.message });
-    const { count } = await db.from("jobs").select("recruitcrm_id", { count: "exact", head: true })
-      .is("deleted_at", null).eq("status", "Open").not("custom_fields->3->>value", "is", null).neq("custom_fields->3->>value", "");
+    const withJd = (open ?? []).filter((j: any) => String(j.custom_fields?.["3"]?.value ?? "").trim());
+    const count = withJd.length;
+    const jobs = withJd.slice(offset, offset + limit);
     const rows: any[] = [];
     for (const j of jobs ?? []) {
       const f = { field_name: "Internal Job Description", value: j.custom_fields?.["3"]?.value };
