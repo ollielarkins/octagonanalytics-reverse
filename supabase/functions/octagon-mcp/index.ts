@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.80.0" };
+const SERVER = { name: "octagon-analytics", version: "3.81.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -719,6 +719,7 @@ const TOOLS = [
   { name: "my_day", description: "One consultant's attention list on OPEN roles: aging offers, stalled candidates, active-in-play count, cold open roles, and placements in the last 7 days. With NO consultant argument it scopes to YOU (your token). Pass consultant to view someone else. Use for 'what's my day', 'what needs my attention', 'how's Keelan's desk'. Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "consultant name; omit to use your own identity" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "action_queue", description: "Today's ranked call list: the same list as the 08:30 Slack DM. Offers out 3+ days, interviews to prep for on the next working day, interviews held with nothing logged (feedback calls), interview requests unbooked 2+ days, CVs sent with no response after 5 working days, cold jobs, and BD calls behind for the week. Up to 10 items, highest priority first, with the total before the caps. Use for 'prep my queue', 'what are my calls today'. Scoped to you; managers can pass consultant. Candidate names are internal PII. Read-only.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "managers only" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "client_visits", description: "Client visits this quarter against the minimum of 2 per consultant: visits done and booked (meetings typed Client Meeting in RecruitCRM), untyped meetings that cannot count yet, and up to five clients to visit with the reasons (live A and B grade jobs, Won fees in the last 12 months, how long since the last visit). Use for 'plan a visit', 'which clients should I visit', 'am I on track for client visits'. Scoped to you; managers can pass consultant, or all=true for the whole team. Read-only.", inputSchema: { type: "object", properties: { consultant: { type: "string", description: "managers only" }, all: { type: "boolean", description: "managers only: every consultant" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "team_exceptions", description: "MANAGERS ONLY. The team view, exceptions only: who was off plan last week (below half their plan from billing), who has a backlog (25+ calls queued or 3+ stages out of date), whose ratios are falling (last 8 weeks more than 30% below the previous 6 months), and who is behind on client visits for the point in the quarter. Lists only people with something to act on, then who is clear. Performance data: for managers, never shared with the team. Read-only.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "match_candidates", description: "Find candidates in the CRM whose skills match a set of skills, ranked by number of matches, with the matched skills and their recent roles for explaining fit. Use for JD->candidate matching: extract the key skills from a job description yourself, then call this with them. Optionally filter by location. Only candidates with skill text populated (~73%) are considered. Candidates marked OFF LIMIT in RecruitCRM (do-not-approach) are excluded automatically and the number dropped is reported as off_limit_excluded — never pitch or submit someone who is off limit. Returns candidate names (PII). Read-only.", inputSchema: { type: "object", properties: { skills: { type: "array", items: { type: "string" }, description: "skills/keywords extracted from the job description" }, location: { type: "string", description: "optional city or country filter" }, limit: { type: "integer" }, include_off_limit: { type: "boolean", description: "deliberately include do-not-approach candidates (default false)" }, ...AUTH_ARG }, required: ["skills"], additionalProperties: false } },
   { name: "call_activity", description: "Telephony activity (calls logged in RecruitCRM via Devyce) for a date window: total calls, connect rate, talk-time in minutes, outgoing/incoming, a per-consultant leaderboard, and a breakdown by call category (e.g. 'Contact - Prospect (BD)', 'Candidate - Job Pitch / Qualifying'). Attributed to the CALLER. Use for 'call activity this week', 'who's making the most calls', 'talk time by consultant', 'BD call volume'. Dates ISO; defaults to 2026 YTD. Read-only.", inputSchema: { type: "object", properties: { from: { type: "string" }, to: { type: "string" }, consultant: { type: "string" }, team: { type: "string" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "weekly_kpis", description: "This-week (from Monday) actuals vs weekly targets (CV sends, interview requests, interviews, BD/client calls, placements). Scoped: a recruiter sees their own row, admins/managers see the whole team. Renders as an inline scorecard widget. Read-only, no arguments.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false }, _meta: { ui: { resourceUri: SCORE_UI, visibility: ["model", "app"] } } },
@@ -795,7 +796,7 @@ const REPORT_TOOLS = new Set(["my_day", "stalled_report", "cold_jobs", "awaiting
   "new_jobs_report", "activity_report", "funnel_report", "consultant_leaderboard", "client_report", "bd_report",
   "rejection_report", "call_activity", "call_hours_report", "fee_analysis", "placements_report", "placements_with_fees",
   "invoices_report", "notes_kpi", "time_to_fill", "match_candidates", "job_pipeline", "find_candidate", "candidate_profile",
-  "cv_pack", "job_spec", "notes_read", "call_notes", "schedule", "action_queue", "client_visits", "pitch_history", "files_list", "platform_health", "usage_report", "team_insights"]);
+  "cv_pack", "job_spec", "notes_read", "call_notes", "schedule", "action_queue", "client_visits", "team_exceptions", "pitch_history", "files_list", "platform_health", "usage_report", "team_insights"]);
 for (const t of TOOLS as any[]) if (REPORT_TOOLS.has(t.name)) t._meta = { ui: { resourceUri: REPORT_UI, visibility: ["model", "app"] } };
 // ---- Mixed read/write tools (3.67.0) -------------------------------------------------------------
 // One widget for both halves: a read action renders as a report view, a preview (or a confirmed
@@ -2265,6 +2266,14 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const { data, error } = await db.rpc("post_digest", { p_kind: kind });
     return toolText(error ? { error: error.message } : data);
   }
+  if (name === "team_exceptions") {
+    // 3.81.0: priority 8. Managers only: individual performance, not usage.
+    if (!actor.sees_team) return toolText({ error: "manager_only", message: "The exceptions view is for managers." });
+    const { data, error } = await db.rpc("team_exceptions");
+    if (error) return toolText({ error: error.message });
+    return toolText({ ...data, note: "Exceptions only. For any person, dig in with weekly_kpis (plan vs actuals), action_queue (their queue) or client_visits. Performance data: keep it with the manager." });
+  }
+
   if (name === "client_visits") {
     // 3.79.0: priority 6. Counts from the mirrored diary, which reaches back to the quarter's start.
     const names = await consultantNameMap();
