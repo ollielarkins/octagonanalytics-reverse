@@ -46,9 +46,7 @@ function exceptionBlocks(x: any) {
       e.ratios?.length ? `Ratios falling: ${e.ratios.join("; ")}` : null,
       e.visits ? `Client visits: ${e.visits}` : null,
     ].filter(Boolean).map((t) => `• ${esc(t)}`);
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: `*${esc(e.consultant)}*
-${parts.join("
-")}`.slice(0, 2900) } });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `*${esc(e.consultant)}*\n${parts.join("\n")}`.slice(0, 2900) } });
   }
   if ((x?.clear ?? []).length) blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Nothing to flag: ${(x.clear as string[]).map(esc).join(", ")}` }] });
   blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `_${esc(x?.rules ?? "")} Ask Claude for "team exceptions" to dig into any of these._` }] });
