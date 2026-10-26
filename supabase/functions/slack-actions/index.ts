@@ -53,9 +53,10 @@ const NOTE: Record<string, string> = {
   feedback: "Interview feedback chased with the client",
   unbooked: "Booking call for the interview request",
   cv_chase: "Chased the client on the CV",
+  rejected: "Candidate updated after the client's rejection",
 };
 // Days an item stays off the queue once done. prep and feedback keys belong to one meeting.
-const HIDE: Record<string, number> = { offer: 2, unbooked: 2, cv_chase: 5, cold_job: 7, bd: 7, prep: 30, feedback: 30 };
+const HIDE: Record<string, number> = { offer: 2, unbooked: 2, cv_chase: 5, cold_job: 7, bd: 7, prep: 30, feedback: 30, new_job: 30, rejected: 30 };
 function noteText(item: any, outcome: string) {
   const parts = [`${NOTE[item.kind]} (${today()})${item.job ? `. Job: ${item.job}` : ""}.`];
   if (outcome) parts.push(`Outcome: ${outcome}`);

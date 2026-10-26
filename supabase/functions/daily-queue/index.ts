@@ -33,7 +33,27 @@ async function slackUserByEmail(email: string): Promise<string | null> {
 }
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-const NOT_CALLS: Record<string, string> = { plan: ":dart:", cleanup: ":broom:", meetings: ":spiral_calendar_pad:", client_visits: ":handshake:" };
+const NOT_CALLS: Record<string, string> = { plan: ":dart:", cleanup: ":broom:", meetings: ":spiral_calendar_pad:", client_visits: ":handshake:", pushtell: ":outbox_tray:" };
+
+// 0121, priority 8: the Monday exceptions DM to managers. Only people with something to act on.
+function exceptionBlocks(x: any) {
+  const ex: any[] = x?.exceptions ?? [];
+  const blocks: any[] = [{ type: "header", text: { type: "plain_text", text: `Team exceptions: ${ex.length} to look at` } }];
+  for (const e of ex) {
+    const parts = [
+      e.off_plan?.length ? `Off plan last week: ${e.off_plan.join(", ")}` : null,
+      e.backlog ? `Backlog: ${e.backlog}` : null,
+      e.ratios?.length ? `Ratios falling: ${e.ratios.join("; ")}` : null,
+      e.visits ? `Client visits: ${e.visits}` : null,
+    ].filter(Boolean).map((t) => `• ${esc(t)}`);
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `*${esc(e.consultant)}*
+${parts.join("
+")}`.slice(0, 2900) } });
+  }
+  if ((x?.clear ?? []).length) blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `Nothing to flag: ${(x.clear as string[]).map(esc).join(", ")}` }] });
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `_${esc(x?.rules ?? "")} Ask Claude for "team exceptions" to dig into any of these._` }] });
+  return { blocks: blocks.slice(0, 48), text: `Team exceptions: ${ex.length} to look at` };
+}
 
 function blocksFor(q: any, shadowFor: string | null) {
   const first = String(q.consultant ?? "").split(" ")[0];
@@ -115,8 +135,24 @@ Deno.serve(async () => {
       results.push({ consultant: c.name, sent: false, reason: String(e).slice(0, 160) });
     }
   }
+  // Monday: the managers' exceptions DM (priority 8), to app_settings.manager_exceptions_emails.
+  let managers: any = undefined;
+  if (new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", weekday: "short" }).format(new Date()) === "Mon") {
+    const { data: mset } = await db.from("app_settings").select("value").eq("key", "manager_exceptions_emails").maybeSingle();
+    const emails = String(mset?.value ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+    if (emails.length) {
+      const { data: tx, error: terr } = await db.rpc("team_exceptions");
+      managers = { sent: 0, failed: 0, error: terr?.message };
+      if (!terr) for (const em of emails) {
+        const uid = await slackUserByEmail(em).catch(() => null);
+        const im = uid ? await slack("conversations.open", { users: uid }) : { ok: false };
+        const post = im.ok ? await slack("chat.postMessage", { channel: im.channel.id, ...exceptionBlocks(tx), unfurl_links: false }) : { ok: false };
+        post.ok ? managers.sent++ : managers.failed++;
+      }
+    }
+  }
   const sent = results.filter((r) => r.sent).length;
   const failed = results.filter((r) => !r.sent && r.reason !== "nothing to send");
   await record(failed.length ? `partial:${sent} sent, ${failed.length} failed` : `ok:${sent} sent${shadow ? " (shadow)" : ""}`);
-  return Response.json({ shadow, sent, results });
+  return Response.json({ shadow, sent, results, managers });
 });
