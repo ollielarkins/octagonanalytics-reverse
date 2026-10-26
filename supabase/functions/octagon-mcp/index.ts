@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.74.0" };
+const SERVER = { name: "octagon-analytics", version: "3.75.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -411,6 +411,37 @@ async function resolveMeetingType(q: any, list?: { id: number; label: string }[]
   for (const [re, label] of MEETING_TYPE_WORDS) if (re.test(s)) return types.find((t) => t.label === label) ?? null;
   return null;
 }
+// ---- Call categories (3.75.0) --------------------------------------------------------------------
+// Bhav's priority 2: BD and client call KPIs count only categorised calls, and 7% of calls over 30s
+// were categorised in the 30 days to 26/10/2026. call_tagging sets a call log's category in
+// RecruitCRM, preview then confirm, never automatically: numbers are shared and some people are both
+// candidate and client, so the consultant always chooses.
+const CALL_TYPE_WORDS: Array<[RegExp, string]> = [
+  [/client.?info/i, "Contact - Client Info"],
+  [/^client|contact.?-?.?client$/i, "Contact - Client"],
+  [/^bd|prospect|business.?dev/i, "Contact - Prospect (BD)"],
+  [/feedback/i, "Interview Feedback"],
+  [/prep|other/i, "Candidate - Interview Prep/Other"],
+  [/pitch|qualif/i, "Candidate - Job Pitch / Qualifying"],
+  [/voicemail|no.?answer|vm/i, "Voicemail/No Answer"],
+];
+async function callTypeList(): Promise<{ id: number; label: string }[]> {
+  const r = await crm("GET", "/custom-call-types");
+  if (!r.ok) throw new Error(`call_types_unavailable ${r.status}`);
+  const inner = r.json?.data ?? r.json;
+  const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
+  return list.map((t: any) => ({ id: Number(t.id), label: String(t.label ?? t.name ?? "").trim() })).filter((t: any) => t.id && t.label);
+}
+// Resolve "client", "bd", a label or a numeric id to a live call type. Never a hardcoded id.
+function resolveCallType(q: any, types: { id: number; label: string }[]) {
+  const s = String(q ?? "").trim();
+  if (!s) return null;
+  if (/^\d+$/.test(s)) return types.find((t) => t.id === Number(s)) ?? null;
+  const exact = types.find((t) => t.label.toLowerCase() === s.toLowerCase());
+  if (exact) return exact;
+  for (const [re, label] of CALL_TYPE_WORDS) if (re.test(s)) return types.find((t) => t.label === label) ?? null;
+  return null;
+}
 function meetingTypeOf(m: any): string | null {
   return m?.meeting_type?.label ?? (typeof m?.meeting_type === "string" && m.meeting_type ? m.meeting_type : null);
 }
@@ -700,6 +731,7 @@ const TOOLS = [
   { name: "log_activity", description: "Log a meeting (e.g. a client visit) or a task in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Link it to a client, job or candidate so it shows against that record. Meetings need a start and end; tasks need only a start. Times are 'YYYY-MM-DD HH:MM'. Created by and owned by you. Use for 'log my visit to X yesterday', 'remind me to chase Y on Friday'.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meeting or task" }, title: { type: "string" }, start: { type: "string", description: "YYYY-MM-DD HH:MM" }, end: { type: "string", description: "YYYY-MM-DD HH:MM — meetings only" }, description: { type: "string" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, candidate: { type: "string", description: "candidate name to link" }, type_id: { type: "integer", description: "task type id (reference_list kind=task_types), or a meeting type id" }, meeting_type: { type: "string", description: "REQUIRED for a meeting: client, internal, video interview, f2f interview or phone interview (or the exact RecruitCRM label). Ask the recruiter if it isn't clear; never guess. Client visits only count toward the 2-per-quarter minimum when typed Client Meeting." }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind", "title", "start"], additionalProperties: false } },
   { name: "schedule", description: "Your interviews and client meetings straight from RecruitCRM (most never reach Outlook): interviews today, interviews tomorrow to prep for, later interviews, interviews already held with no feedback logged since (no feedback call, candidate note or stage move after the interview time), and client meetings coming up. Defaults: the next 7 days, and interviews back to 3 days ago for feedback. Times are UK time. Managers can pass consultant. Candidate names are internal PII. Read-only.", inputSchema: { type: "object", properties: { days_ahead: { type: "integer", description: "default 7, max 21" }, days_back: { type: "integer", description: "how far back to look for feedback due, default 3, max 14" }, consultant: { type: "string", description: "managers only" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "meeting_review", description: "Your meetings in RecruitCRM that have no meeting type, each with a suggested type to confirm, so client visits count toward the minimum of 2 per consultant per quarter. action=list (default, read-only): your untyped meetings for a window (default this quarter to date), plus how many Client Meetings you have this quarter. action=set: give the meetings to change as items [{meeting_id, type}] (type: client, internal, video interview, f2f interview, phone interview, or skip for a personal/calendar entry that isn't work), up to 25. WRITE, two-step: preview, then confirm=true. Only your own meetings. Never set a type the recruiter didn't choose: present the suggestions and let them pick.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list or set" }, from: { type: "string", description: "YYYY-MM-DD, default start of this quarter" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, consultant: { type: "string", description: "managers only: review someone else's (list only)" }, items: { type: "array", description: "for set: [{meeting_id, type}]", items: { type: "object", properties: { meeting_id: { type: "integer" }, type: { type: "string" } }, required: ["meeting_id", "type"] } }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "call_tagging", description: "Set the category on your Devyce calls in RecruitCRM, so BD and client calls count toward the weekly targets (only categorised calls count). action=set: items [{call_id, type}] (type: client, client info, bd, interview feedback, interview prep, pitch, voicemail, or the exact label), up to 25. WRITE, two-step: preview, then confirm=true. Only your own calls. Never choose a category for the recruiter: numbers are shared and some people are both candidate and client, so they pick. Each change is read back from RecruitCRM and checked.", inputSchema: { type: "object", properties: { action: { type: "string", description: "set" }, items: { type: "array", description: "[{call_id, type}]", items: { type: "object", properties: { call_id: { type: "integer" }, type: { type: "string" } }, required: ["call_id", "type"] } }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "update_deal", description: "Change a deal in RecruitCRM — most importantly moving it to Won and entering the value, which IS how billing is recorded at Octagon. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the deal by its numeric ID, slug, or part of its name. stage accepts a stage name (Won, Lost, Open, CV Sent, Interview Request, 1st/2nd/3rd Interview, Offered, Declined, Job Lead) resolved against the live pipeline. Note RecruitCRM requires name, value, stage and close_date on every edit, so the tool reads the deal first and preserves anything you don't change.", inputSchema: { type: "object", properties: { deal: { type: "string", description: "deal ID, slug, or part of the name" }, stage: { type: "string", description: "target stage name" }, value: { type: "number", description: "deal value (the fee)" }, name: { type: "string", description: "rename the deal" }, close_date: { type: "string", description: "YYYY-MM-DD" }, reason: { type: "string", description: "why the deal was lost - only for stage Lost/Declined. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["deal"], additionalProperties: false } },
   { name: "create_deal", description: "Create a deal in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Requires a name, a value, a stage and a close date. Optionally link it to a job, client or candidate. Billing is Won deal value, so a deal is how revenue enters the system — created owned by and attributed to you.", inputSchema: { type: "object", properties: { name: { type: "string", description: "deal name" }, value: { type: "number", description: "deal value (the fee)" }, stage: { type: "string", description: "stage name, e.g. Open or Job Lead" }, close_date: { type: "string", description: "YYYY-MM-DD" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["name", "value", "stage", "close_date"], additionalProperties: false } },
   { name: "pitch_history", description: "Speculative pitches recorded in RecruitCRM — who has been pitched to whom, and when. This is the 'pitched candidates' activity the business asks about; it lives in RecruitCRM's pitch feature, which nothing else in this platform reads. Give a candidate (name or slug) to see everywhere they've been pitched, or a contact slug to see everyone pitched to them, or both for that pair's history. Returns candidate and contact names (PII). Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name, slug or RecruitCRM candidate ID" }, contact_slug: { type: "string", description: "contact slug" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -753,7 +785,7 @@ for (const t of TOOLS as any[]) if (REPORT_TOOLS.has(t.name)) t._meta = { ui: { 
 // ---- Mixed read/write tools (3.67.0) -------------------------------------------------------------
 // One widget for both halves: a read action renders as a report view, a preview (or a confirmed
 // change) as the confirm card. They get card_nonce like the card tools.
-const MIXED_TOOLS = new Set(["meeting_review", "off_limit", "hotlist", "inbox", "push_tell", "eow_email", "manage_tokens", "webhook_subscriptions", "client_status"]);
+const MIXED_TOOLS = new Set(["meeting_review", "call_tagging", "off_limit", "hotlist", "inbox", "push_tell", "eow_email", "manage_tokens", "webhook_subscriptions", "client_status"]);
 for (const t of TOOLS as any[]) if (MIXED_TOOLS.has(t.name)) {
   t.inputSchema = { ...t.inputSchema, properties: { ...(t.inputSchema?.properties ?? {}), card_nonce: { type: "string", description: "Internal: copy it from _card.confirm_args when confirming a preview. Never invent one." } } };
   t._meta = { ui: { resourceUri: MIXED_UI, visibility: ["model", "app"] } };
@@ -2253,6 +2285,63 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         note: failed.length ? "Stopped at the first problem so nothing else was touched. Check that meeting in RecruitCRM." : "Every change was read back from RecruitCRM and checked." });
     }
     return toolText({ error: "action must be list or set" });
+  }
+
+  if (name === "call_tagging") {
+    const action = String(args?.action ?? "set").toLowerCase();
+    if (action !== "set") return toolText({ error: "action must be set" });
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. Setting call categories requires a write-enabled token." });
+    const items = Array.isArray(args?.items) ? args.items : [];
+    if (!items.length) return toolText({ error: "missing_items", message: "Give the calls to change as items [{call_id, type}]." });
+    if (items.length > 25) return toolText({ error: "too_many", message: "Up to 25 calls per confirmation." });
+    const types = await callTypeList();
+    const names = await consultantNameMap();
+    const plan: any[] = [];
+    for (const it of items) {
+      const id = Number(it?.call_id);
+      const t = resolveCallType(it?.type, types);
+      if (!id || !t) return toolText({ error: "bad_item", call_id: it?.call_id ?? null, message: `Unknown category '${it?.type}'.`, options: types.map((x) => x.label) });
+      const cur = await crm("GET", `/call-logs/${id}`);
+      const c = cur.ok ? (cur.json?.data ?? cur.json) : null;
+      if (!c?.id) return toolText({ error: "call_not_found", call_id: id });
+      if (!actor.is_admin && String(c.created_by ?? "") !== String(actor.id)) return toolText({ error: "not_your_call", call_id: id, message: "You can only categorise your own calls." });
+      const { data: who } = c.related_to_type === "candidate"
+        ? await db.from("candidates").select("name").eq("slug", String(c.related_to ?? "")).maybeSingle()
+        : { data: null };
+      plan.push({ id, c, type: t, current: c?.custom_call_type?.label ?? null, with: who?.name ?? c.related_to_type ?? null });
+    }
+    if (!args.confirm) return toolText({ mode: "preview", action: "set_call_types", count: plan.length,
+      changes: plan.map((p) => ({ call_id: p.id, when: String(p.c.call_started_on ?? "").slice(0, 16).replace("T", " "),
+        caller: names.get(String(p.c.created_by)) ?? null, direction: p.c.call_type ?? null,
+        minutes: Math.round((Number(p.c.duration) || 0) / 6) / 10, with: p.with,
+        current_category: p.current, new_category: p.type.label })),
+      instruction: "Show this to the recruiter. To apply, call again with confirm=true and the same items." });
+    const results: any[] = [];
+    for (const p of plan) {
+      // Change ONLY the category, then read the call back: if anything else moved (the Devyce summary
+      // in call_notes above all), stop and say so. RecruitCRM's edit semantics for call logs (patch
+      // or replace) were unconfirmed when this was written.
+      const body: any = { custom_call_type_id: p.type.id };
+      if (actor.id != null) body.updated_by = actor.id;
+      const r = await crm("POST", `/call-logs/${p.id}`, body);
+      if (!r.ok) { results.push({ call_id: p.id, ok: false, result: `recruitcrm_error ${r.status}`, detail: String(r.json?.message ?? r.text ?? "").slice(0, 160) }); break; }
+      const back = await crm("GET", `/call-logs/${p.id}`);
+      if (!back.ok) { results.push({ call_id: p.id, ok: false, result: `written, but could not read it back to verify (${back.status})` }); break; }
+      const b = back.json?.data ?? back.json ?? {};
+      // Compare EVERY field the call had, except the category and RecruitCRM's own bookkeeping.
+      const ignore = /^(custom_call_type|custom_call_type_id|updated_on|updated_by|modified|modified_on|last_modified)$/;
+      const norm = (v: any) => (v == null || v === "" ? "" : typeof v === "object" ? JSON.stringify(v) : String(v));
+      const drift = Object.keys(p.c ?? {}).filter((k) => !ignore.test(k) && norm(b?.[k]) !== norm(p.c?.[k]));
+      const typed = (b?.custom_call_type?.label ?? null) === p.type.label || Number(b?.custom_call_type?.id ?? b?.custom_call_type_id ?? NaN) === p.type.id;
+      await audit({ actor: String(actor.id), action: "set_call_type", entity: "call_log", entity_id: String(p.id), before: { custom_call_type: p.current }, after: { custom_call_type: p.type.label, drift }, via: "claude" });
+      // Mirror now, so the weekly KPIs move without waiting for the next sync.
+      if (typed && !drift.length) await db.from("call_activity").update({ custom_call_type: p.type.label }).eq("recruitcrm_id", p.id);
+      results.push({ call_id: p.id, ok: typed && !drift.length, result: typed ? (drift.length ? "categorised, but other fields changed" : "categorised") : "category did not stick", changed_fields: drift.length ? drift : undefined });
+      if (!typed || drift.length) break;
+    }
+    const failed = results.filter((x) => !x.ok);
+    return toolText({ mode: "applied", changed: results.filter((x) => x.ok).length, failed: failed.length, not_attempted: plan.length - results.length, results,
+      note: failed.length ? "Stopped at the first problem so nothing else was touched. Check that call in RecruitCRM." : "Every change was read back from RecruitCRM and checked." });
   }
 
   if (name === "log_activity") {
