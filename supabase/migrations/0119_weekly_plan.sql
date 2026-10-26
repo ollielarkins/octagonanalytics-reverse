@@ -8,7 +8,9 @@
 --  * Small samples blend with the firm's ratios: each ratio is shrunk towards the firm's
 --    (own_num + k * firm_rate) / (own_den + k), so a couple of lucky placements don't set the plan.
 --    k = 40 CVs, 40 CVs, 20 first interviews, 5 offers.
---  * No billing target (Will Drake, 26/10/2026): use the firm's median target until one is set.
+--  * No billing target (Will Drake, 26/10/2026): no plan from billing, just the flat minimums, and
+--    the DM says so. Decided the same day: the firm median gave Will 26 CVs a week, about 13 times his
+--    6-month rate.
 --  * Median fee from the consultant's Won deals in 12 months, or the firm's if they have fewer than 4.
 -- Monday: a plan line in the 08:30 DM. Friday: actuals against plan in the end-of-week email.
 
@@ -43,7 +45,6 @@ as $function$
     select percentile_cont(0.5) within group (order by deal_value) fee from deals
     where deal_stage = 'Won' and deleted_at is null and deal_value > 0 and coalesce(close_date, created_date) >= now() - interval '12 months'
   ),
-  firm_target as (select percentile_cont(0.5) within group (order by quarterly_target) t from billing_targets where quarterly_target > 0),
   own as (
     select p.recruitcrm_id, p.name,
            coalesce((select n from ev where consultant = p.name and stage_metric='cv_sent'), 0)::numeric cv,
@@ -62,8 +63,8 @@ as $function$
   ),
   calc as (
     select o.*,
-           coalesce(nullif(o.quarterly_target, 0), (select t from firm_target))::numeric target,   -- percentile_cont is double precision
-           case when nullif(o.quarterly_target, 0) is null then 'firm median (no target set)' else 'billing target' end target_source,
+           nullif(o.quarterly_target, 0)::numeric target,
+           case when nullif(o.quarterly_target, 0) is null then 'none set: flat minimums only' else 'billing target' end target_source,
            (case when o.won_n >= 4 then o.own_fee else (select fee from firm_fee) end)::numeric fee,
            case when o.won_n >= 4 then 'own median, 12 months' else 'firm median (fewer than 4 Won deals)' end fee_source,
            (o.ir  + 40 * f.ir_cv) / (o.cv + 40) ir_cv,
@@ -140,7 +141,8 @@ declare
     select 0, jsonb_build_object('kind', 'plan', 'item_key', 'plan:'||to_char(current_date, 'IYYY-IW'),
            'action', 'This week''s plan: '||(pl.x->'plan'->>'cv_sent')||' CVs, '||(pl.x->'plan'->>'interview_request')||' interview requests, '
                      ||(pl.x->'plan'->>'first_interview')||' first interviews',
-           'who', 'Worked back from your £'||to_char((pl.x->>'target')::numeric, 'FM999,999')||' quarter'
+           'who', case when pl.x->>'target' is null then 'The flat minimums: no quarterly billing target is set for you yet'
+                       else 'Worked back from your £'||to_char((pl.x->>'target')::numeric, 'FM999,999')||' quarter' end
                   ||coalesce(', and '||(pl.x->>'ratio_to_work_on')||' is the step to work on', ''))
     from (select x from jsonb_array_elements(public.weekly_plan(p_consultant)->'consultants') x) pl
     where extract(isodow from current_date) = 1
