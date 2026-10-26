@@ -3146,7 +3146,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       const planT = planRows.length ? table(["Team member", "CVs sent", "IV requests", "Interviews", "Step to work on", "Quarter so far"],
         planRows.map((x: any) => [x.consultant, gap(x.this_week?.cv_sent, x.plan?.cv_sent), gap(x.this_week?.interview_request, x.plan?.interview_request),
           gap(x.this_week?.first_interview, x.plan?.first_interview), x.ratio_to_work_on ?? "",
-          `£${Number(x.quarter_position?.won_by_close_date ?? 0).toLocaleString("en-GB")} of £${Number(x.quarter_position?.target ?? 0).toLocaleString("en-GB")}`])) : "";
+          x.quarter_position?.target == null ? `£${Number(x.quarter_position?.won_by_close_date ?? 0).toLocaleString("en-GB")} (no target set)`
+            : `£${Number(x.quarter_position?.won_by_close_date ?? 0).toLocaleString("en-GB")} of £${Number(x.quarter_position.target).toLocaleString("en-GB")}`])) : "";
       const html = `<div style="font-family:Calibri,Arial,sans-serif;font-size:15px">`
         + `<p>${h(args?.greeting ?? "Hi all,")}</p>` + para(args?.intro)
         + `<p>Here's how the week shaped up:</p><ul>`
