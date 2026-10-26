@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.77.0" };
+const SERVER = { name: "octagon-analytics", version: "3.77.1" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -3361,13 +3361,20 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     // what the job holds now, so the preview shows current -> new for each question.
     const jofChanges: Record<number, string> = {};
     const jofPreview: any[] = [];
-    if (args.job_order_form && typeof args.job_order_form === "object" && Object.keys(args.job_order_form).length) {
+    // A client with the pre-3.77.0 tool list cached does not know job_order_form is an object and sends
+    // it as a JSON string; accept both, and refuse anything else rather than silently dropping it.
+    let jof: any = args.job_order_form;
+    if (typeof jof === "string" && jof.trim()) {
+      try { jof = JSON.parse(jof); } catch { return toolText({ error: "bad_job_order_form", message: "job_order_form must be an object of { question: answer }." }); }
+    }
+    if (jof != null && (typeof jof !== "object" || Array.isArray(jof))) return toolText({ error: "bad_job_order_form", message: "job_order_form must be an object of { question: answer }." });
+    if (jof && Object.keys(jof).length) {
       const defs = await jobFieldDefs();
       const writable = [...defs.values()].filter((d: any) => !JOF_OWNED_ELSEWHERE.has(Number(d.field_id)) &&
         (["text", "longtext"].includes(String(d.field_type)) || JOF_PICKLISTS.test(String(d.field_name ?? "").trim())));
       const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
       const live = await liveJobCustomFields(job.slug);
-      for (const [q, raw] of Object.entries(args.job_order_form as Record<string, any>)) {
+      for (const [q, raw] of Object.entries(jof as Record<string, any>)) {
         const key = String(q).trim();
         let hits = /^\d+$/.test(key) ? writable.filter((d: any) => Number(d.field_id) === Number(key))
           : writable.filter((d: any) => norm(String(d.field_name)) === norm(key));
