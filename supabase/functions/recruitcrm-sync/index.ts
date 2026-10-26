@@ -177,18 +177,22 @@ const mapMeeting = (m: any) => {
     owner_recruitcrm_id: owner, start_at: crmTimeIso(m.start_date), end_at: crmTimeIso(m.end_date),
     related_to: m.related_to != null ? String(m.related_to) : null, related_to_type: m.related_to_type ?? null,
     candidate_slug: cand, job_slug: assocSlugs(m.associated_jobs)[0] ?? null,
+    // 0118: the client company, for client visits per quarter (priority 6).
+    company_slug: m.related_to_type === "company" && m.related_to ? String(m.related_to) : assocSlugs(m.associated_companies)[0] ?? null,
     synced_at: new Date().toISOString(), deleted_at: null,
   };
 };
-async function syncMeetingsWindow() {
+// The incremental run refreshes 14 days back to 10 ahead; meetings_quarter (daily, 0118) refreshes
+// from the start of the quarter, so client visits can be counted against the 2-per-quarter minimum.
+async function syncMeetingsWindow(entity = "meetings", fromDate?: string) {
   const day = (ms: number) => new Date(Date.now() + ms).toISOString().slice(0, 10);
-  const from = day(-14 * 86400_000), to = day(11 * 86400_000);
+  const from = fromDate ?? day(-14 * 86400_000), to = day(11 * 86400_000);
   const { data: cons } = await db.from("consultants").select("recruitcrm_id").is("deleted_at", null).eq("active", true);
   let upserted = 0, removed = 0, failed = 0;
   for (const c of cons ?? []) {
     const owner = String(c.recruitcrm_id), seen = new Map<any, any>();
     let complete = false;
-    for (let page = 1; page <= 10; page++) {
+    for (let page = 1; page <= 30; page++) {
       const qs = new URLSearchParams({ starting_from: from, starting_to: to, owner_id: owner, page: String(page) });
       const r = await crm(`/meetings/search?${qs}`);
       if (!r.ok) break;
@@ -214,8 +218,8 @@ async function syncMeetingsWindow() {
     removed += gone?.length ?? 0;
   }
   const status = failed ? `partial:${failed}_failed` : "ok";
-  await db.from("sync_state").upsert({ entity: "meetings", last_run_at: new Date().toISOString(), last_status: status }, { onConflict: "entity" });
-  return { entity: "meetings", window: { from, to }, consultants: cons?.length ?? 0, upserted, removed, failed };
+  await db.from("sync_state").upsert({ entity, last_run_at: new Date().toISOString(), last_status: status }, { onConflict: "entity" });
+  return { entity, window: { from, to }, consultants: cons?.length ?? 0, upserted, removed, failed };
 }
 
 // Off-limit list -> mirror flags. Pages through the whole list (the old single call stopped at 100
@@ -685,6 +689,12 @@ Deno.serve(async (req) => {
       try { (globalThis as any).EdgeRuntime?.waitUntil(runBg("assignment_sweep", sweepAssignments)); }
       catch { return Response.json(await sweepAssignments()); }
       return Response.json({ mode: "assignment_sweep", status: "started (background)" }, { status: 202 });
+    }
+
+    if (mode === "meetings_quarter") {
+      const now = new Date(), q = Math.floor(now.getUTCMonth() / 3) * 3;
+      const qStart = new Date(Date.UTC(now.getUTCFullYear(), q, 1)).toISOString().slice(0, 10);
+      return Response.json(await syncMeetingsWindow("meetings_quarter", qStart));
     }
 
     if (mode === "history_recent") {

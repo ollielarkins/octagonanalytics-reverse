@@ -33,24 +33,33 @@ async function slackUserByEmail(email: string): Promise<string | null> {
 }
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const NOT_CALLS: Record<string, string> = { cleanup: ":broom:", meetings: ":spiral_calendar_pad:", client_visits: ":handshake:" };
+
 function blocksFor(q: any, shadowFor: string | null) {
   const first = String(q.consultant ?? "").split(" ")[0];
-  // 0116: a closing "clean up these stages" line is not a call; keep it out of the numbering and counts.
+  // Closing lines that are not calls (0116, 0118) stay out of the numbering and the counts.
   const all: any[] = q.items ?? [];
-  const items = all.filter((x) => x.kind !== "cleanup");
-  const cleanup = all.find((x) => x.kind === "cleanup");
+  const items = all.filter((x) => !NOT_CALLS[x.kind]);
+  const closing = all.filter((x) => NOT_CALLS[x.kind]);
   const head = shadowFor
     ? `Preview for ${shadowFor}: ${items.length} of ${q.total} calls`
     : `Your calls today, ${first}: ${items.length} of ${q.total}`;
-  const lines = items.map((x, i) => {
+  const blocks: any[] = [{ type: "header", text: { type: "plain_text", text: head.slice(0, 150) } }];
+  if (!items.length) blocks.push({ type: "section", text: { type: "mrkdwn", text: "_Nothing urgent today._" } });
+  // 0118: one section per call with a Done button. slack-actions previews what Done writes to
+  // RecruitCRM and only writes it when the consultant confirms.
+  items.forEach((x, i) => {
     const what = [x.who, x.job, x.client].filter(Boolean).map(esc).join(" · ");
-    return `*${i + 1}. ${esc(x.action)}*${what ? `\n${what}` : ""}`;
+    const block: any = { type: "section", text: { type: "mrkdwn", text: `*${i + 1}. ${esc(x.action)}*${what ? `\n${what}` : ""}`.slice(0, 2900) } };
+    // The form must open within Slack's 3 seconds, so the button carries what it shows; slack-actions
+    // re-checks the item against the consultant's own queue before writing anything.
+    if (x.item_key) block.accessory = { type: "button", action_id: "queue_done", text: { type: "plain_text", text: "Done" },
+      value: JSON.stringify({ k: x.item_key, kind: x.kind, a: x.action, who: x.who, job: x.job, client: x.client, cs: x.candidate_slug }).slice(0, 1900) };
+    blocks.push(block);
   });
-  const blocks: any[] = [
-    { type: "header", text: { type: "plain_text", text: head.slice(0, 150) } },
-    { type: "section", text: { type: "mrkdwn", text: lines.join("\n\n").slice(0, 2900) || "_Nothing urgent today._" } },
-  ];
-  if (cleanup) blocks.push({ type: "section", text: { type: "mrkdwn", text: `:broom: *${esc(cleanup.action)}*${cleanup.who ? `\n${esc(cleanup.who)}` : ""}`.slice(0, 2900) } });
+  for (const x of closing) {
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: `${NOT_CALLS[x.kind]} *${esc(x.action)}*${x.who ? `\n${esc(x.who)}` : ""}`.slice(0, 2900) } });
+  }
   const more = Number(q.total) - items.length;
   blocks.push({ type: "context", elements: [{ type: "mrkdwn", text:
     (more > 0 ? `${more} more not shown, lowest priority first. ` : "") +

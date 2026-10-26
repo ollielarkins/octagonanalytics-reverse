@@ -54,6 +54,12 @@ verify_jwt = true
 [functions.storage-upload]
 verify_jwt = true
 
+[functions.slack-actions]
+# Slack interactivity for the action queue's Done buttons (0118). Slack cannot send a Supabase JWT, so
+# this is open, and every request is checked against the Team Briefs app's Slack signature
+# (SLACK_BRIEFS_SIGNING_SECRET) before anything else. Writes only on the consultant's own Confirm.
+verify_jwt = false
+
 [functions.daily-queue]
 # The 08:30 action queue DMs (priority 4, migration 0115). Driven by pg_cron via action_queue_if_due(),
 # which presents app_settings.cron_bearer. Holds SLACK_BOT_TOKEN, so it stays locked.
