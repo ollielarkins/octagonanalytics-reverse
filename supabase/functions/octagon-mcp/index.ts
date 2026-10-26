@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.75.5" };
+const SERVER = { name: "octagon-analytics", version: "3.76.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -731,7 +731,7 @@ const TOOLS = [
   { name: "log_activity", description: "Log a meeting (e.g. a client visit) or a task in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Link it to a client, job or candidate so it shows against that record. Meetings need a start and end; tasks need only a start. Times are 'YYYY-MM-DD HH:MM'. Created by and owned by you. Use for 'log my visit to X yesterday', 'remind me to chase Y on Friday'.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "meeting or task" }, title: { type: "string" }, start: { type: "string", description: "YYYY-MM-DD HH:MM" }, end: { type: "string", description: "YYYY-MM-DD HH:MM — meetings only" }, description: { type: "string" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, candidate: { type: "string", description: "candidate name to link" }, type_id: { type: "integer", description: "task type id (reference_list kind=task_types), or a meeting type id" }, meeting_type: { type: "string", description: "REQUIRED for a meeting: client, internal, video interview, f2f interview or phone interview (or the exact RecruitCRM label). Ask the recruiter if it isn't clear; never guess. Client visits only count toward the 2-per-quarter minimum when typed Client Meeting." }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["kind", "title", "start"], additionalProperties: false } },
   { name: "schedule", description: "Your interviews and client meetings straight from RecruitCRM (most never reach Outlook): interviews today, interviews tomorrow to prep for, later interviews, interviews already held with no feedback logged since (no feedback call, candidate note or stage move after the interview time), and client meetings coming up. Defaults: the next 7 days, and interviews back to 3 days ago for feedback. Times are UK time. Managers can pass consultant. Candidate names are internal PII. Read-only.", inputSchema: { type: "object", properties: { days_ahead: { type: "integer", description: "default 7, max 21" }, days_back: { type: "integer", description: "how far back to look for feedback due, default 3, max 14" }, consultant: { type: "string", description: "managers only" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "meeting_review", description: "Your meetings in RecruitCRM that have no meeting type, each with a suggested type to confirm, so client visits count toward the minimum of 2 per consultant per quarter. action=list (default, read-only): your untyped meetings for a window (default this quarter to date), plus how many Client Meetings you have this quarter. action=set: give the meetings to change as items [{meeting_id, type}] (type: client, internal, video interview, f2f interview, phone interview, or skip for a personal/calendar entry that isn't work), up to 25. WRITE, two-step: preview, then confirm=true. Only your own meetings. Never set a type the recruiter didn't choose: present the suggestions and let them pick.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list or set" }, from: { type: "string", description: "YYYY-MM-DD, default start of this quarter" }, to: { type: "string", description: "YYYY-MM-DD exclusive, default tomorrow" }, consultant: { type: "string", description: "managers only: review someone else's (list only)" }, items: { type: "array", description: "for set: [{meeting_id, type}]", items: { type: "object", properties: { meeting_id: { type: "integer" }, type: { type: "string" } }, required: ["meeting_id", "type"] } }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
-  { name: "call_tagging", description: "Set the category on your Devyce calls in RecruitCRM, so BD and client calls count toward the weekly targets (only categorised calls count). action=set: items [{call_id, type}] (type: client, client info, bd, interview feedback, interview prep, pitch, voicemail, or the exact label), up to 25. WRITE, two-step: preview, then confirm=true. Only your own calls. Never choose a category for the recruiter: numbers are shared and some people are both candidate and client, so they pick. Each change is read back from RecruitCRM and checked.", inputSchema: { type: "object", properties: { action: { type: "string", description: "set" }, items: { type: "array", description: "[{call_id, type}]", items: { type: "object", properties: { call_id: { type: "integer" }, type: { type: "string" } }, required: ["call_id", "type"] } }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
+  { name: "call_tagging", description: "Set the category on your Devyce calls in RecruitCRM, so BD and client calls count toward the weekly targets (only categorised calls count). action=list (default, read-only): your untagged calls of 30 seconds or more for a window (default today, UK time), contact calls first, each with who it was with and a SUGGESTED category and why (how you tagged that person before, the company's status, or an interview in the diary). Suggestions are never applied: show them and let the recruiter choose. action=set: items [{call_id, type}] (type: client, client info, bd, interview feedback, interview prep, pitch, voicemail, or the exact label), up to 25. WRITE, two-step: preview, then confirm=true. Only your own calls. Never choose a category for the recruiter: numbers are shared and some people are both candidate and client, so they pick. Each change is read back from RecruitCRM and checked.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list or set" }, from: { type: "string", description: "list: YYYY-MM-DD, default today" }, to: { type: "string", description: "list: YYYY-MM-DD exclusive, default tomorrow" }, consultant: { type: "string", description: "list, managers only: someone else's calls" }, items: { type: "array", description: "[{call_id, type}]", items: { type: "object", properties: { call_id: { type: "integer" }, type: { type: "string" } }, required: ["call_id", "type"] } }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "update_deal", description: "Change a deal in RecruitCRM — most importantly moving it to Won and entering the value, which IS how billing is recorded at Octagon. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the deal by its numeric ID, slug, or part of its name. stage accepts a stage name (Won, Lost, Open, CV Sent, Interview Request, 1st/2nd/3rd Interview, Offered, Declined, Job Lead) resolved against the live pipeline. Note RecruitCRM requires name, value, stage and close_date on every edit, so the tool reads the deal first and preserves anything you don't change.", inputSchema: { type: "object", properties: { deal: { type: "string", description: "deal ID, slug, or part of the name" }, stage: { type: "string", description: "target stage name" }, value: { type: "number", description: "deal value (the fee)" }, name: { type: "string", description: "rename the deal" }, close_date: { type: "string", description: "YYYY-MM-DD" }, reason: { type: "string", description: "why the deal was lost - only for stage Lost/Declined. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["deal"], additionalProperties: false } },
   { name: "create_deal", description: "Create a deal in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: preview first, then confirm=true. Requires a name, a value, a stage and a close date. Optionally link it to a job, client or candidate. Billing is Won deal value, so a deal is how revenue enters the system — created owned by and attributed to you.", inputSchema: { type: "object", properties: { name: { type: "string", description: "deal name" }, value: { type: "number", description: "deal value (the fee)" }, stage: { type: "string", description: "stage name, e.g. Open or Job Lead" }, close_date: { type: "string", description: "YYYY-MM-DD" }, client: { type: "string", description: "company name to link" }, job: { type: "string", description: "job ID/slug/title to link" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["name", "value", "stage", "close_date"], additionalProperties: false } },
   { name: "pitch_history", description: "Speculative pitches recorded in RecruitCRM — who has been pitched to whom, and when. This is the 'pitched candidates' activity the business asks about; it lives in RecruitCRM's pitch feature, which nothing else in this platform reads. Give a candidate (name or slug) to see everywhere they've been pitched, or a contact slug to see everyone pitched to them, or both for that pair's history. Returns candidate and contact names (PII). Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name, slug or RecruitCRM candidate ID" }, contact_slug: { type: "string", description: "contact slug" }, ...AUTH_ARG }, additionalProperties: false } },
@@ -2371,8 +2371,93 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
   }
 
   if (name === "call_tagging") {
-    const action = String(args?.action ?? "set").toLowerCase();
-    if (action !== "set") return toolText({ error: "action must be set" });
+    const action = String(args?.action ?? (Array.isArray(args?.items) ? "set" : "list")).toLowerCase();
+    if (action === "list") {
+      // 3.76.0: the consultant's untagged calls with a suggested category. Suggestions only: the
+      // consultant picks every one, because numbers are shared and people are both candidate and client.
+      const names = await consultantNameMap();
+      let ownerId = actor.id != null ? String(actor.id) : null, who = "you";
+      if (args?.consultant) {
+        if (!actor.sees_team) return toolText({ error: "manager_only", message: "Only managers can see someone else's calls." });
+        const want = String(args.consultant).toLowerCase();
+        const hit = [...names.entries()].filter(([, n]) => String(n).toLowerCase().includes(want));
+        if (hit.length !== 1) return toolText({ error: hit.length ? "ambiguous_consultant" : "consultant_not_found", matches: hit.map(([, n]) => n) });
+        ownerId = hit[0][0]; who = hit[0][1];
+      }
+      if (!ownerId || ownerId === "0") return toolText({ error: "no_consultant", message: "This token has no consultant record; pass consultant=<name>." });
+      const today = londonDay(new Date());
+      const fromD = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.from ?? "")) ? String(args.from) : today;
+      const toD = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.to ?? "")) ? String(args.to)
+        : new Date(Date.parse(fromD + "T12:00:00Z") + 86400_000).toISOString().slice(0, 10);
+      // call_started_on is UTC; widen by a day and trim to UK calendar days below.
+      const { data: calls, error } = await db.from("call_activity")
+        .select("recruitcrm_id,call_type,custom_call_type,call_started_on,duration_seconds,related_to,related_to_type")
+        .eq("consultant_recruitcrm_id", Number(ownerId)).is("custom_call_type", null).gte("duration_seconds", 30)
+        .gte("call_started_on", new Date(Date.parse(fromD + "T00:00:00Z") - 86400_000).toISOString())
+        .lt("call_started_on", new Date(Date.parse(toD + "T00:00:00Z") + 86400_000).toISOString())
+        .order("call_started_on", { ascending: false }).limit(200);
+      if (error) return toolText({ error: error.message });
+      const inWindow = (calls ?? []).filter((c: any) => { const d = londonDay(new Date(c.call_started_on)); return d >= fromD && d < toD; });
+      const ordered = [...inWindow.filter((c: any) => c.related_to_type === "contact"), ...inWindow.filter((c: any) => c.related_to_type !== "contact")];
+      const shown = ordered.slice(0, 25);
+      const slugs = [...new Set(shown.map((c: any) => String(c.related_to ?? "")).filter(Boolean))];
+      // How this person's calls were tagged before, by anyone: the strongest hint there is.
+      const prior = new Map<string, string>();
+      if (slugs.length) {
+        const { data: past } = await db.from("call_activity").select("related_to,custom_call_type")
+          .in("related_to", slugs).not("custom_call_type", "is", null).order("call_started_on", { ascending: false }).limit(1000);
+        const tally = new Map<string, Map<string, number>>();
+        for (const r of past ?? []) {
+          if (/voicemail/i.test(r.custom_call_type)) continue;
+          const m = tally.get(r.related_to) ?? new Map(); m.set(r.custom_call_type, (m.get(r.custom_call_type) ?? 0) + 1); tally.set(r.related_to, m);
+        }
+        for (const [k, m] of tally) prior.set(k, [...m.entries()].sort((a, b) => b[1] - a[1])[0][0]);
+      }
+      const candSlugs = shown.filter((c: any) => c.related_to_type === "candidate").map((c: any) => String(c.related_to));
+      const [{ data: cands }, { data: ivs }] = await Promise.all([
+        candSlugs.length ? db.from("candidates").select("slug,name").in("slug", candSlugs) : Promise.resolve({ data: [] as any[] }),
+        candSlugs.length ? db.from("meetings").select("candidate_slug,start_at,meeting_type").in("candidate_slug", candSlugs).is("deleted_at", null)
+          .ilike("meeting_type", "%interview%") : Promise.resolve({ data: [] as any[] }),
+      ]);
+      const cName = new Map((cands ?? []).map((c: any) => [c.slug, c.name]));
+      // Contacts are not mirrored: their name and company come live from RecruitCRM, once each.
+      const contactInfo = new Map<string, any>();
+      for (const slug of new Set(shown.filter((c: any) => c.related_to_type === "contact").map((c: any) => String(c.related_to)))) {
+        const r = await crm("GET", `/contacts/${slug}`);
+        const d = r.ok ? (r.json?.data ?? r.json ?? {}) : {};
+        contactInfo.set(slug, { name: [d.first_name, d.last_name].filter(Boolean).join(" ") || null, company_slug: d.company_slug ?? d.company?.slug ?? null });
+      }
+      const coSlugs = [...new Set([...contactInfo.values()].map((x: any) => x.company_slug).filter(Boolean))];
+      const { data: cos } = coSlugs.length ? await db.from("clients").select("company_slug,company_name,company_status").in("company_slug", coSlugs) : { data: [] as any[] };
+      const coBy = new Map((cos ?? []).map((c: any) => [c.company_slug, c]));
+      const rows = shown.map((c: any) => {
+        const slug = String(c.related_to ?? ""), at = new Date(c.call_started_on);
+        let withName: string | null = null, company: string | null = null, suggested: string | null = null, why: string | null = null;
+        if (c.related_to_type === "contact") {
+          const ci = contactInfo.get(slug) ?? {}; const co = ci.company_slug ? coBy.get(ci.company_slug) : null;
+          withName = ci.name ?? null; company = co?.company_name ?? null;
+          const st = String(co?.company_status ?? "");
+          if (prior.get(slug)) { suggested = prior.get(slug)!; why = "how this contact's calls were tagged before"; }
+          else if (/^client$/i.test(st)) { suggested = "Contact - Client"; why = `${company ?? "their company"} is a Client`; }
+          else if (/prospect|engaged|passive/i.test(st)) { suggested = "Contact - Prospect (BD)"; why = `${company ?? "their company"} is ${st}`; }
+        } else if (c.related_to_type === "candidate") {
+          withName = cName.get(slug) ?? null;
+          const mine = (ivs ?? []).filter((m: any) => m.candidate_slug === slug).map((m: any) => new Date(m.start_at).getTime());
+          const before = mine.filter((t: number) => t <= at.getTime() && at.getTime() - t <= 3 * 86400_000);
+          const after = mine.filter((t: number) => t > at.getTime() && t - at.getTime() <= 3 * 86400_000);
+          if (before.length) { suggested = "Interview Feedback"; why = "they had an interview in the diary in the 3 days before this call"; }
+          else if (after.length) { suggested = "Candidate - Interview Prep/Other"; why = "they have an interview in the diary within 3 days"; }
+          else if (prior.get(slug)) { suggested = prior.get(slug)!; why = "how this candidate's calls were tagged before"; }
+          else { suggested = "Candidate - Job Pitch / Qualifying"; why = "a candidate call with no interview in the diary"; }
+        }
+        return { call_id: c.recruitcrm_id, when: londonFmt.format(at), minutes: Math.round(c.duration_seconds / 6) / 10,
+          direction: c.call_type ?? null, with: withName, with_type: c.related_to_type ?? null, company, suggested, why };
+      });
+      return toolText({ consultant: who, window: { from: fromD, to_exclusive: toD }, untagged: inWindow.length,
+        untagged_contact_calls: inWindow.filter((c: any) => c.related_to_type === "contact").length, shown: rows.length, calls: rows,
+        note: "Untagged calls of 30 seconds or more, contact calls first. Suggestions only: the recruiter chooses each category, then action=set applies them (preview, then confirm). Only contact calls tagged BD or Client count toward the BD and client call targets." });
+    }
+    if (action !== "set") return toolText({ error: "action must be list or set" });
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Setting call categories requires a write-enabled token." });
     const items = Array.isArray(args?.items) ? args.items : [];
     if (!items.length) return toolText({ error: "missing_items", message: "Give the calls to change as items [{call_id, type}]." });
