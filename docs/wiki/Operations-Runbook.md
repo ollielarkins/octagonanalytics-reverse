@@ -120,7 +120,7 @@ Daily action queue settings, in `app_settings`:
 
 | Key | Meaning |
 |---|---|
-| `action_queue_pilot` | RecruitCRM ids that get a DM. 26/10/2026: Will Drake, Keelan Riley, Adam Barnett |
+| `action_queue_pilot` | RecruitCRM ids that get a DM. 26/10/2026: Will Drake, Keelan Riley, Adam Barnett, Bhavesh Patel |
 | `action_queue_shadow` | `true` sends every DM to `action_queue_shadow_email` instead, labelled. Set to `false` on 26/10/2026, so the pilots get their own |
 | `action_queue_shadow_email` | where shadow DMs go |
 
