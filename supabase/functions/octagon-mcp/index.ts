@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.75.4" };
+const SERVER = { name: "octagon-analytics", version: "3.75.5" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -1602,8 +1602,21 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
     const inner = r.json?.data ?? r.json;
     const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
+    // 3.75.5: a job's Internal Job Description is a job custom field, not an attachment, so it never
+    // shows here. Say so in the RESULT: tool descriptions are cached by the client, results are not,
+    // so this reaches every recruiter at once (26/10/2026, job 6097 stopped at "0 files").
+    let internal_job_description: string | undefined;
+    if (entity === "job") {
+      const { data: jr } = await db.from("jobs").select("custom_fields").eq("slug", slug).maybeSingle();
+      internal_job_description = String(jr?.custom_fields?.["3"]?.value ?? "").trim()
+        ? "This job HAS an Internal Job Description. It is stored in the job's Internal Job Description field, not as an attachment, so it is not listed here. Call job_spec for this job to read its text."
+        : "No Internal Job Description is recorded on this job.";
+    } else if (entity === "company") {
+      internal_job_description = "A job's Internal Job Description is stored on the job itself, not on the company. Call job_spec for the job to read it.";
+    }
     return toolText({ about: `${entity}: ${who}`, count: list.length,
       files: list.map((f: any) => ({ name: f.file_name, link: f.file_link, added: (f.created_on ?? "").toString().slice(0, 10) })),
+      internal_job_description,
       note: "Links point at documents containing personal data — internal use only." });
   }
 
