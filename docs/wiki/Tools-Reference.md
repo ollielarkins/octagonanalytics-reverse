@@ -28,7 +28,7 @@ This page is for knowing what's possible, and for debugging when an answer looks
 | `notes_kpi` | Leads, internal interviews and job-order-forms, by consultant and period | No |
 | `notes_read` | Notes already written against a candidate, job or client | Yes |
 | `pitch_history` | Where a candidate has been pitched, and to whom | Yes |
-| `candidate_profile` | Work history, education, every job they're in play on | Yes |
+| `candidate_profile` | Work history, education, every job they're in play on, and when they were last called (with or without a Devyce summary) | Yes |
 | `activity_report` | Meetings (client visits) or tasks for a window | Yes |
 | `files_list` | CVs and documents attached to a candidate, job or client | Yes |
 | `inbox` | Your own Outlook inbox: what's new, read one, connect or disconnect. See [Inbox](Inbox) | Yes |

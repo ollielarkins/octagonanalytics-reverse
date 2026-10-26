@@ -181,4 +181,9 @@ an intake under it is opt-in per call and the recruiter is asked first. `note_ty
 `POST /notes` has not been tested live yet: check the first internal-interview save in RecruitCRM.
 Suggesting Devyce call tags from the summary is a later step.
 
+**Follow-up 26/10/2026.** `call_notes` had no calls in its first six days, because nothing led
+recruiters to it. `candidate_profile` (3.73.0) now returns `latest_call`: date, caller, and whether
+a Devyce summary exists, never the text, so it needs no audit row. The `/intake` skill
+(octagon-reporting 0.1.5) and `/interviewprep` read the summary through `call_notes`.
+
 **Status:** **Built 20/10/2026** (octagon-mcp 3.70.0, migration 0104). Not live until deployed.
