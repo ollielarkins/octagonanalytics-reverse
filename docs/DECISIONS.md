@@ -268,7 +268,7 @@ metric six of eight were. A list that names everyone isn't a list of exceptions.
 ## Slack: the admin bot carries sync alerts only
 
 **Decision.** The analytics-admin bot (`alert_webhook_url`) posts sync and cron alerts only. The
-briefs post from the "(Claude) - Team Briefs" app to #claude-teambriefs (`digest_webhook_url`), and
+briefs post from the "(Claude) - Team Briefs" app to #briefs (`digest_webhook_url`), and
 the DMs use that app's bot token (0114).
 
 **Why.** Decided 26/10/2026, when the briefs moved to their own channel: the admin bot should only

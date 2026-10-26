@@ -55,7 +55,7 @@ confirm.
 | Commands | 75 slash commands in four plugins |
 | Sync | health-monitored feeds plus a cron manifest watchdog (22 jobs declared) |
 | Webhooks | 15 subscriptions, including the four `*.deleted` events |
-| Slack | Morning, Day End and Week Ahead briefs in #claude-teambriefs; the 08:30 action queue DM (pilot of four); the Monday manager exceptions DM |
+| Slack | Morning, Day End and Week Ahead briefs in #briefs; the 08:30 action queue DM (pilot of four); the Monday manager exceptions DM |
 | Active tokens | 20, held by 11 people (OAuth sessions are rows of their own) |
 
 ### The data
