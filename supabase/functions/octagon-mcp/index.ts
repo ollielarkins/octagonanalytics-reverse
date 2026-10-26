@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.79.0" };
+const SERVER = { name: "octagon-analytics", version: "3.80.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -1369,6 +1369,10 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const { data, error } = await db.rpc("kpis_report");
     if (error) return toolText({ error: error.message });
     if (!actor.sees_team) { const vn = await consultantName(actor.id); data.consultants = (data.consultants ?? []).filter((x: any) => x.name === vn); }
+    // 3.80.0: priority 5. Each consultant's plan, worked back from their billing target (never below
+    // the flat minimums), alongside the flat targets the scorecard already shows.
+    const { data: plan } = await db.rpc("weekly_plan", { p_consultant: actor.sees_team ? null : (actor.id != null ? Number(actor.id) : -1) });
+    data.plan = plan ?? null;
     return widgetResult(data, SCORE_UI, `Weekly KPI scorecard (inline widget): ${(data.consultants ?? []).length} recruiter(s), week from ${data.week_start ?? "?"}.`);
   }
   if (name === "billing") {
@@ -3108,7 +3112,9 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       bd_calls: named(people.filter((c: any) => c.bd_calls >= 10), "bd_calls"),
       offers: people.filter((c: any) => c.offers > 0).sort((a: any, b: any) => b.offers - a.offers).map((c: any) => c.offers > 1 ? `${first(c.name)} (${c.offers})` : first(c.name)),
     };
-    if (action === "report") return toolText({ ...rep, shout_outs: shout, thresholds: "10+ CVs sent, 4+ interview requests, 10+ BD calls, any offer",
+    const { data: wplan } = await db.rpc("weekly_plan");
+    const planRows = ((wplan?.consultants ?? []) as any[]).filter((x) => people.some((c: any) => c.name === x.consultant));
+    if (action === "report") return toolText({ ...rep, shout_outs: shout, plan: planRows, thresholds: "10+ CVs sent, 4+ interview requests, 10+ BD calls, any offer",
       notes: "Same counting as /week. Candidates assigned counts each candidate put on a job, credited to whoever assigned them (tracked from 01/09/2026). Rows with no activity are left out; leavers tagged left. Candidate names are internal: this email is for the team only." });
 
     if (action === "draft") {
@@ -3135,6 +3141,13 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         rep.offers.map((o: any) => [o.candidate, o.company, o.job, o.current_stage, dmy(o.current_stage_date), o.offered_by])) : "<p>No offers this week.</p>";
       const jobsT = (rep.jobs ?? []).length ? table(["Job", "Company", "Contact", "Status", "Date added", "Owner"],
         rep.jobs.map((j: any) => [j.title, j.company, j.contact ?? "", j.status, dmy(j.date_added), j.owner])) : "<p>No new jobs this week.</p>";
+      // Priority 5: actuals against each consultant's plan (worked back from billing), with the gap.
+      const gap = (a: any, p: any) => { const d = Number(a ?? 0) - Number(p ?? 0); return d >= 0 ? `${a} of ${p}` : `${a} of ${p} (${d})`; };
+      const planT = planRows.length ? table(["Team member", "CVs sent", "IV requests", "Interviews", "Step to work on", "Quarter so far"],
+        planRows.map((x: any) => [x.consultant, gap(x.this_week?.cv_sent, x.plan?.cv_sent), gap(x.this_week?.interview_request, x.plan?.interview_request),
+          gap(x.this_week?.first_interview, x.plan?.first_interview), x.ratio_to_work_on ?? "",
+          x.quarter_position?.target == null ? `£${Number(x.quarter_position?.won_by_close_date ?? 0).toLocaleString("en-GB")} (no target set)`
+            : `£${Number(x.quarter_position?.won_by_close_date ?? 0).toLocaleString("en-GB")} of £${Number(x.quarter_position.target).toLocaleString("en-GB")}`])) : "";
       const html = `<div style="font-family:Calibri,Arial,sans-serif;font-size:15px">`
         + `<p>${h(args?.greeting ?? "Hi all,")}</p>` + para(args?.intro)
         + `<p>Here's how the week shaped up:</p><ul>`
@@ -3144,7 +3157,9 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         + shoutLine("10+ CVs sent", shout.cv_sent, c.cv_sent) + shoutLine("4+ interview requests", shout.interview_requests, c.interview_requests)
         + shoutLine("10+ BD calls", shout.bd_calls, c.bd_calls) + shoutLine("Offers landed: congrats to", shout.offers, c.offers) + `</ul>`
         + para(args?.closing)
-        + `<p><b>Team</b></p>${team}<p><b>Offers</b></p>${offersT}<p><b>Jobs</b></p>${jobsT}</div>`;
+        + `<p><b>Team</b></p>${team}`
+        + (planT ? `<p><b>Against plan</b> (each person's weekly plan, worked back from their billing target)</p>${planT}` : "")
+        + `<p><b>Offers</b></p>${offersT}<p><b>Jobs</b></p>${jobsT}</div>`;
 
       // Recipients: as given, else every current consultant with an email on record.
       let to: string[] = Array.isArray(args?.to) ? args.to.map((x: any) => String(x).trim()).filter(Boolean) : [];

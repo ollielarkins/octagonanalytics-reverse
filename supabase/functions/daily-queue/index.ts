@@ -33,7 +33,7 @@ async function slackUserByEmail(email: string): Promise<string | null> {
 }
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-const NOT_CALLS: Record<string, string> = { cleanup: ":broom:", meetings: ":spiral_calendar_pad:", client_visits: ":handshake:" };
+const NOT_CALLS: Record<string, string> = { plan: ":dart:", cleanup: ":broom:", meetings: ":spiral_calendar_pad:", client_visits: ":handshake:" };
 
 function blocksFor(q: any, shadowFor: string | null) {
   const first = String(q.consultant ?? "").split(" ")[0];
