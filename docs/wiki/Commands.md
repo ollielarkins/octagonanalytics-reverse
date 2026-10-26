@@ -3,9 +3,15 @@
 75 slash commands, in four plugins. Type `/` in Cowork or a chat to see them, or just ask in plain
 English - every command is a shortcut for something you can phrase yourself.
 
-> [!NOTE]
+> [!WARNING]
 > Commands that change RecruitCRM are marked **write**. Every one previews first and applies
 > only on your explicit confirmation. Nothing is written on the model's judgement alone.
+
+> [!NOTE]
+> You can further specify commands by adding context after the command.
+> For example, with **/find**, add text like **a candidate that fits X criteria**:
+>
+> _"/find a candidate that hasn't been contacted yet this week"_
 
 ## Your day
 
