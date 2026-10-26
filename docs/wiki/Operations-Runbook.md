@@ -111,7 +111,8 @@ Two Slack apps post for the platform:
   Since 0114 nothing else holds its URL. Keep it that way.
 - **"(Claude) - Team Briefs"** (shown as "Ollie's Team Briefs"):
   - Its webhook (`digest_webhook_url`) posts the morning, Day End and Week Ahead briefs to
-    #claude-teambriefs. With it unset, the briefs don't post.
+    #briefs (renamed from #claude-teambriefs on 26/10/2026; the webhook is tied to the channel, not
+    its name, so renaming it doesn't break posting). With it unset, the briefs don't post.
   - Its bot token (the `SLACK_BOT_TOKEN` function secret) sends the 08:30 action queue DMs from
     `daily-queue`. Scopes: `chat:write`, `im:write`, `users:read`, `users:read.email`. It must be the
     plain `xoxb-` value; a malformed one is recorded in `sync_state` as `action_queue`.
@@ -137,7 +138,7 @@ must be off, or Slack won't call the URL. Done items are kept in `action_queue_d
 
 | Key | Meaning |
 |---|---|
-| `manager_exceptions_emails` | Comma-separated work emails that get the Monday DM. 26/10/2026: Oliver only |
+| `manager_exceptions_emails` | Comma-separated work emails that get the Monday DM. 26/10/2026: Oliver and Bhavesh Patel |
 | `exceptions_exclude_ids` | RecruitCRM ids left out of `team_exceptions`. 26/10/2026: Dale Barnett |
 
 The team figures in it are for managers only: never point it at a channel.

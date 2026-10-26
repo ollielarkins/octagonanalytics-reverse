@@ -255,7 +255,7 @@ update mcp_tokens set active = false where label = '…';
 ```
 
 Slack webhooks live in `app_settings`: `alert_webhook_url` (sync alerts only, the admin bot),
-`digest_webhook_url` (the briefs, #claude-teambriefs), `standup_webhook_url` (weekday standup, unset).
+`digest_webhook_url` (the briefs, #briefs), `standup_webhook_url` (weekday standup, unset).
 The action queue DMs use the `SLACK_BOT_TOKEN` function secret. See the runbook's Slack section.
 
 ---
