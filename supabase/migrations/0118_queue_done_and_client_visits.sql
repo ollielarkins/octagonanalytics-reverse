@@ -244,7 +244,7 @@ as $function$
     select * from (
       select * from offers union all select * from prep union all select * from fb union all select * from unbooked
       union all select * from cvs union all select * from cold union all select * from bd) a
-    where a.item_key not in (select item_key from done)
+    where not exists (select 1 from done where done.item_key = a.item_key)   -- not "not in": a null key must not vanish
   ),
   numbered as (
     select a.*, row_number() over (partition by kind order by age desc nulls last, who) n_in_kind from allrows a
