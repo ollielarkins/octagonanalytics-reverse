@@ -1,5 +1,5 @@
 // recruitcrm-sync — RecruitCRM → Supabase mirror. Locked (verify_jwt=true).
-// Entities: consultants, clients, jobs, candidates, calls (call_activity via /call-logs), deals.
+// Entities: consultants, clients, jobs, candidates, calls (call_activity via /call-logs), deals, meetings (diary window).
 // Modes: backfill | backfill_all | incremental | reconcile | history (candidate_stage_events).
 // deals feeds the billing report (Won deal_value); owner-attributed via deals.owner_recruitcrm_id.
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -150,6 +150,73 @@ const mapNote = (n: any) => ({
   created_on: n.created_on ?? null,
   updated_on: n.updated_on ?? null,
 });
+
+// Meetings diary (0110): the morning brief needs each consultant's interviews and client meetings,
+// which RecruitCRM keeps as meetings and which mostly never reach Outlook. Refreshes a rolling window
+// (14 days back, 10 ahead) per active consultant through /meetings/search, the owner-filtered path
+// octagon-mcp's schedule tool already relies on. Rows in the window that RecruitCRM no longer returns
+// are soft-deleted, but only after a complete fetch for that consultant: a failed page deletes nothing.
+const assocSlugs = (v: any): string[] => {
+  if (v == null || v === "") return [];
+  if (Array.isArray(v)) return v.map((x: any) => (typeof x === "object" && x ? (x.slug ?? x.id) : x)).filter((x: any) => x != null && x !== "").map(String);
+  return String(v).split(",").map((s) => s.trim()).filter(Boolean);
+};
+const crmTimeIso = (v: any): string | null => {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(s) ? s : s.replace(" ", "T") + "Z");   // bare times are UTC
+  return isNaN(d.getTime()) ? null : d.toISOString();
+};
+const mapMeeting = (m: any) => {
+  const o = m?.owner ?? m?.owner_id;
+  const owner = o == null || o === "" ? null : typeof o === "object" ? (o.id ?? null) : (/^\d+$/.test(String(o)) ? Number(o) : null);
+  const cand = m.related_to_type === "candidate" && m.related_to ? String(m.related_to) : assocSlugs(m.associated_candidates)[0] ?? null;
+  return {
+    recruitcrm_id: m.id, title: typeof m.title === "string" ? m.title.slice(0, 500) : null,
+    meeting_type: m.meeting_type?.label ?? (typeof m.meeting_type === "string" && m.meeting_type ? m.meeting_type : null),
+    owner_recruitcrm_id: owner, start_at: crmTimeIso(m.start_date), end_at: crmTimeIso(m.end_date),
+    related_to: m.related_to != null ? String(m.related_to) : null, related_to_type: m.related_to_type ?? null,
+    candidate_slug: cand, job_slug: assocSlugs(m.associated_jobs)[0] ?? null,
+    synced_at: new Date().toISOString(), deleted_at: null,
+  };
+};
+async function syncMeetingsWindow() {
+  const day = (ms: number) => new Date(Date.now() + ms).toISOString().slice(0, 10);
+  const from = day(-14 * 86400_000), to = day(11 * 86400_000);
+  const { data: cons } = await db.from("consultants").select("recruitcrm_id").is("deleted_at", null).eq("active", true);
+  let upserted = 0, removed = 0, failed = 0;
+  for (const c of cons ?? []) {
+    const owner = String(c.recruitcrm_id), seen = new Map<any, any>();
+    let complete = false;
+    for (let page = 1; page <= 10; page++) {
+      const qs = new URLSearchParams({ starting_from: from, starting_to: to, owner_id: owner, page: String(page) });
+      const r = await crm(`/meetings/search?${qs}`);
+      if (!r.ok) break;
+      const inner = r.json?.data ?? r.json;
+      const list = Array.isArray(inner) ? inner : (inner?.records ?? []);
+      const before = seen.size;
+      for (const m of list) if (m?.id) seen.set(m.id, m);
+      if (!r.json?.next_page_url || !list.length || seen.size === before) { complete = true; break; }
+      await sleep(100);
+    }
+    if (!complete) { failed += 1; continue; }
+    // The search can return other people's meetings; keep the owner's, as scheduleFor does.
+    const rows = dedupeBy([...seen.values()].map(mapMeeting), byRecruitcrmId)
+      .filter((m: any) => m.owner_recruitcrm_id == null || String(m.owner_recruitcrm_id) === owner)
+      .map((m: any) => ({ ...m, owner_recruitcrm_id: m.owner_recruitcrm_id ?? Number(owner) }));
+    if (rows.length) await db.from("meetings").upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
+    upserted += rows.length;
+    const { data: gone } = await db.from("meetings").update({ deleted_at: new Date().toISOString() })
+      .eq("owner_recruitcrm_id", Number(owner)).is("deleted_at", null)
+      .gte("start_at", from).lt("start_at", to)
+      .not("recruitcrm_id", "in", `(${rows.map((m: any) => m.recruitcrm_id).join(",") || "0"})`)
+      .select("recruitcrm_id").throwOnError();
+    removed += gone?.length ?? 0;
+  }
+  const status = failed ? `partial:${failed}_failed` : "ok";
+  await db.from("sync_state").upsert({ entity: "meetings", last_run_at: new Date().toISOString(), last_status: status }, { onConflict: "entity" });
+  return { entity: "meetings", window: { from, to }, consultants: cons?.length ?? 0, upserted, removed, failed };
+}
 
 // Off-limit list -> mirror flags. Pages through the whole list (the old single call stopped at 100
 // with no paging), and applies it in ONE transaction via apply_off_limit(), so a reader never sees
@@ -651,6 +718,7 @@ Deno.serve(async (req) => {
       if (entity === "all" || entity === "jobs") await step("jobs", async () => { const [cb, sb] = await jobMaps(); return incremental("jobs", "jobs", mapJobFactory(cb, sb), "jobs"); });
       if (entity === "all" || entity === "calls") await step("calls", async () => { const cn = await consNameMap(); return incremental("calls", "call-logs", mapCallFactory(cn), "call_activity"); });
       if (entity === "all" || entity === "deals") await step("deals", () => incremental("deals", "deals", mapDeal, "deals"));
+      if (entity === "all" || entity === "meetings") await step("meetings", () => syncMeetingsWindow());
       return Response.json(out);
     }
 
