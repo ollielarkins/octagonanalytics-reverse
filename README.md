@@ -15,7 +15,7 @@ always-current mirror of the firm's recruitment data — exposed as **dashboards
 
 | | |
 |---|---|
-| Connector | `octagon-mcp` **3.81.1** — 72 tools, 26 prompts |
+| Connector | `octagon-mcp` **3.82.0** — 72 tools, 26 prompts |
 | Commands | 75 slash commands across four plugins, in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) |
 | Migrations | 0000–0122 |
 | Writes | Live — 412 in `audit_log`, first on 12/08/2026; 361 in the last 30 days |
