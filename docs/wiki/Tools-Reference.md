@@ -11,6 +11,7 @@ This page is for knowing what's possible, and for debugging when an answer looks
 | `my_day` | Your attention list: aging offers, stalled candidates, active in play, cold roles, placed last 7 days | Yes |
 | `weekly_kpis` | This week's actuals vs target. Your row; admins see the team | No |
 | `billing` | Quarter to date vs target, plus open pipeline | No |
+| `deals_by_consultant` | Per consultant: Won in the window, Won dated later, deals at Offered and earlier stages now, candidate offers, offers with no deal | No |
 | `fee_analysis` | Fee total and median, fee percentage achieved, salary band placed, forecast on open roles | No |
 | `funnel_report` | Funnel and conversion for any window, consultant or team | No |
 | `rejection_report` | Client vs internal rejections, and the client rejection rate, by consultant and client | No |
