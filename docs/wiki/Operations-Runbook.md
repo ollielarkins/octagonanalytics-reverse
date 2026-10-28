@@ -104,7 +104,7 @@ watchdog that should have caught it had been deleted too. If you add a permanent
 
 ## Slack
 
-Two Slack apps post for the platform:
+Three Slack apps post for the platform:
 
 - **The analytics-admin bot**, a webhook into Ollie's DM, carries **sync alerts only**:
   `alert_webhook_url`, read by `check_sync_health`, `check_cron_manifest` and `sync_health_digest`.
@@ -142,6 +142,31 @@ must be off, or Slack won't call the URL. Done items are kept in `action_queue_d
 | `exceptions_exclude_ids` | RecruitCRM ids left out of `team_exceptions`. 26/10/2026: Dale Barnett |
 
 The team figures in it are for managers only: never point it at a channel.
+
+### Octagon Coach
+
+A separate Slack app (0129, 28/10/2026), created from `slack/octagon-coach-manifest.yml`. It only sends
+DMs to the people on its pilot list and never posts in channels. Scopes: `chat:write`, `im:write`,
+`users:read`, `users:read.email`. No event subscriptions. Interactivity is on, pointing at
+`coach-actions`, with Socket Mode off. Its secrets are `COACH_BOT_TOKEN` and `COACH_SIGNING_SECRET`.
+
+| Key | Meaning |
+|---|---|
+| `coach_pilot` | RecruitCRM ids that get the coach. 28/10/2026: Will Drake, Keelan Riley, Adam Barnett, Bhavesh Patel |
+| `coach_shadow` | `true` sends every coach DM to `coach_shadow_email` instead, labelled. On as of 28/10/2026 |
+| `coach_shadow_email` | where shadow DMs go |
+
+Schedules, all sent once at the London hour by `coach_if_due()`:
+
+| Job | When | What |
+|---|---|---|
+| `coach-midday` | 12:30 weekdays | today so far against today's share of the plan, queue progress, up to 3 things for the afternoon, one command to try |
+| `coach-wrap` | 16:45 weekdays | admin before home time; Fridays add the week against plan and Push & Tell. Not sent when there's nothing to say |
+| `coach-monday` | 08:45 Mondays | the week's plan, billing against the quarter's pace, pipeline, client visits |
+
+The rules are in `coach_nudges(consultant, slot)`. Pauses and mutes are in `coach_pause`; what each DM
+suggested is in `coach_log`, to check later whether the suggested commands were used. `select
+last_run_at, last_status from sync_state where entity = 'coach'` shows the last run.
 
 ## Tokens and access
 
