@@ -15,9 +15,9 @@ always-current mirror of the firm's recruitment data — exposed as **dashboards
 
 | | |
 |---|---|
-| Connector | `octagon-mcp` **3.82.0** — 72 tools, 26 prompts |
+| Connector | `octagon-mcp` **3.83.0** — 73 tools, 26 prompts |
 | Commands | 75 slash commands across four plugins, in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) |
-| Migrations | 0000–0129 |
+| Migrations | 0000–0130 |
 | Writes | Live — 412 in `audit_log`, first on 12/08/2026; 361 in the last 30 days |
 | Tool calls logged | 2,888 — 2,345 in the last 30 days, from 7 people |
 | Slack | Morning, Day End and Week Ahead briefs; the 08:30 action queue DM; the Monday manager exceptions DM; the Octagon Coach DMs (shadow mode) |
@@ -84,11 +84,11 @@ limitation.
 
 ```
 supabase/
-  migrations/           0000–0129 — schema, semantic layer, functions, cron
+  migrations/           0000–0130 — schema, semantic layer, functions, cron
   functions/
     recruitcrm-sync/      the mirror: backfill | incremental | reconcile | history | notes | offlimit | meetings
     recruitcrm-webhook/   near-live change trigger; tombstones on *.deleted events
-    octagon-mcp/          the MCP connector: 72 tools, 26 prompts, OAuth bridge
+    octagon-mcp/          the MCP connector: 73 tools, 26 prompts, OAuth bridge
     dashboard-data/       unauthenticated JSON API; its only caller now is slack-command
     daily-queue/          the 08:30 action queue DMs, and the Monday manager exceptions DM
     slack-actions/        Slack interactivity: the queue's Done buttons, written back to RecruitCRM
@@ -307,7 +307,7 @@ Why the numbers are what they are. Fuller treatment in
 | M2 Ingestion / sync | ✅ Done — plus webhooks, delete events and a cron manifest watchdog |
 | M3 Semantic layer | ✅ Done |
 | M4 Dashboards | ✅ Done |
-| M5 Claude query layer | ✅ Done — 72 tools, 26 prompts, 75 commands, per-user auth |
+| M5 Claude query layer | ✅ Done — 73 tools, 26 prompts, 75 commands, per-user auth |
 | M6 Claude action layer | ✅ Done — live, 412 audited writes since 12/08/2026 |
 | Coaching layer (Bhav's priorities 1–8, Oct 2026) | ✅ Done — diary, call tagging, Won deal per placement, daily action queue, client visits, weekly plan from billing, event-triggered drafts, manager exceptions |
 | M7 Hardening & rollout | ⚠️ Partial — auth, monitoring and a full command test done; `dashboard-data` exposure open, no CI, throwaway functions still deployed |
