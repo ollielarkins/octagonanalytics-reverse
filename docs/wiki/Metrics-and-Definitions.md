@@ -125,14 +125,14 @@ items; the totals say how many there were before the caps.
 | 2 | Interview on the next working day: prep call | all |
 | 3 | Interview held, nothing logged: feedback call | all |
 | 3 | New job in the last 3 days: kick it off | all |
-| 3 | Rejected by the client in the last 4 days, no note since: update the candidate | all |
 | 4 | Interview request unbooked, 2+ days (up to 14) | 3 |
 | 5 | CV sent, no response, 5+ working days | 3 |
 | 6 | Cold job, 7+ days without activity | 2 |
 | 7 | Behind on BD calls this week (Tuesday to Friday, tagged BD calls only) | 1 |
 
 Older offers and requests go to one "clean up these stages" line instead. Closing lines that are not
-calls: the Monday plan, Monday client visits, and Push & Tell on Fridays. Done in Slack logs a note
+calls: the Monday plan, Monday client visits, and Push & Tell on Fridays. Client rejections are not prompted (0126,
+28/10/2026); they stay in `/rejections`. Done in Slack logs a note
 in RecruitCRM on confirm and hides the item for a set number of days by kind.
 
 ## Client visits

@@ -87,7 +87,7 @@ Bhav's priorities 1 to 8, all live by 26/10/2026:
    your own Claude via "prep my queue".
 5. **Weekly plan from billing.** Worked back from the quarter's target, never below the minimums.
 6. **Client visits.** At least 2 per quarter, counted, with who to visit and why (`/visitplan`).
-7. **Event-triggered drafts.** New jobs, client rejections and Friday Push & Tell go into the queue.
+7. **Event-triggered drafts.** New jobs and Friday Push & Tell go into the queue.
 8. **Manager exceptions.** Only people with something to act on (`/exceptions`, Monday DM).
 
 Also: `/intake` from Devyce call summaries, Internal Job Descriptions read from the file, job order
