@@ -89,7 +89,7 @@ supabase/
     recruitcrm-sync/      the mirror: backfill | incremental | reconcile | history | notes | offlimit | meetings
     recruitcrm-webhook/   near-live change trigger; tombstones on *.deleted events
     octagon-mcp/          the MCP connector: 72 tools, 26 prompts, OAuth bridge
-    dashboard-data/       JSON API behind web/dashboard.html
+    dashboard-data/       unauthenticated JSON API; its only caller now is slack-command
     daily-queue/          the 08:30 action queue DMs, and the Monday manager exceptions DM
     slack-actions/        Slack interactivity: the queue's Done buttons, written back to RecruitCRM
     inbox-sync/           polls connected Outlook inboxes (Microsoft Graph), metadata only
@@ -99,7 +99,7 @@ supabase/
     dashboard/            defunct — Supabase cannot serve HTML
     recruitcrm-probe/     throwaway API probe, locked and gutted
     recruitcrm-discover/  throwaway discovery probe, locked and gutted
-web/dashboard.html      static page rendering dashboard-data
+web/octagon-connect.html  connector login handoff page
 docs/
   wiki/                 SOURCE OF TRUTH for the published wiki — edit here, then sync
   DECISIONS.md          design-decision log
@@ -211,10 +211,11 @@ Connector access is by per-user token in `mcp_tokens`, not a server secret. The 
 
 `GET /functions/v1/dashboard-data` requires no token, key or header, and returns firm Won revenue,
 the funnel, the deal pipeline and every consultant by name with their figures. The URL appears in
-this README, the wiki and `web/dashboard.html`, in a repository GitHub reports as public.
+this README and the wiki, in a repository GitHub reports as public.
 
 It stays open until the endpoint is authenticated or reduced to genuinely publishable fields.
-`web/dashboard.html` is what currently depends on it being open, so check that first.
+`web/dashboard.html`, the static page that read it, was removed on 28/10/2026. The remaining caller
+is `slack-command` (the Slack `/dashboard`), so that is the one to change when it is locked.
 
 The repository itself is clean of credentials: no personal access tokens or service-role keys are
 committed. The only credentials in tracked files are Supabase **anon** JWTs in cron definitions,
