@@ -305,3 +305,25 @@ custom field, not the job's files. `internal_jd_check` across the 113 open-job I
 to build.
 
 **Status:** **Live 26/10/2026** (octagon-mcp 3.75.4 and 3.75.5).
+
+---
+
+## The Octagon Coach: rule-based nudges from a separate Slack app
+
+**Decision.** A separate Slack app, Octagon Coach, DMs each pilot consultant at 12:30 (the main check:
+today so far, the afternoon's top 3, one command to try), 16:45 (admin before home time; Fridays add the
+week) and Monday 08:45 (the week ahead, billing pace). `coach_nudges()` picks each nudge by rule from
+their own numbers, and each one names the command or prompt to use in their own Claude. It sends at most
+3 suggestions, skips anything already done today, goes gentle on Mondays and Tuesdays, and has Pause for
+today and Mute buttons. It started in shadow mode.
+
+**Why.** The Team Briefs 1:1 DMs were well received, and a coach that points at the right command at the
+right time is where usage turns into habit. It is rule-based to keep the 13/10/2026 rule of no AI on the
+server, and a separate app so it can be muted, measured and switched off without touching the queue or
+the briefs. An AI-written coach in each person's own Claude (Slack connector plus a scheduled task) was
+considered and set aside for now. Redrawing the team briefs (Block Kit, then image cards) was tried and
+dropped on 28/10/2026; the briefs are unchanged.
+
+**Status:** **Live in shadow mode 28/10/2026** (0129, `coach-dm`, `coach-actions`). The pilots get it
+once `coach_shadow` is set to `false`.
+

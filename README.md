@@ -17,10 +17,10 @@ always-current mirror of the firm's recruitment data — exposed as **dashboards
 |---|---|
 | Connector | `octagon-mcp` **3.82.0** — 72 tools, 26 prompts |
 | Commands | 75 slash commands across four plugins, in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) |
-| Migrations | 0000–0122 |
+| Migrations | 0000–0129 |
 | Writes | Live — 412 in `audit_log`, first on 12/08/2026; 361 in the last 30 days |
 | Tool calls logged | 2,888 — 2,345 in the last 30 days, from 7 people |
-| Slack | Morning, Day End and Week Ahead briefs; the 08:30 action queue DM; the Monday manager exceptions DM |
+| Slack | Morning, Day End and Week Ahead briefs; the 08:30 action queue DM; the Monday manager exceptions DM; the Octagon Coach DMs (shadow mode) |
 
 Figures as of 26/10/2026.
 
@@ -84,7 +84,7 @@ limitation.
 
 ```
 supabase/
-  migrations/           0000–0122 — schema, semantic layer, functions, cron
+  migrations/           0000–0129 — schema, semantic layer, functions, cron
   functions/
     recruitcrm-sync/      the mirror: backfill | incremental | reconcile | history | notes | offlimit | meetings
     recruitcrm-webhook/   near-live change trigger; tombstones on *.deleted events
@@ -92,6 +92,8 @@ supabase/
     dashboard-data/       unauthenticated JSON API; its only caller now is slack-command
     daily-queue/          the 08:30 action queue DMs, and the Monday manager exceptions DM
     slack-actions/        Slack interactivity: the queue's Done buttons, written back to RecruitCRM
+    coach-dm/             the Octagon Coach DMs: 12:30, 16:45 and Monday 08:45
+    coach-actions/        Slack interactivity for the coach's Pause, Mute and Unmute buttons
     inbox-sync/           polls connected Outlook inboxes (Microsoft Graph), metadata only
     slack-command/        Slack /dashboard entry point
     digest-email/         scheduled digests
@@ -131,6 +133,8 @@ Postgres 17 · project name "Reporting for CRM"
 | `dashboard-data` | false | **Unauthenticated JSON API.** See the warning above |
 | `daily-queue` | true | 08:30 action queue DMs, and the Monday exceptions DM to managers. Driven by `pg_cron` with `cron_bearer` |
 | `slack-actions` | false | Slack interactivity for the queue's Done buttons. Verifies the Slack signature; previews, then writes the note on Confirm |
+| `coach-dm` | true | The Octagon Coach DMs, from its own Slack app. Driven by `pg_cron` with `cron_bearer` |
+| `coach-actions` | false | The coach's Pause, Mute and Unmute buttons. Verifies the coach app's Slack signature; writes only `coach_pause` |
 | `inbox-sync` | true | Polls connected Outlook inboxes every 5 minutes. Metadata only |
 | `slack-command` | false | Slack `/dashboard`; verifies the signing secret |
 | `digest-email`, `feedback` | mixed | Scheduled digests; connect-page issue capture |
@@ -156,6 +160,9 @@ can't be flipped by a stray CLI flag.
 | every 10 min | **cron manifest watchdog** — are the jobs themselves still there? |
 | 07:30 weekdays | Slack morning brief |
 | 08:30 weekdays | the daily action queue DMs; on Mondays also the manager exceptions DM |
+| 08:45 Mondays | coach: week ahead |
+| 12:30 weekdays | coach: midday check |
+| 16:45 weekdays | coach: wrap-up (Fridays add the week) |
 | 17:30 weekdays | Slack Day End brief |
 | 08:00 Mondays | Slack Week Ahead brief |
 | 16:00 Fridays | weekly usage table |
@@ -169,7 +176,7 @@ Plus **15 webhook subscriptions** for near-live change, including the four `*.de
 > The cron manifest watchdog exists because on 10/09/2026 the cron entries were deleted from the
 > database and nothing noticed for five days — the watchdog that would have reported it had been
 > deleted too, and staleness cannot distinguish a job that failed from one that no longer exists.
-> `cron_manifest` declares 22 jobs; add new permanent jobs to it in the same migration. As of
+> `cron_manifest` declares 25 jobs; add new permanent jobs to it in the same migration. As of
 > 26/10/2026, `weekly-usage-slack` and `recruitcrm-assignment-sweep` run but are not declared in it.
 
 ### Authentication and write safety
@@ -199,6 +206,7 @@ Set in Supabase, never in the repo. `.gitignore` excludes `.env`, `*.key` and `s
 | `SLACK_SIGNING_SECRET` | `slack-command` |
 | `SLACK_BOT_TOKEN` | `daily-queue`, `slack-actions` — the Team Briefs app's bot token (`xoxb-`) |
 | `SLACK_BRIEFS_SIGNING_SECRET` | `slack-actions` — the Team Briefs app's signing secret |
+| `COACH_BOT_TOKEN`, `COACH_SIGNING_SECRET` | `coach-dm`, `coach-actions` — the Octagon Coach app's bot token and signing secret |
 | `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` | `inbox-sync`, `octagon-mcp` — Microsoft Graph, for the Octagon inbox |
 | `RESEND_API_KEY`, `DIGEST_FROM`, `FEEDBACK_FROM`, `FEEDBACK_TO` | `digest-email`, `feedback` |
 
