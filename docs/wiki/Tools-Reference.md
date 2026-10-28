@@ -53,7 +53,7 @@ The daily and weekly nudges. Drafting happens in your own Claude; the server nev
 
 | Tool | Answers | PII |
 |---|---|---|
-| `action_queue` | Today's ranked calls, the same list as the 08:30 Slack DM: offers out 3+ days, interviews to prep for, feedback calls, unbooked requests, CV chases, cold jobs, BD, new jobs to kick off, client rejections to update the candidate on. Also this week's plan and, on Fridays, Push & Tell. Behind `/queue` | Yes |
+| `action_queue` | Today's ranked calls, the same list as the 08:30 Slack DM: offers out 3+ days, interviews to prep for, feedback calls, unbooked requests, CV chases, cold jobs, BD, new jobs to kick off. Also this week's plan and, on Fridays, Push & Tell. Behind `/queue` | Yes |
 | `weekly_kpis` (plan) | This week's plan per person, worked back from their quarterly billing target and their own ratios, never below the flat minimums | No |
 | `client_visits` | Client visits this quarter against the minimum of 2, untyped meetings that can't count yet, and up to five clients to visit with reasons. Behind `/visitplan` | Yes |
 | `team_exceptions` | **Managers only.** Who is off plan (below half on both CVs and interviews last week), who has a backlog, whose ratios are falling, who is behind on visits. Behind `/exceptions` | No |

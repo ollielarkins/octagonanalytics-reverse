@@ -223,7 +223,8 @@ gives `placed_value`.
 drafts: "prep my queue" in the consultant's own Claude writes the prep notes, chase and booking emails,
 Booleans and InMails. Each call has a Done button (`slack-actions`, 0118) that previews the note it
 will log in RecruitCRM, writes it as the consultant only on Confirm, and hides the item for a set
-number of days by kind. New jobs, client rejections and Friday Push & Tell joined the queue in 0121
+number of days by kind. New jobs and Friday Push & Tell joined the queue in 0121 (client
+rejections too, until 0126 took them out on 28/10/2026)
 as triggers for drafts (priority 7), on the same rule: nothing is sent until the consultant approves.
 
 **Why.** The 13/10/2026 rule of no server-side AI: candidate and client data stays inside each
