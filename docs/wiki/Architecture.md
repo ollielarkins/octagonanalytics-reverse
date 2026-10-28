@@ -87,12 +87,12 @@ poll is what makes the mirror converge anyway.
 > `GET /functions/v1/dashboard-data` returns firm Won revenue, the full funnel, the deal pipeline and
 > **every consultant by name with their individual figures** — with no token, key or header.
 
-The URL appears in `README.md`, this wiki and `web/dashboard.html`, in a repo that is public on
+The URL appears in `README.md` and this wiki, in a repo that is public on
 GitHub. Anyone who finds it can read Octagon's revenue and every consultant's performance.
 
-Open as of 15/09/2026. It stays open until the endpoint is either authenticated or reduced to fields
-that are genuinely safe to publish — and `web/dashboard.html` is the thing to check first, since it
-is what currently depends on the endpoint being open.
+Still open as of 28/10/2026. It stays open until the endpoint is either authenticated or reduced to
+fields that are genuinely safe to publish. `web/dashboard.html`, the static page that read it, was
+removed on 28/10/2026; the remaining caller is `slack-command` (the Slack `/dashboard`).
 
 **Twelve entities are health-monitored**: candidates, clients, consultants, jobs, calls, deals, plus
 the three nightly reconciles. Live entities warn at 10 minutes stale and go critical at 30;
