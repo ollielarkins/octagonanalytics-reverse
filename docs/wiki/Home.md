@@ -51,7 +51,7 @@ confirm.
 
 | | |
 |---|---|
-| Connector | octagon-mcp 3.83.0 — 73 tools, 26 prompts |
+| Connector | octagon-mcp 3.83.1 — 73 tools, 26 prompts |
 | Commands | 75 slash commands in four plugins |
 | Sync | health-monitored feeds plus a cron manifest watchdog (22 jobs declared) |
 | Webhooks | 15 subscriptions, including the four `*.deleted` events |

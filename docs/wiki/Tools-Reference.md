@@ -61,7 +61,9 @@ The daily and weekly nudges. Drafting happens in your own Claude; the server nev
 | `call_tagging` (list) | Your untagged calls of 30 seconds or more, each with a suggested category and why. Behind `/tagcalls` | Yes |
 | `meeting_review` (list) | Your meetings with no type, each with a suggested type, so client visits count | Yes |
 
-Windows default to 2026 year to date, end exclusive. Dates are ISO on the way in, DD/MM/YYYY on the
+Windows default to 2026 year to date, end exclusive. Reports that count Won deals by close date (`fee_analysis`, `placements_report`,
+`deals_by_consultant`) end at today by default, so Won deals dated in the future are never counted as
+billed (28/10/2026). Dates are ISO on the way in, DD/MM/YYYY on the
 way out.
 
 ## Writing
