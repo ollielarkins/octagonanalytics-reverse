@@ -601,7 +601,15 @@ async function markWalked(recruitcrmId: any) {
 // falling off the tail, and a poller outage delays the walk rather than erasing it.
 async function syncHistoryRecent(days: number, maxCandidates: number, offset = 0, sleepMs = 600) {
   const { data: cands, error: qErr } = await db.rpc("candidates_due_for_history", { p_limit: maxCandidates });
-  if (qErr) throw qErr;
+  if (qErr) {
+    // 28/10/2026: a statement timeout here was never recorded, so sync_health could not count it.
+    // Record the error (the 0124 trigger counts it) but leave last_run_at, so staleness still shows.
+    try {
+      await db.from("sync_state").update({ last_status: `error:${qErr.message ?? String(qErr)}`.slice(0, 200) })
+        .eq("entity", "history_recent");
+    } catch (_) { /* never let the record hide the real error */ }
+    throw qErr;
+  }
 
   // Nothing due: skip the maps and the queue count. Never-walked candidates (with a slug) are always
   // due, so an empty result also means the never-walked queue is empty. Still stamp sync_state, or
