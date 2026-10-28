@@ -65,6 +65,31 @@ function noteText(item: any, outcome: string) {
 }
 const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+// 0125: a confirmed Done turns that call's button into "Completed". chat.update replaces the whole
+// message, so the message's latest blocks are kept in slack_queue_messages (the bot cannot read its
+// own DMs back) and each update builds on them, keeping earlier Completed buttons.
+const keyOf = (el: any) => { try { return String(JSON.parse(String(el?.value ?? "{}")).k ?? ""); } catch { return ""; } };
+async function saveBlocks(ch: string, ts: string, blocks: any[]) {
+  await db.from("slack_queue_messages").upsert({ channel_id: ch, message_ts: ts, blocks, updated_at: new Date().toISOString() },
+    { onConflict: "channel_id,message_ts" });
+}
+async function markCompleted(ch: string | null, ts: string | null, key: string) {
+  if (!ch || !ts || !key) return;
+  const { data } = await db.from("slack_queue_messages").select("blocks").eq("channel_id", ch).eq("message_ts", ts).maybeSingle();
+  const blocks: any[] = data?.blocks ?? [];
+  let hit = false;
+  for (const b of blocks) {
+    if (b?.accessory?.action_id === "queue_done" && keyOf(b.accessory) === key) {
+      b.accessory = { type: "button", action_id: "queue_completed", style: "primary", text: { type: "plain_text", text: "Completed" }, value: b.accessory.value };
+      hit = true;
+    }
+  }
+  if (!hit) return;
+  const head = blocks.find((b) => b?.type === "header")?.text?.text ?? "Your calls today";
+  const up = await slack("chat.update", { channel: ch, ts, text: head, blocks });
+  if (up.ok) await saveBlocks(ch, ts, blocks);
+}
+
 // Opens at once from what the button carries (Slack's 3-second limit); confirm() re-checks it.
 async function openForm(p: any) {
   let v: any = {}; try { v = JSON.parse(String(p.actions?.[0]?.value ?? "{}")); } catch { /* old button */ }
@@ -84,6 +109,10 @@ async function openForm(p: any) {
     type: "modal", callback_id: "queue_done", title: { type: "plain_text", text: "Mark done" },
     submit: { type: "plain_text", text: "Confirm" }, close: { type: "plain_text", text: "Cancel" },
     private_metadata: JSON.stringify({ k: key, ch: p.channel?.id ?? null, ts: p.message?.ts ?? null }), blocks } });
+  // After the form is open (the trigger has a 3-second life): keep the message as it stands now.
+  if (p.channel?.id && p.message?.ts && Array.isArray(p.message?.blocks)) {
+    await saveBlocks(p.channel.id, p.message.ts, p.message.blocks).catch(() => {});
+  }
 }
 
 async function confirm(p: any) {
@@ -93,7 +122,12 @@ async function confirm(p: any) {
   const who = await consultantFor(p.user?.id);
   if (!who) return reply("I couldn't match your Slack account to a consultant, so nothing was changed.");
   const item = await findItem(who.recruitcrm_id, String(meta.k ?? ""));
-  if (!item) return reply("That one is already done, or no longer on your list, so nothing was changed.");
+  if (!item) {
+    const { data: done } = await db.from("action_queue_done").select("item_key")
+      .eq("consultant_recruitcrm_id", who.recruitcrm_id).eq("item_key", String(meta.k ?? "")).maybeSingle();
+    if (done) await markCompleted(meta.ch, meta.ts, String(meta.k));
+    return reply(done ? "That one is already done, so nothing was changed." : "That one is no longer on your list, so nothing was changed.");
+  }
   let noteOk = false, noteErr = "";
   if (item.candidate_slug && NOTE[item.kind]) {
     const r = await fetch("https://api.recruitcrm.io/v1/notes", {
@@ -108,6 +142,7 @@ async function confirm(p: any) {
     { onConflict: "consultant_recruitcrm_id,item_key" });
   await db.from("audit_log").insert({ actor: String(who.recruitcrm_id), action: "queue_done", entity: item.candidate_slug ? "candidate" : "queue_item",
     entity_id: item.candidate_slug ?? item.item_key, before: null, after: { kind: item.kind, note_written: noteOk }, via: "slack" }).then(() => {}, () => {});
+  await markCompleted(meta.ch, meta.ts, item.item_key).catch(() => {});
   await reply(noteOk ? `:white_check_mark: Done. Note saved on ${item.who} in RecruitCRM.` : ":white_check_mark: Done. Off your list.");
 }
 
@@ -129,6 +164,8 @@ Deno.serve(async (req) => {
     await openForm(p);
     return new Response("", { status: 200 });
   }
+  // A Completed button does nothing; acknowledge so Slack doesn't show an error.
+  if (p.type === "block_actions" && p.actions?.[0]?.action_id === "queue_completed") return new Response("", { status: 200 });
   if (p.type === "view_submission" && p.view?.callback_id === "queue_done") {
     const work = confirm(p);
     try { (globalThis as any).EdgeRuntime?.waitUntil(work); } catch { await work; }
