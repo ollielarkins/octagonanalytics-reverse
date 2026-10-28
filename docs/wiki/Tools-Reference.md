@@ -71,7 +71,7 @@ lands in `audit_log` with before and after.
 
 | Tool | Does |
 |---|---|
-| `update_hiring_stage` | Moves a candidate's stage on a job. Sets `create_placement` on Placed |
+| `update_hiring_stage` | Moves a candidate's stage on a job. Placed needs the candidate's start date (saved in the stage remark) and sets `create_placement` |
 | `assign_candidate` | Adds a candidate to a job |
 | `manage_assignment` | Unassign, hide/show to the client, or record an application |
 | `add_note` | Adds a note to a candidate or job |
