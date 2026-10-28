@@ -75,3 +75,14 @@ verify_jwt = true
 # presents the bearer from app_settings.cron_bearer. Holds the Graph app secret, so it stays locked.
 # Its response carries counts only, never mail data.
 verify_jwt = true
+
+[functions.coach-dm]
+# The Octagon Coach DMs (0129). Driven by pg_cron via coach_if_due(), which presents
+# app_settings.cron_bearer, so it stays locked.
+verify_jwt = true
+
+[functions.coach-actions]
+# Slack interactivity for the coach's Pause / Mute / Unmute buttons (0129). Slack cannot send a
+# Supabase JWT, so this is open, and every request is checked against the coach app's Slack signature
+# (COACH_SIGNING_SECRET) before anything else. Writes only coach_pause.
+verify_jwt = false
