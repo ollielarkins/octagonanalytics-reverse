@@ -19,6 +19,7 @@
 // it must not fail the cron, and it must not pretend to have sent something it did not.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { forbidden, trustedCaller } from "../_shared/caller.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -311,6 +312,7 @@ function renderWeekly(d: any) {
 
 // ---------- entry ----------
 Deno.serve(async (req) => {
+  if (!trustedCaller(req)) return forbidden();
   const url = new URL(req.url);
   const kind = (url.searchParams.get("kind") ?? "morning").toLowerCase();
   const dry = url.searchParams.get("dry") === "1";

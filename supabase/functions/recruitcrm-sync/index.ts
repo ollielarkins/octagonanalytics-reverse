@@ -3,6 +3,7 @@
 // Modes: backfill | backfill_all | incremental | reconcile | history (candidate_stage_events).
 // deals feeds the billing report (Won deal_value); owner-attributed via deals.owner_recruitcrm_id.
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { forbidden, trustedCaller } from "../_shared/caller.ts";
 
 const BASE = "https://api.recruitcrm.io/v1";
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
@@ -647,6 +648,7 @@ async function syncHistoryRecent(days: number, maxCandidates: number, offset = 0
 }
 
 Deno.serve(async (req) => {
+  if (!trustedCaller(req)) return forbidden();
   try {
     if (!TOKEN) return Response.json({ error: "token not set" }, { status: 500 });
     const url = new URL(req.url);

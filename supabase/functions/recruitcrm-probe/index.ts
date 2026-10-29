@@ -7,6 +7,7 @@
 // and returns ONLY the field names + value *types* of the first record — never
 // the values themselves. Delete this function once the shapes are captured.
 
+import { forbidden, trustedCaller } from "../_shared/caller.ts";
 export {};   // marks this as a module so `node --check` strips types (CJS path does not)
 const BASE = "https://api.recruitcrm.io/v1";
 // Probing where the FEE lives: the placement record has no fee column, so it is either on the
@@ -110,6 +111,7 @@ async function targetReport(token: string) {
 }
 
 Deno.serve(async (req) => {
+  if (!trustedCaller(req)) return forbidden();
   {
     const probeUrl = new URL(req.url);
     if (probeUrl.searchParams.get("call_notes_probe")) {
