@@ -12,6 +12,7 @@
 // presents app_settings.cron_bearer, so the function stays locked (verify_jwt).
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { forbidden, trustedCaller } from "../_shared/caller.ts";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
 const BOT = (Deno.env.get("SLACK_BOT_TOKEN") ?? "").trim();
@@ -86,7 +87,8 @@ function blocksFor(q: any, shadowFor: string | null) {
   return { blocks, text: head };
 }
 
-Deno.serve(async () => {
+Deno.serve(async (req) => {
+  if (!trustedCaller(req)) return forbidden();
   const runAt = new Date().toISOString();
   const record = async (status: string) => {
     await db.from("sync_state").upsert({ entity: "action_queue", last_run_at: runAt, last_status: status.slice(0, 200) }, { onConflict: "entity" });

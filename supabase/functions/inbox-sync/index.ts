@@ -17,6 +17,7 @@
 // "never" is checked first, so an email that is both ("thanks — about the offer") is never-touch.
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { graph, graphConfigured, mbx } from "../_shared/graph.ts";
+import { forbidden, trustedCaller } from "../_shared/caller.ts";
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const SELECT = "subject,from,receivedDateTime,importance,isRead,conversationId,inferenceClassification,bodyPreview";
@@ -98,7 +99,8 @@ async function syncMailbox(row: any) {
   return { added, removed };
 }
 
-Deno.serve(async () => {
+Deno.serve(async (req) => {
+  if (!trustedCaller(req)) return forbidden();
   const now = new Date().toISOString();
   if (!graphConfigured()) {
     await db.from("sync_state").upsert({ entity: "inbox", last_run_at: now, last_status: "not_configured" }, { onConflict: "entity" });
