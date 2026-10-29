@@ -78,7 +78,7 @@ lands in `audit_log` with before and after.
 | `assign_candidate` | Adds a candidate to a job |
 | `manage_assignment` | Unassign, hide/show to the client, or record an application |
 | `add_note` | Adds a note to a candidate or job |
-| `create_job` / `update_job` | Raise a new vacancy, or change one (status, salary, title, job order form answers) |
+| `create_job` / `update_job` | Raise a new vacancy, or change one (status, salary, pay type, job type, workplace, categories, title, job order form answers). The preview shows how the job will look on octagongroup.co.uk and what it is missing. The description is written by the recruiter or drafted from an attached JD, then approved |
 | `create_deal` / `update_deal` | Raise a deal, or move it — **moving to Won is how billing is recorded** |
 | `create_candidate` / `update_candidate` | Add or edit a person. Refuses obvious duplicates |
 | `manage_client` | Create or edit a company or a contact |
