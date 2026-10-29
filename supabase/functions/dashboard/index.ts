@@ -28,7 +28,7 @@ function renderClient(D: any) {
     + rowfn("Candidates in funnel", num(k.candidates), "all-time")
     + rowfn("Total jobs", num(k.jobs), num(k.open_jobs) + " open")
     + rowfn("Clients", num(k.clients), "&mdash;") + rowfn("Consultants", num(k.consultants), "&mdash;")
-    + rowfn("Open pipeline value", gbp(k.open_pipeline), "deals not Won/Lost")
+    + rowfn("Open pipeline value", gbp(k.open_pipeline), "deals Open to Offered")
     + rowfn("Won value", gbp(k.won), "deals marked Won")
     + rowfn("CVs sent (all-time)", num(k.cv_all), "incl. under-logged 2025")
     + rowfn("Placements (all-time)", num(k.placed_all), "&mdash;") + '</table>');
