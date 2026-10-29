@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.84.0" };
+const SERVER = { name: "octagon-analytics", version: "3.85.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -981,6 +981,28 @@ function cardWrap(name: string, args: any, out: any) {
   const sc = { ...d, _card: card };
   return { content: [{ type: "text", text: JSON.stringify(sc) }], structuredContent: sc, _meta: { ui: { resourceUri: CONFIRM_UI } } };
 }
+// 3.85.0, 29/10/2026: a confirm must answer a preview this server issued. The nonce used to be
+// checked only for re-use, so confirm=true with no nonce, or a made-up one, applied the change with
+// no preview at all. Each preview now records its nonce with the exact arguments it offered
+// (mcp_card_previews, migration 0131); a confirm applies only for that tool, that person and those
+// arguments. Keys are sorted and nulls dropped so a faithful copy of confirm_args always matches.
+const CARD_PREVIEW_TTL_MS = 24 * 60 * 60 * 1000;
+const canonArgs = (v: any): any => Array.isArray(v) ? v.map(canonArgs)
+  : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().filter((k) => v[k] != null).map((k) => [k, canonArgs(v[k])])) : v;
+function cardArgsKey(a: any) {
+  const b: any = { ...(a ?? {}) }; delete b.confirm; delete b.card_nonce; delete b.auth_token;
+  return JSON.stringify(canonArgs(b));
+}
+async function recordCardPreview(name: string, actor: any, out: any) {
+  const card = out?.structuredContent?._card;
+  const nonce = card?.kind === "preview" ? card?.confirm_args?.card_nonce : null;
+  if (!nonce) return;
+  const allowed = [card.confirm_args, card.draft_args].filter(Boolean).map(cardArgsKey);
+  // If this insert fails the confirm is refused later as preview_mismatch: nothing is applied.
+  const { error } = await db.from("mcp_card_previews").insert({ nonce, tool: name, consultant_recruitcrm_id: actor.id == null ? null : String(actor.id),
+    allowed, expires_at: new Date(Date.now() + CARD_PREVIEW_TTL_MS).toISOString() });
+  if (error) console.error("card preview not recorded", name, error.message);
+}
 
 // ---- Prompts ---------------------------------------------------------------
 const PROMPTS = [
@@ -1312,10 +1334,22 @@ async function callTool(name: string, args: any, req: Request) {
   if (!auth.ok) return toolText({ error: auth.reason });
   const actor = auth.actor;
   try {
-    if ((CARD_TOOLS.has(name) || MIXED_TOOLS.has(name)) && args?.card_nonce) {
-      const nonce = String(args.card_nonce).slice(0, 80);
-      args = { ...args }; delete args.card_nonce;
+    if (CARD_TOOLS.has(name) || MIXED_TOOLS.has(name)) {
+      const nonce = String(args?.card_nonce ?? "").slice(0, 80);
+      const argsKey = cardArgsKey(args);
+      args = { ...(args ?? {}) }; delete args.card_nonce;
       if (args.confirm) {
+        const refuse = (code: string, message: string) => {
+          logCall(actor.id, name, false, code);
+          return (MIXED_TOOLS.has(name) ? mixedWrap : cardWrap)(name, { ...args, confirm: true }, toolText({ error: code, message }));
+        };
+        if (!nonce) return refuse("preview_required", "Nothing was changed. A change is applied only from its preview: call without confirm to get the preview, show it, then confirm with exactly its _card.confirm_args.");
+        const { data: pv, error: pe } = await db.from("mcp_card_previews").select("tool, consultant_recruitcrm_id, allowed, expires_at").eq("nonce", nonce).maybeSingle();
+        if (pe) return refuse("card_check_failed", "Could not check this confirmation, so nothing was changed. Try again in a moment.");
+        if (!pv || pv.tool !== name || String(pv.consultant_recruitcrm_id ?? "") !== String(actor.id ?? "") || !(pv.allowed ?? []).includes(argsKey)) {
+          return refuse("preview_mismatch", "Nothing was changed. This confirmation does not match a preview you were shown: ask for a fresh preview and confirm that one.");
+        }
+        if (Date.parse(pv.expires_at) < Date.now()) return refuse("preview_expired", "Nothing was changed. That preview is over 24 hours old: ask for a fresh preview.");
         const { error } = await db.from("mcp_card_confirms").insert({ nonce, tool: name, consultant_recruitcrm_id: actor.id });
         if (error) {
           const dup = error.code === "23505";
@@ -1331,6 +1365,7 @@ async function callTool(name: string, args: any, req: Request) {
     if (CARD_TOOLS.has(name)) out = cardWrap(name, args, out);
     else if (REPORT_TOOLS.has(name)) out = viewWrap(name, out);
     else if (MIXED_TOOLS.has(name)) out = mixedWrap(name, args, out);
+    if (CARD_TOOLS.has(name) || MIXED_TOOLS.has(name)) await recordCardPreview(name, actor, out);
     return out;
   } catch (e) {
     logCall(actor.id, name, false, "exception");
@@ -1574,11 +1609,18 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const box = await myMailbox(actor.id);
 
     if (action === "connect") {
-      let address = String(args?.mailbox ?? "").trim().toLowerCase();
-      if (!address && actor.id != null) {
+      // 3.85.0, 29/10/2026: a consultant can connect only their own mailbox. mailbox used to be taken
+      // as given, so anyone could connect a colleague's inbox and read it. Naming one is now for
+      // admin tokens with no consultant email, as Inbox.md always said.
+      const asked = String(args?.mailbox ?? "").trim().toLowerCase();
+      let own = "";
+      if (actor.id != null) {
         const { data: c } = await db.from("consultants").select("email").eq("recruitcrm_id", actor.id).maybeSingle();
-        address = String(c?.email ?? "").trim().toLowerCase();
+        own = String(c?.email ?? "").trim().toLowerCase();
       }
+      if (own && asked && asked !== own) return toolText({ error: "not_your_mailbox", message: `You can connect only your own mailbox (${own}). Call again without mailbox.` });
+      if (!own && asked && !actor.is_admin) return toolText({ error: "no_mailbox", message: "Your token has no consultant email on record. Ask an admin to add your email to your consultant record." });
+      const address = own || asked;
       if (!address) return toolText({ error: "no_mailbox", message: "Your token has no consultant email on record. Call again with mailbox set to your @" + MAIL_DOMAIN + " address." });
       if (!address.endsWith("@" + MAIL_DOMAIN)) return toolText({ error: "wrong_domain", message: `Only @${MAIL_DOMAIN} mailboxes can be connected; '${address}' is not one.` });
       if (!args?.confirm) {
@@ -4022,17 +4064,28 @@ async function validateOctagonToken(token: string) {
 // Supabase can't serve rendered HTML (text/plain + nosniff on the *.supabase.co domain), so the
 // login form is hosted off-Supabase and just POSTs back here. GET hands off to it; POST does the work.
 const LOGIN_URL = "https://octagongroup.co.uk/octagon-connect.html/";
+// 3.85.0, 29/10/2026: only Claude's own callbacks and a local client may receive a code. Any https
+// address used to be accepted, so a link to the real connect page with an attacker's redirect_uri
+// sent the recruiter's code, and with it a working token, to the attacker. Checked on both the GET
+// and the POST, since the form posts the redirect_uri back to us.
+const OAUTH_REDIRECTS = new Set(["https://claude.ai/api/mcp/auth_callback", "https://claude.com/api/mcp/auth_callback"]);
+function oauthRedirectAllowed(uri: string) {
+  let u: URL; try { u = new URL(uri); } catch { return false; }
+  if (u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1")) return true;
+  return OAUTH_REDIRECTS.has(`${u.origin}${u.pathname}`) && !u.search && !u.hash;
+}
 const OAUTH_PASSTHRU = ["client_id", "redirect_uri", "state", "code_challenge", "code_challenge_method", "response_type", "scope", "resource"];
 async function handleAuthorize(req: Request): Promise<Response> {
   const u = new URL(req.url);
   if (req.method === "GET") {
     const p: Record<string, string> = {}; for (const k of u.searchParams.keys()) p[k] = u.searchParams.get(k) ?? "";
     if (p.response_type !== "code" || !p.redirect_uri || !p.code_challenge || p.code_challenge_method !== "S256") return new Response("invalid_request: need response_type=code, redirect_uri, and S256 PKCE", { status: 400, headers: { "Content-Type": "text/plain" } });
-    if (!/^https:\/\//.test(p.redirect_uri) && !/^http:\/\/localhost[:/]/.test(p.redirect_uri)) return new Response("invalid redirect_uri", { status: 400, headers: { "Content-Type": "text/plain" } });
+    if (!oauthRedirectAllowed(p.redirect_uri)) return new Response("invalid redirect_uri", { status: 400, headers: { "Content-Type": "text/plain" } });
     const dest = new URL(LOGIN_URL); for (const k of OAUTH_PASSTHRU) if (p[k]) dest.searchParams.set(k, p[k]);
     return new Response(null, { status: 302, headers: { Location: dest.toString() } });
   }
   const form = new URLSearchParams(await req.text()); const p: Record<string, string> = {}; for (const [k, v] of form) p[k] = v;
+  if (!oauthRedirectAllowed(p.redirect_uri ?? "")) return new Response("invalid redirect_uri", { status: 400, headers: { "Content-Type": "text/plain" } });
   const who = await validateOctagonToken(p.token ?? "");
   if (!who) {
     const back = new URL(LOGIN_URL); back.searchParams.set("error", "1"); for (const k of OAUTH_PASSTHRU) if (p[k]) back.searchParams.set(k, p[k]);

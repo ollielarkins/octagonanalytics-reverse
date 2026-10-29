@@ -15,9 +15,9 @@ always-current mirror of the firm's recruitment data — exposed as **dashboards
 
 | | |
 |---|---|
-| Connector | `octagon-mcp` **3.84.0** — 73 tools, 26 prompts |
+| Connector | `octagon-mcp` **3.85.0** — 73 tools, 26 prompts |
 | Commands | 75 slash commands across four plugins, in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) |
-| Migrations | 0000–0130 |
+| Migrations | 0000–0131 |
 | Writes | Live — 412 in `audit_log`, first on 12/08/2026; 361 in the last 30 days |
 | Tool calls logged | 2,888 — 2,345 in the last 30 days, from 7 people |
 | Slack | Morning, Day End and Week Ahead briefs; the 08:30 action queue DM; the Monday manager exceptions DM; the Octagon Coach DMs (shadow mode) |
