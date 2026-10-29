@@ -10,11 +10,22 @@ const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// 29/10/2026: a 429 is retried up to three times (Retry-After when RecruitCRM sends one, else
+// 1s/2s/4s) before the caller sees it. Webhook bursts start overlapping runs, and one 429 used to
+// end a whole walk.
 async function crm(path: string) {
-  const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" } });
-  const text = await res.text();
-  let json: any = null; try { json = JSON.parse(text); } catch {}
-  return { ok: res.ok, status: res.status, json, text };
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${TOKEN}`, Accept: "application/json" } });
+    if (res.status === 429 && attempt < 3) {
+      const ra = Number(res.headers.get("retry-after"));
+      await res.body?.cancel();
+      await sleep(ra > 0 && ra <= 10 ? ra * 1000 : 1000 * 2 ** attempt);
+      continue;
+    }
+    const text = await res.text();
+    let json: any = null; try { json = JSON.parse(text); } catch {}
+    return { ok: res.ok, status: res.status, json, text };
+  }
 }
 const nm = (a: any, b: any) => ([a, b].filter(Boolean).join(" ").trim() || null);
 
@@ -302,10 +313,19 @@ async function backfillLoop(entity: string, startPage: number, maxPages: number,
   return { entity, pages_processed: done, total_upserted: upserted, dupes_dropped: dupes, stopped, resume_next_page: (stopped || more) ? page : null };
 }
 
+// 29/10/2026: the watermark moves only after a complete walk (reached records older than it, or
+// the end of the list). It used to jump to the newest record seen even when the walk stopped early
+// (a 429) or hit the page cap, so everything between the old watermark and the stopping point was
+// never fetched again: deals (billing), jobs and calls stayed stale until edited. An incomplete
+// walk now saves {page, max} in sync_state.cursor and the next run resumes there. The list is
+// newest-first, so changes made meanwhile push records down a page: resuming re-reads some rows
+// but cannot skip any, and the changes themselves are newer than max and caught on a later run.
 async function incremental(entity: string, ep: string, mapRow: (x: any) => any, table: string) {
-  const { data: st } = await db.from("sync_state").select("last_synced_at").eq("entity", entity).maybeSingle();
+  const { data: st } = await db.from("sync_state").select("last_synced_at,cursor").eq("entity", entity).maybeSingle();
   const since = st?.last_synced_at ? Date.parse(st.last_synced_at) : 0;
-  let page = 1, more = true, caught = false, upserted = 0, maxSeen = since, stopped: any = null, done = 0, noId = 0;
+  let resume: any = null; try { resume = st?.cursor ? JSON.parse(st.cursor) : null; } catch { /* not ours: start over */ }
+  let page = Number(resume?.page) > 1 ? Number(resume.page) : 1;
+  let more = true, caught = false, upserted = 0, maxSeen = Math.max(since, Number(resume?.max) || 0), stopped: any = null, done = 0, noId = 0;
   const CAP = 40;
   while (more && !caught && done < CAP) {
     const r = await crm(`/${ep}?page=${page}&sort_by=updatedon&sort_order=desc&limit=100`);
@@ -326,9 +346,13 @@ async function incremental(entity: string, ep: string, mapRow: (x: any) => any, 
     if (rows.length) await db.from(table).upsert(rows, { onConflict: "recruitcrm_id" }).throwOnError();
     upserted += rows.length; more = !!r.json?.next_page_url; page += 1; done += 1; await sleep(100);
   }
-  const newSince = new Date(Math.max(maxSeen, since)).toISOString();
-  await db.from("sync_state").upsert({ entity, last_synced_at: newSince, last_run_at: new Date().toISOString(), last_status: stopped ? `stopped:${stopped}` : caught ? "caught_up" : "page_cap" }, { onConflict: "entity" });
-  return { entity, pages: done, upserted, caught, stopped, skipped_no_id: noId };
+  const complete = !stopped && (caught || !more);
+  await db.from("sync_state").upsert({ entity,
+    last_synced_at: complete ? new Date(maxSeen).toISOString() : (st?.last_synced_at ?? null),
+    cursor: complete ? null : JSON.stringify({ page, max: maxSeen }),
+    last_run_at: new Date().toISOString(),
+    last_status: stopped ? `stopped:${stopped}@p${page}` : complete ? "caught_up" : `page_cap@p${page}` }, { onConflict: "entity" });
+  return { entity, pages: done, upserted, caught, complete, stopped, resume_page: complete ? null : page, skipped_no_id: noId };
 }
 
 async function syncConsultants() {
@@ -467,7 +491,11 @@ async function jobIdsFor(slugs: string[]) {
 async function historyForCandidate(cand: any, maps: any) {
   const r = await crm(`/candidates/${cand.slug}/history`);
   if (!r.ok) return { ok: false, status: r.status, events: 0 };
-  const hist = Array.isArray(r.json) ? r.json : [];
+  // 29/10/2026: a 200 that is not a list (a wrapper, a maintenance page, bad JSON) used to read as
+  // "no history", and the prune below then deleted every stage event the candidate had. Treat it
+  // like a 429: stop the run and leave the candidate due.
+  if (!Array.isArray(r.json)) return { ok: false, status: 429, bad_body: true, events: 0 };
+  const hist = r.json;
   const jobId = await jobIdsFor([...new Set(hist.map((e: any) => e?.job_slug).filter(Boolean))] as string[]);
   const raw: any[] = [];
   const assigned: any[] = [];
@@ -533,7 +561,7 @@ async function syncHistory(maxCandidates: number) {
   for (const cand of cands) {
     const res = await historyForCandidate(cand, maps);
     if (!res.ok) {
-      if (res.status === 429) { stopped = 429; break; }   // back off; don't advance cursor
+      if (res.status === 429) { stopped = (res as any).bad_body ? "bad_body" : 429; break; }   // back off; don't advance cursor
       skipped++; cursor = cand.recruitcrm_id; continue;   // 404/etc: skip candidate, advance
     }
     events += res.events; processed++; cursor = cand.recruitcrm_id; await sleep(50);
@@ -627,7 +655,7 @@ async function syncHistoryRecent(days: number, maxCandidates: number, offset = 0
   for (const cand of (cands ?? [])) {
     const res = await historyForCandidate(cand, maps);
     if (!res.ok) {
-      if (res.status === 429) { stopped = 429; break; }   // back off; leave it due for the next run
+      if (res.status === 429) { stopped = (res as any).bad_body ? "bad_body" : 429; break; }   // back off; leave it due for the next run
       // 404 and friends: mark it walked anyway. Left due, a permanently-missing candidate sits at
       // the head of the queue and burns a slot on every run, forever.
       skipped++; await markWalked(cand.recruitcrm_id); continue;

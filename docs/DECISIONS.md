@@ -327,3 +327,26 @@ dropped on 28/10/2026; the briefs are unchanged.
 **Status:** **Live in shadow mode 28/10/2026** (0129, `coach-dm`, `coach-actions`). The pilots get it
 once `coach_shadow` is set to `false`.
 
+
+---
+
+## Billing and pipeline: one definition, deleted deals out
+
+**Decision.** Quarter billing is Won deal value with a close date inside the quarter (start inclusive,
+end exclusive), the window `weekly_plan` already used. A close date later in the quarter still counts.
+Deleted deals are excluded from every billing and pipeline figure. Open pipeline is Open to Offered,
+the same on the dashboard as in billing. Leavers stay on the billing scorecard, tagged left, while they
+own Won revenue this quarter or open pipeline.
+
+**Why.** The platform audit on 29/10/2026 found three versions of the same numbers.
+- `billing_report` had no end date and counted deleted deals.
+- The dashboard's open pipeline took in Declined, Placed and deleted deals, so it was far higher than
+  billing's figure for the same thing.
+- Leavers fell off the billing scorecard, against the rule that they stay in totals.
+
+**Open question.** Every Q4 Won deal on 29/10/2026 had a close date in December, most on 31/12. If close
+dates are set to the expected invoice date, "won this quarter" includes revenue not yet closed. Whether
+that is intended is for the business to confirm.
+
+**Status:** **Live 29/10/2026** (0133). Q4 billing dropped by the one deleted Won deal, and the
+dashboard's open pipeline fell to billing's figure.
