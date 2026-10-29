@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.83.1" };
+const SERVER = { name: "octagon-analytics", version: "3.84.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -205,6 +205,139 @@ const CF_DATES = new Set([CF_BRIEFING, CF_DPE_SENT, CF_PUSH_TELL]);
 // with job_dpe and push_tell, so update_job cannot overwrite them.
 const JOF_OWNED_ELSEWHERE = new Set([...Object.values(DPE_SCORES), CF_TOTAL, CF_GRADE, CF_FINDABILITY, CF_BRIEFING, CF_DPE_SENT, CF_PUSH_TELL]);
 const JOF_PICKLISTS = /^(job categories|job industry)$/i;
+
+// ---- Website-ready jobs (3.84.0) -----------------------------------------------------------------
+// octagongroup.co.uk publishes every Open job from RecruitCRM's webhooks and shows/filters on these
+// fields. Until 3.84.0 create_job could not set pay type, job type, workplace or categories, so a job
+// made here reached the site with no "per hour/per year" label and missing from three filters, and
+// update_job could not fix a contract role saved as "Annual" (£60-£70 shown "per year", 29/10/2026).
+const CF_JOB_CATEGORIES = 1, CF_JOB_INDUSTRY = 42;
+// /v1/salary-types, read 29/10/2026. Written as the type_id.
+const PAY_TYPE: Record<string, number> = { monthly: 1, annual: 2, yearly: 2, weekly: 3, daily: 4, hourly: 5 };
+const PAY_TYPE_LABEL: Record<number, string> = { 1: "per month", 2: "per year", 3: "per week", 4: "per day", 5: "per hour" };
+// job_type values the website's Job Type filter matches.
+const JOB_TYPES = ["Full Time", "Part Time", "Contract"];
+// job_location_type codes; the website shows them as On-site / Remote / Hybrid.
+const WORKPLACE: Record<string, string> = { "on-site": "0", onsite: "0", "on site": "0", office: "0", remote: "1", hybrid: "2" };
+const WORKPLACE_NAME: Record<string, string> = { "0": "On-site", "1": "Remote", "2": "Hybrid" };
+// RecruitCRM's Job Categories list has duplicates ("Sales Power", "Sales – Power", "Sales - Power").
+// The website merged them on 29/10/2026; writes here only ever use the canonical name, so the
+// duplicates cannot come back. Mirrors octagon_job_category_aliases() in the website's mu-plugin.
+const CATEGORY_ALIASES: Record<string, string> = {
+  "sales – application": "Sales - Application", "sales application": "Sales - Application",
+  "sales – components": "Sales - Components", "sales components": "Sales - Components",
+  "sales – electrical": "Sales - Electrical", "sales electrical": "Sales - Electrical",
+  "sales – mechanical": "Sales - Mechanical", "sales mechanical": "Sales - Mechanical",
+  "sales – power": "Sales - Power", "sales power": "Sales - Power",
+  "other area(s)": "Other", "other areas": "Other",
+  "finance executive": "Finance", "finance management": "Finance", "financial controller": "Finance", "management accountant": "Finance",
+  "human resources management": "Human Resources", "hr": "Human Resources",
+};
+const CATEGORY_JUNK = new Set(["none", "n/a", "skills"]);
+// Below this many words Google for Jobs tends not to list a job, and the page reads as empty.
+const WEBSITE_MIN_WORDS = 150;
+
+// Pick-list values for Job Categories / Job Industry, resolved against the live options. Categories
+// go through the alias map first; an alias whose canonical name is not a live option is refused
+// rather than written as the duplicate.
+function resolvePicklist(def: any, given: string | string[], canonical: boolean): { value: string } | { error: any } {
+  const opts = String(def?.default_value ?? "").split(",").map((o) => o.trim()).filter(Boolean);
+  const wanted = (Array.isArray(given) ? given : String(given).split(",")).map((v) => String(v).trim()).filter(Boolean);
+  const out: string[] = [];
+  for (const raw of wanted) {
+    if (canonical && CATEGORY_JUNK.has(raw.toLowerCase())) return { error: { error: "not_a_category", given: raw } };
+    const name = canonical ? (CATEGORY_ALIASES[raw.toLowerCase()] ?? raw) : raw;
+    const hit = opts.find((o) => o.toLowerCase() === name.toLowerCase());
+    if (!hit) return { error: { error: "not_an_option", question: def?.field_name, given: raw,
+      options: canonical ? opts.filter((o) => !CATEGORY_ALIASES[o.toLowerCase()] && !CATEGORY_JUNK.has(o.toLowerCase())) : opts } };
+    if (!out.includes(hit)) out.push(hit);
+  }
+  return { value: out.join(",") };
+}
+
+const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// The website shows job_description_text as HTML. Text typed or pasted into chat arrives plain, and
+// sent as-is it renders as one run-on paragraph; turn it into paragraphs, headings and bullet lists.
+// Text that is already HTML is left alone.
+function descriptionHtml(text: string): string {
+  const t = String(text ?? "").replace(/\r\n?/g, "\n").trim();
+  if (!t || /<(p|ul|ol|li|br|h[1-6]|strong|b)\b[^>]*>/i.test(t)) return t;
+  const html: string[] = [];
+  for (const block of t.split(/\n\s*\n/)) {
+    const lines = block.split("\n").map((l) => l.trim()).filter(Boolean);
+    let para: string[] = [], items: string[] = [];
+    const flushPara = () => { if (para.length) html.push(`<p>${para.map(escHtml).join("<br>")}</p>`); para = []; };
+    const flushList = () => { if (items.length) html.push(`<ul>${items.map((i) => `<li>${escHtml(i)}</li>`).join("")}</ul>`); items = []; };
+    for (const line of lines) {
+      const bullet = line.match(/^(?:[-*•▪◦]|\d+[.)])\s+(.*)$/);
+      if (bullet) { flushPara(); items.push(bullet[1]); continue; }
+      flushList();
+      // A short line ending in ":" or a lone short line with no full stop reads as a heading.
+      if (line.length <= 60 && (/:$/.test(line) || (lines.length === 1 && !/[.!?]$/.test(line)))) { flushPara(); html.push(`<p><strong>${escHtml(line)}</strong></p>`); continue; }
+      para.push(line);
+    }
+    flushPara(); flushList();
+  }
+  return html.join("\n");
+}
+const wordCount = (html: string) => String(html ?? "").replace(/<[^>]+>/g, " ").split(/\s+/).filter(Boolean).length;
+
+// What the job will look like on octagongroup.co.uk, and what is missing. Warns, never blocks: a
+// missing category should not keep a real job off the site, but the recruiter sees it before confirming.
+function websiteCheck(j: { title?: string; status?: number; city?: string; country?: string; salary_min?: number; salary_max?: number;
+  pay_type?: number | null; job_type?: string | null; workplace?: string | null; categories?: string | null; description?: string }) {
+  const gaps: string[] = [];
+  const words = wordCount(j.description ?? "");
+  if (!words) gaps.push("No job description: the page shows an empty description and Google for Jobs will not list it. Write one, or attach the client's JD and ask for an advert to be drafted from it.");
+  else if (words < WEBSITE_MIN_WORDS) gaps.push(`Description is short (${words} words): Google for Jobs may not list it. Aim for ${WEBSITE_MIN_WORDS}+ words.`);
+  if (!j.city) gaps.push("No city: the job shows without a location.");
+  const hasPay = (j.salary_min ?? 0) > 0 || (j.salary_max ?? 0) > 0;
+  if (hasPay && !j.pay_type) gaps.push("Salary given but no pay type (annual, monthly, weekly, daily or hourly): the site shows no period.");
+  if (hasPay && j.pay_type === 2 && Math.max(j.salary_min ?? 0, j.salary_max ?? 0) < 1500) gaps.push("Pay type is annual but the amount is under 1,500: is it hourly or daily?");
+  if (!j.job_type) gaps.push("No job type (Full Time, Part Time or Contract): the job is missing from the Job Type filter.");
+  if (!j.workplace) gaps.push("No workplace (On-site, Hybrid or Remote): the job is missing from the Workplace filter.");
+  if (!j.categories) gaps.push("No job category: the job is missing from the Category filter.");
+  const money = (n?: number) => n ? `£${Number(n).toLocaleString("en-GB")}` : "";
+  const pay = hasPay ? [money(j.salary_min), money(j.salary_max)].filter(Boolean).join(" - ") + (j.pay_type ? ` ${PAY_TYPE_LABEL[j.pay_type]}` : "") : "Competitive";
+  return {
+    shows_as: [j.title, j.city, pay, j.workplace ? WORKPLACE_NAME[j.workplace] : null, j.job_type, j.categories?.split(",").join(", ")].filter(Boolean).join(" · "),
+    publishing: j.status === 1 ? "Open jobs appear on octagongroup.co.uk/jobs/ within about a minute of saving." : `Not published: only Open jobs appear on the website (this one is ${JOB_STATUS_NAME[j.status ?? 1]}).`,
+    gaps: gaps.length ? gaps : undefined,
+    ready: !gaps.length,
+  };
+}
+// The field names for pay type / job type / workplace on the multipart job write were taken from the
+// GET shape on 29/10/2026 and had not been written before: read the job back and name any that did not
+// land, rather than report success. Returns the website field names that were not applied.
+async function verifyJobWebsiteFields(slug: string, sent: Record<string, any>): Promise<string[]> {
+  const keys = ["salary_type", "job_type", "job_location_type"].filter((k) => sent[k] != null);
+  if (!keys.length) return [];
+  const r = await crm("GET", `/jobs/${slug}`);
+  const j = r.json?.data ?? r.json ?? {};
+  const now: Record<string, string> = { salary_type: String(j.salary_type?.id ?? j.salary_type ?? ""), job_type: String(j.job_type ?? ""), job_location_type: String(j.job_location_type ?? "") };
+  const label: Record<string, string> = { salary_type: "pay_type", job_type: "job_type", job_location_type: "workplace" };
+  return keys.filter((k) => now[k] !== String(sent[k])).map((k) => label[k]);
+}
+// Shared argument parsing for pay type, job type and workplace. Returns RecruitCRM fields or an error.
+function jobWebsiteFields(args: any): { fields: Record<string, any> } | { error: any } {
+  const fields: Record<string, any> = {};
+  if (args.pay_type != null && String(args.pay_type).trim() !== "") {
+    const k = String(args.pay_type).toLowerCase().replace(/\s*salary$/, "").trim();
+    if (!(k in PAY_TYPE)) return { error: { error: "bad_pay_type", given: args.pay_type, options: ["annual", "monthly", "weekly", "daily", "hourly"] } };
+    fields.salary_type = PAY_TYPE[k];
+  }
+  if (args.job_type != null && String(args.job_type).trim() !== "") {
+    const hit = JOB_TYPES.find((t) => t.toLowerCase().replace(/\W/g, "") === String(args.job_type).toLowerCase().replace(/\W/g, "").replace(/^permanent$/, "fulltime"));
+    if (!hit) return { error: { error: "bad_job_type", given: args.job_type, options: JOB_TYPES } };
+    fields.job_type = hit;
+  }
+  if (args.workplace != null && String(args.workplace).trim() !== "") {
+    const code = WORKPLACE[String(args.workplace).toLowerCase().trim()];
+    if (code == null) return { error: { error: "bad_workplace", given: args.workplace, options: ["on-site", "hybrid", "remote"] } };
+    fields.job_location_type = code;
+  }
+  return { fields };
+}
 
 // 26/10/2026: with no tool for a change (the job order form on job 6107), Claude opened the app's
 // browser panel to edit RecruitCRM, which logged the recruiter out. Sent at connect time and repeated
@@ -767,14 +900,14 @@ const TOOLS = [
   { name: "internal_jd_check", description: "ADMIN ONLY. Checks whether the Internal Job Description file on each open job can be read: file type, size, pages and how much text comes out. Returns counts only, never the text. In batches: offset and limit (default 0 and 25); the result says the next offset. Read-only.", inputSchema: { type: "object", properties: { offset: { type: "integer" }, limit: { type: "integer", description: "default 25, max 40" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "platform_health", description: "ADMIN ONLY (admins and usage viewers). Is the platform working: sync health per feed, scheduled-job drift, connected inboxes and their last check, and tool errors in the last 7 days by tool. Read-only.", inputSchema: { type: "object", properties: { ...AUTH_ARG }, additionalProperties: false } },
   { name: "reference_list", description: "Look up one of RecruitCRM's reference lists — the id-to-label tables behind every dropdown. Use it to turn an id into a name (what is currency 19?), to find an id before a write, or to see what values exist. kinds: currencies, industries, qualifications, languages, proficiencies, salary_types, call_types, note_types, task_types, meeting_types, invoice_status, off_limit_status, teams, job_stages, deal_stages, contact_stages, pitch_stages, hiring_pipelines, hiring_stages (every candidate stage id+label across all pipelines, for update_hiring_stage), job_custom_fields (job custom field definitions: ids, types, dropdown options), enrollment_statuses. Read-only, no PII.", inputSchema: { type: "object", properties: { kind: { type: "string", description: "which list to fetch" }, ...AUTH_ARG }, required: ["kind"], additionalProperties: false } },
-  { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job description text" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, country: { type: "string" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
+  { name: "create_job", description: "Create a new job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview showing exactly what will be created, get approval, then call again with confirm=true. RecruitCRM requires a company AND a contact at that company — pass client by name and the contact is resolved automatically, or give contact_slug directly. Everything defaulted or resolved is spelled out in the preview. The job is created owned by you and attributed to you. status: open (default), closed, on hold, cancelled. WEBSITE: every Open job is published on octagongroup.co.uk within about a minute, and the preview's `website` section shows how it will look and what is missing — ask the recruiter for anything in website.gaps (pay_type, job_type, workplace, categories) before confirming. DESCRIPTION, two ways: (1) the recruiter writes or pastes it — pass it as given (plain text is turned into paragraphs and bullet lists); (2) the recruiter attaches the client's JD instead — read it and draft the website advert yourself following Octagon's job_advert rules (headings The Company / The Role / What You'll Need / What's on Offer / How to Apply; do not name the client unless the recruiter says to; never copy the client's addresses, signature blocks or internal wording; [placeholders] for any fact, salary or benefit not in the JD or given by the recruiter), show the draft, and pass it as description only once the recruiter approves it. Remind them to attach the JD to the job's Internal Job Description field in RecruitCRM.", inputSchema: { type: "object", properties: { name: { type: "string", description: "job title" }, client: { type: "string", description: "client/company name (partial) or exact company_slug" }, description: { type: "string", description: "the job advert shown on the website: the recruiter's own text, or a draft from the attached JD that they approved" }, contact_slug: { type: "string", description: "optional; resolved from the client if omitted" }, openings: { type: "integer", description: "number of openings (default 1)" }, status: { type: "string", description: "open | closed | on hold | cancelled (default open)" }, salary_min: { type: "number" }, salary_max: { type: "number" }, pay_type: { type: "string", description: "annual | monthly | weekly | daily | hourly: what salary_min/max are per. Contract rates are usually hourly or daily" }, job_type: { type: "string", description: "Full Time | Part Time | Contract" }, workplace: { type: "string", description: "on-site | hybrid | remote" }, city: { type: "string", description: "where the job is based (not the client's head office)" }, state: { type: "string", description: "county / state / region" }, country: { type: "string" }, categories: { type: "string", description: "Job Categories, comma-separated, from RecruitCRM's list (duplicates such as 'Sales Power' are mapped to the canonical 'Sales - Power')" }, industry: { type: "string", description: "Job Industry, comma-separated, from RecruitCRM's list" }, currency: { type: "string", description: "currency code, e.g. GBP. Defaults to this client's most recent job, then GBP" }, currency_id: { type: "integer", description: "explicit RecruitCRM currency id, overrides currency" }, confirm: { type: "boolean", description: "false/omitted = preview only; true = create" }, ...AUTH_ARG }, required: ["name", "client", "description"], additionalProperties: false } },
   { name: "cv_pack", description: "Data for a candidate's formatted (coversheet) CV, already REDACTED by default: name as first name + surname initial; no phone, email, LinkedIn or full address (town only); the 3 most recent roles removed and those employers' names scrubbed from all text. Returns the cover-sheet fields (location, relocate, education summary, sponsorship, notice period, recruiter notes) and the CV content (title, skills, remaining work history, education). Off-limit candidates are refused, because this goes to clients. redacted=false gives the full version for internal use only. Read-only.", inputSchema: { type: "object", properties: { candidate: { type: "string", description: "candidate name, slug or RecruitCRM ID" }, redacted: { type: "boolean", description: "default true" }, ...AUTH_ARG }, required: ["candidate"], additionalProperties: false } },
   { name: "job_spec", description: "A job's full spec, read live from RecruitCRM: title, client, status, location, salary range, skills, the job description text, the Internal Job Description file's text (a job custom field, which files_list does not see), and the client briefing answers recorded on the job (ideal candidate background, day-to-day, interview process, etc.). Use it before a Boolean search, an advert, candidate matching or interview prep whenever a job is named, instead of asking the recruiter to paste the spec. Identify the job by ID, slug or part of the title. Read-only.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "eow_email", description: "End-of-week team email, MANAGERS/ADMINS only. action=report (read): the week's per-consultant table (jobs added, candidates assigned, CVs sent, interview requests, interviews, offers, BD calls; same counting as weekly_kpis), totals, shout-outs (10+ CVs, 4+ interview requests, 10+ BD calls, any offer), the week's offers with each candidate's current stage, and new jobs with their contact. Default window this week Monday to today; from/until (YYYY-MM-DD, until is end-exclusive) for another. action=draft (WRITE, two-step, internal): builds the formatted email (greeting, intro, week totals, shout-outs with the manager's comments, closing, then Team, Offers and Jobs tables) and saves it to the manager's Outlook Drafts, never sent. comments is {cv_sent, interview_requests, bd_calls, offers}: the manager's own words, never written for them. to defaults to every current consultant. Call without confirm for a preview, read it back, then confirm=true with the same values.", inputSchema: { type: "object", properties: { action: { type: "string", description: "report | draft" }, from: { type: "string" }, until: { type: "string" }, to: { type: "array", items: { type: "string" }, description: "recipient addresses; default every current consultant" }, greeting: { type: "string" }, intro: { type: "string" }, comments: { type: "object", properties: { cv_sent: { type: "string" }, interview_requests: { type: "string" }, bd_calls: { type: "string" }, offers: { type: "string" } }, additionalProperties: false }, closing: { type: "string" }, subject: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "push_tell", description: "Push & Tell: the weekly client update email. action=list (read): the consultant's open jobs grouped by client, A and B grade included by default and C/ungraded listed separately, each with the last 7 days of client-visible activity (CVs sent, interviews, offers) and the candidates already submitted to that client, plus the last Push & Tell date. action=draft (WRITE, two-step, OUTWARD-FACING draft): job_ids for ONE client, subject and body; the recipient is the jobs' RecruitCRM contact (or contact_slug), opted-out contacts are refused; call without confirm for a preview, read it back, then confirm=true saves it to the consultant's Outlook Drafts (never sent) and sets the Push & Tell Email date to today on each job. Managers/admins may pass consultant for someone else's desk.", inputSchema: { type: "object", properties: { action: { type: "string", description: "list | draft" }, consultant: { type: "string" }, job_ids: { type: "array", items: { type: "integer" } }, contact_slug: { type: "string" }, subject: { type: "string" }, body: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, additionalProperties: false } },
   { name: "dpe_email", description: "Draft the DPE email for a job: Octagon's FIXED template, written by the server so it is identical every time, confirming the brief to the client after the briefing call (location, salary, day-to-day, ideal background, interview stages, interviewers, timescales, next steps). Missing facts read 'To be confirmed'. Scores and Job Grade never appear. Needs first_cvs_by (YYYY-MM-DD), the date the consultant commits to sending the first CVs. Recipient is the job's RecruitCRM contact (or contact_slug); opted-out contacts are refused. WRITE, two-step, OUTWARD-FACING draft: without confirm returns a preview; confirm=true saves it to the consultant's Outlook Drafts (never sent) and sets DPE Sent to today.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, first_cvs_by: { type: "string", description: "YYYY-MM-DD" }, contact_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "job_dpe", description: "Record a job's DPE in RecruitCRM: the six scores the CONSULTANT gives (urgency, cooperation, track_record, commitment, process_quality, positioning, each 1-5 - never estimate one), then Total Score (out of 30) is calculated and written back with the Job Grade. The grade bands (A 25-30, B 19-24, C under 19) SUGGEST a grade; the consultant decides: pass grade=A/B/C to keep or override. If the job already has a grade that differs from the suggestion and no grade is passed, the tool returns grade_choice_needed instead of overwriting it. Plus optional findability (1-3, not in the total), briefing_call_date and dpe_sent_date (YYYY-MM-DD). WRITE, two-step, EXPLICIT-ONLY: call without confirm for a current-vs-new preview, get approval, then confirm=true with the same values. The write is read back from RecruitCRM and verified.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, urgency: { type: "integer" }, cooperation: { type: "integer" }, track_record: { type: "integer" }, commitment: { type: "integer" }, process_quality: { type: "integer" }, positioning: { type: "integer" }, grade: { type: "string", description: "A, B or C: the consultant's grade; omit to use the banded suggestion" }, findability: { type: "integer" }, briefing_call_date: { type: "string" }, dpe_sent_date: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
-  { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X', and to fill in or change the JOB ORDER FORM (the client briefing answers) with job_order_form. status: open | closed | on hold | cancelled. RecruitCRM edits go through this tool, never a browser.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, city: { type: "string" }, state: { type: "string", description: "state / county / region" }, country: { type: "string" }, job_order_form: { type: "object", description: "job order form answers, as { question: answer }. The question is the field's name in RecruitCRM, or enough of it to be unique (e.g. 'Background of the ideal candidate', 'Timescales', 'Interviewers'), or its field id. Also Job Categories and Job Industry (comma-separated, from their options). Leave out anything the recruiter did not give you; never guess. An empty answer clears the field.", additionalProperties: { type: "string" } }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
+  { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X', 'job 6106 is hourly', and to fill in or change the JOB ORDER FORM (the client briefing answers) with job_order_form. The preview's `website` section shows how the job will look on octagongroup.co.uk after the change and what is still missing. To write a website advert for a job with no description: call job_spec (it returns the Internal Job Description file's text), draft the advert from it under the same rules as create_job, get the recruiter's approval, then pass it as description. status: open | closed | on hold | cancelled. RecruitCRM edits go through this tool, never a browser.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string", description: "the job advert shown on the website (plain text is turned into paragraphs and bullet lists)" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, pay_type: { type: "string", description: "annual | monthly | weekly | daily | hourly" }, job_type: { type: "string", description: "Full Time | Part Time | Contract" }, workplace: { type: "string", description: "on-site | hybrid | remote" }, categories: { type: "string", description: "Job Categories, comma-separated (replaces the current list)" }, industry: { type: "string", description: "Job Industry, comma-separated (replaces the current list)" }, city: { type: "string" }, state: { type: "string", description: "state / county / region" }, country: { type: "string" }, job_order_form: { type: "object", description: "job order form answers, as { question: answer }. The question is the field's name in RecruitCRM, or enough of it to be unique (e.g. 'Background of the ideal candidate', 'Timescales', 'Interviewers'), or its field id. Also Job Categories and Job Industry (comma-separated, from their options). Leave out anything the recruiter did not give you; never guess. An empty answer clears the field.", additionalProperties: { type: "string" } }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token. The preview checks both records first: candidate_slug takes the slug or RecruitCRM candidate ID (from find_candidate); job_slug takes the job's slug, its RecruitCRM job ID, or an exact title. A candidate or job that does not resolve to exactly one record, or a job that is not Open, is reported at preview, so a bad identifier never reaches the confirm. A candidate already on the job comes back as no_change, not an error.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string", description: "candidate slug or RecruitCRM candidate ID" }, job_slug: { type: "string", description: "job slug, RecruitCRM job ID, or exact job title" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
   { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, note_type: { type: "string", enum: ["internal_interview", "job_order_form"], description: "optional. internal_interview files the note as 'Candidate - Internal Interview' (counts toward the internal interviews KPI; only when the call WAS an internal interview, only on a candidate). job_order_form files it as 'Job Order Form Complete' (counts toward the job order forms KPI; only on a job, only when the form really was completed). To fill in the form's own fields use update_job with job_order_form." }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
 ];
@@ -937,7 +1070,7 @@ function getPrompt(name: string, args: any): any | null {
     return { description: "New-job admin pack", ...msg(jobCtx + "A new job has come in — run Octagon's vacancy checklist and build the admin pack, conversationally (don't dump everything at once). Steps: (1) Confirm the job and ask the recruiter to paste the full job spec plus any client background if not already provided — you need this to write good content. (2) Research & pitch: summarise what the client does, why the role is exciting, and the application process/next steps the consultant can use on a call. (3) Shortlist: extract the key skills from the spec, call match_candidates, present the top 5 CRM candidates with why each fits, and tell the consultant to CALL these first. (4) Then offer to generate any of: LinkedIn advert, website advert, LinkedIn InMail, Boolean (job boards), Boolean (LinkedIn) — each is also its own command. Candidate names are internal (PII); never invent a salary.") };
   }
   if (name === "job_advert") {
-    return { description: "Job adverts", ...msg(jobCtx + "Write recruitment adverts for the role. Ask the recruiter to paste the job spec if they haven't. Produce TWO versions: (1) a LinkedIn advert — punchy, employer voice, hook + role + must-haves + what's on offer + a clear call to action + a few relevant hashtags; (2) a website advert — a little longer, with headings (The Company / The Role / What You'll Need / What's on Offer / How to Apply). Use inclusive, neutral language and never invent a salary — only state pay if the recruiter gave it.") };
+    return { description: "Job adverts", ...msg(jobCtx + "Write recruitment adverts for the role. Source material, in order: a JD the recruiter attaches or pastes; for a job already in RecruitCRM, job_spec (it includes the Internal Job Description file's text); otherwise ask for the spec. A client's JD is source material, not the advert: do not name the client unless the recruiter says to, and never copy its addresses, signature blocks or internal wording. Produce TWO versions: (1) a LinkedIn advert — punchy, employer voice, hook + role + must-haves + what's on offer + a clear call to action + a few relevant hashtags; (2) a website advert — a little longer, with headings (The Company / The Role / What You'll Need / What's on Offer / How to Apply). Use inclusive, neutral language and never invent a salary — only state pay if the recruiter gave it. Use [placeholders] for anything you would otherwise have to guess. Once the recruiter approves the website advert, offer to save it as the job's description (create_job for a new job, update_job for an existing one); that is what octagongroup.co.uk shows.") };
   }
   if (name === "job_boolean") {
     return { description: "Boolean searches", ...msg(jobCtx + "Build Boolean search strings for the role. Use the pasted spec (ask for it, or the key skills, if missing). Extract must-have skills, likely job titles and their synonyms. Produce TWO strings: (1) a job-board Boolean (portable across CV databases) and (2) a LinkedIn Boolean (LinkedIn-friendly title/skill phrasing). Group synonyms with OR in parentheses, combine requirements with AND, exclude noise with NOT. Briefly explain your choices so the consultant can tweak.") };
@@ -3004,33 +3137,64 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
 
     const statusKey = String(args.status ?? "open").toLowerCase();
     if (!(statusKey in JOB_STATUS)) return toolText({ error: `status must be one of: open, closed, on hold, cancelled` });
+    const web = jobWebsiteFields(args);
+    if ("error" in web) return toolText(web.error);
+    // Categories and industry are job custom fields: resolved now so a bad value fails the preview,
+    // written after the job exists (the create endpoint takes no custom fields).
+    const cfChanges: Record<number, string> = {};
+    if ((args.categories ?? "") !== "" || (args.industry ?? "") !== "") {
+      const defs = await jobFieldDefs();
+      for (const [id, given, canonical] of [[CF_JOB_CATEGORIES, args.categories, true], [CF_JOB_INDUSTRY, args.industry, false]] as const) {
+        if (given == null || String(given).trim() === "") continue;
+        const res = resolvePicklist(defs.get(id), given, canonical);
+        if ("error" in res) return toolText(res.error);
+        cfChanges[id] = res.value;
+      }
+    }
+    const description = descriptionHtml(String(args.description ?? ""));
     const fields: Record<string, any> = {
       name: args.name, company_slug: client.company_slug, contact_slug: contactSlug,
-      job_description_text: args.description, number_of_openings: args.openings ?? 1,
+      job_description_text: description, number_of_openings: args.openings ?? 1,
       currency_id: currencyId, enable_job_application_form: 0, job_status: JOB_STATUS[statusKey],
       min_annual_salary: args.salary_min, max_annual_salary: args.salary_max,
-      city: args.city, country: args.country,
+      city: args.city, state: args.state, country: args.country, ...web.fields,
       owner_id: actor.id, created_by: actor.id, updated_by: actor.id,
     };
+    const website = websiteCheck({ title: args.name, status: fields.job_status, city: args.city, country: args.country,
+      salary_min: args.salary_min, salary_max: args.salary_max, pay_type: fields.salary_type ?? null, job_type: fields.job_type ?? null,
+      workplace: fields.job_location_type ?? null, categories: cfChanges[CF_JOB_CATEGORIES] ?? null, description });
 
     if (!args.confirm) {
       return toolText({ mode: "preview", action: "create_job", will_create: {
         title: fields.name, client: client.company_name, contact: contactNote,
         status: JOB_STATUS_NAME[fields.job_status], openings: fields.number_of_openings,
-        salary: (args.salary_min || args.salary_max) ? `${args.salary_min ?? "?"}–${args.salary_max ?? "?"}` : "not set",
-        location: [args.city, args.country].filter(Boolean).join(", ") || "not set",
-        currency_id: `${currencyId} (${currencyNote})`, owner: "you", description_chars: String(args.description ?? "").length,
-      }, instruction: "Show this to the recruiter in full. This CREATES A REAL JOB in RecruitCRM. To apply, call again with confirm=true." });
+        salary: (args.salary_min || args.salary_max) ? `${args.salary_min ?? "?"}–${args.salary_max ?? "?"}${fields.salary_type ? ` ${PAY_TYPE_LABEL[fields.salary_type]}` : ""}` : "not set",
+        job_type: fields.job_type ?? "not set", workplace: fields.job_location_type ? WORKPLACE_NAME[fields.job_location_type] : "not set",
+        location: [args.city, args.state, args.country].filter(Boolean).join(", ") || "not set",
+        categories: cfChanges[CF_JOB_CATEGORIES] ?? "not set", industry: cfChanges[CF_JOB_INDUSTRY] ?? "not set",
+        currency_id: `${currencyId} (${currencyNote})`, owner: "you", description_words: wordCount(description),
+      }, website,
+      instruction: "Show this to the recruiter in full, including website.shows_as and any website.gaps (offer to fill each gap). This CREATES A REAL JOB in RecruitCRM" + (fields.job_status === 1 ? " and publishes it on octagongroup.co.uk" : "") + ". To apply, call again with confirm=true." });
     }
 
     const r = await crmForm("/jobs", fields);
     if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
     const created = r.json?.data ?? r.json ?? {};
-    await audit({ actor: String(actor.id), action: "create_job", entity: "job", entity_id: created.slug ?? null, before: null, after: { ...fields, id: created.id, slug: created.slug }, via: "claude" });
+    const webNotApplied = created.slug ? await verifyJobWebsiteFields(created.slug, fields) : [];
+    let cfResult: any = undefined;
+    if (Object.keys(cfChanges).length && created.slug) {
+      const w = await writeJobCustomFields(created.slug, cfChanges, actor.id);
+      cfResult = { ok: w.ok, not_applied: w.not_applied.length ? w.not_applied.map((id) => id === CF_JOB_CATEGORIES ? "categories" : "industry") : undefined, detail: w.detail };
+    }
+    await audit({ actor: String(actor.id), action: "create_job", entity: "job", entity_id: created.slug ?? null, before: null, after: { ...fields, job_description_text: `(${wordCount(description)} words)`, custom_fields: cfChanges, id: created.id, slug: created.slug }, via: "claude" });
     // Pull the new job into the mirror immediately rather than waiting for the next sync.
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=jobs`,
       { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
-    return toolText({ mode: "applied", job_id: created.id ?? null, job_title: fields.name, client: client.company_name, status: JOB_STATUS_NAME[fields.job_status], note: "Job created in RecruitCRM and the mirror refreshed." });
+    return toolText({ mode: "applied", job_id: created.id ?? null, job_title: fields.name, client: client.company_name, status: JOB_STATUS_NAME[fields.job_status],
+      categories_and_industry: cfResult, website: { publishing: website.publishing, gaps: website.gaps },
+      not_applied: webNotApplied.length ? webNotApplied : undefined,
+      note: webNotApplied.length ? `Job created, but ${webNotApplied.join(", ")} did not save in RecruitCRM: say so plainly and tell the recruiter to set it on the job in RecruitCRM. Do not retry another way.`
+        : cfResult && !cfResult.ok ? "Job created, but the categories/industry did not save: say so, and offer update_job to retry." : "Job created in RecruitCRM and the mirror refreshed." });
   }
 
   if (name === "cv_pack") {
@@ -3434,10 +3598,12 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: matches.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, status: j.status })), instruction: "Ask which one, then call again with that job ID." });
     const job = matches[0];
 
+    const web = jobWebsiteFields(args);
+    if ("error" in web) return toolText(web.error);
     const fields: Record<string, any> = {
-      name: args.title, job_description_text: args.description, number_of_openings: args.openings,
+      name: args.title, job_description_text: args.description != null ? descriptionHtml(String(args.description)) : undefined, number_of_openings: args.openings,
       min_annual_salary: args.salary_min, max_annual_salary: args.salary_max,
-      city: args.city, state: args.state, country: args.country, updated_by: actor.id,
+      city: args.city, state: args.state, country: args.country, ...web.fields, updated_by: actor.id,
     };
     if (args.status != null) {
       const k = String(args.status).toLowerCase();
@@ -3484,7 +3650,21 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         jofPreview.push({ question: def.field_name, current, new: value || "(cleared)" });
       }
     }
-    if (!changing.length && !jofPreview.length) return toolText({ error: "Nothing to change — pass at least one field (status, title, description, openings, salary_min/max, city, state, country) or a job_order_form answer that differs from what the job already holds." });
+    // categories / industry as their own arguments (3.84.0); categories only ever as canonical names.
+    if ((args.categories ?? "") !== "" || (args.industry ?? "") !== "") {
+      const defs = await jobFieldDefs();
+      const live = await liveJobCustomFields(job.slug);
+      for (const [id, given, canonical] of [[CF_JOB_CATEGORIES, args.categories, true], [CF_JOB_INDUSTRY, args.industry, false]] as const) {
+        if (given == null || String(given).trim() === "") continue;
+        const res = resolvePicklist(defs.get(id), given, canonical);
+        if ("error" in res) return toolText(res.error);
+        const current = live.fields.get(id) ?? null;
+        if (String(current ?? "") === res.value) continue;
+        jofChanges[id] = res.value;
+        jofPreview.push({ question: defs.get(id)?.field_name ?? (canonical ? "Job Categories" : "Job Industry"), current, new: res.value });
+      }
+    }
+    if (!changing.length && !jofPreview.length) return toolText({ error: "Nothing to change — pass at least one field (status, title, description, openings, salary_min/max, pay_type, job_type, workplace, city, state, country, categories, industry) or a job_order_form answer that differs from what the job already holds." });
 
     const jobClosing = args.status != null && JOB_CLOSING.includes(String(args.status).toLowerCase());
     let jobReason: string | null = null;
@@ -3497,9 +3677,22 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     }
 
     if (!args.confirm) {
+      // How the job will look on the website once this change lands: the live record with the changes applied.
+      const cur = await crm("GET", `/jobs/${job.slug}`);
+      const c = cur.json?.data ?? cur.json ?? {};
+      const cfs = new Map<number, any>((Array.isArray(c.custom_fields) ? c.custom_fields : []).map((f: any) => [Number(f.field_id), f.value]));
+      const pick = (k: string, live: any) => fields[k] !== undefined && fields[k] !== null ? fields[k] : live;
+      const website = websiteCheck({ title: pick("name", c.name), status: pick("job_status", Number(c.job_status?.id ?? c.job_status ?? 1)),
+        city: pick("city", c.city), country: pick("country", c.country), salary_min: Number(pick("min_annual_salary", c.min_annual_salary) ?? 0),
+        salary_max: Number(pick("max_annual_salary", c.max_annual_salary) ?? 0), pay_type: Number(pick("salary_type", c.salary_type?.id ?? c.salary_type)) || null,
+        job_type: pick("job_type", c.job_type) || null, workplace: String(pick("job_location_type", c.job_location_type) ?? "") || null,
+        categories: jofChanges[CF_JOB_CATEGORIES] ?? cfs.get(CF_JOB_CATEGORIES) ?? null, description: pick("job_description_text", c.job_description_text ?? "") });
       return toolText({ mode: "preview", action: "update_job",
         job: { job_id: job.recruitcrm_id, title: job.title, current_status: job.status },
-        changes: Object.fromEntries(changing.map(([k, v]) => [k === "job_status" ? "status" : k, k === "job_status" ? JOB_STATUS_NAME[v as number] : v])),
+        changes: Object.fromEntries(changing.map(([k, v]) => [
+          k === "job_status" ? "status" : k === "salary_type" ? "pay_type" : k === "job_location_type" ? "workplace" : k === "job_description_text" ? "description_words" : k,
+          k === "job_status" ? JOB_STATUS_NAME[v as number] : k === "salary_type" ? PAY_TYPE_LABEL[v as number] : k === "job_location_type" ? WORKPLACE_NAME[v as string] : k === "job_description_text" ? wordCount(v as string) : v])),
+        website,
         job_order_form: jofPreview.length ? jofPreview : undefined,
         untouched: "every other field is left exactly as it is", rule: NO_BROWSER,
         ...(jobClosing ? (jobReason
@@ -3509,9 +3702,11 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         instruction: "Show this to the recruiter. To apply, call again with confirm=true." });
     }
 
+    let webNotApplied: string[] = [];
     if (changing.length) {
       const r = await crmForm(`/jobs/${job.slug}`, fields);
       if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+      webNotApplied = await verifyJobWebsiteFields(job.slug, fields);
     }
     // Job order form answers through the custom-field writer, which reads the job back and reports any
     // answer that did not land and any other custom field that moved.
@@ -3532,7 +3727,9 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
                      : "Reason logged for reporting, but the note could not be written to RecruitCRM." };
     }
     return toolText({ mode: "applied", job_id: job.recruitcrm_id, job_title: job.title, changed: Object.keys(Object.fromEntries(changing)), job_order_form: jofResult, closure_reason: jobReasonResult,
-      note: jofResult && !jofResult.ok ? "Some job order form answers did not save: say which, and do not try another way such as a browser." : "Job updated in RecruitCRM and the mirror refreshed." });
+      not_applied: webNotApplied.length ? webNotApplied : undefined,
+      note: webNotApplied.length ? `${webNotApplied.join(", ")} did not save in RecruitCRM: say so plainly and give the manual step (set it on the job in RecruitCRM). Do not try another way such as a browser.`
+        : jofResult && !jofResult.ok ? "Some job order form answers did not save: say which, and do not try another way such as a browser." : "Job updated in RecruitCRM and the mirror refreshed." });
   }
 
   if (name === "assign_candidate") {
