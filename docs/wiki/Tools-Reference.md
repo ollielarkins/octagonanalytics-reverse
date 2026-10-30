@@ -88,7 +88,7 @@ lands in `audit_log` with before and after.
 | `off_limit` (mark/release) | Bar a candidate from being approached, or lift it |
 | `send_email` | Email a candidate or contact, or save a draft. **Checks opt-out first** |
 | `draft_reply` | Save a reply to an email in your own Outlook inbox to Outlook Drafts. **Never sends.** See [Inbox](Inbox) |
-| `delete_record` | Permanently delete any of 12 record types. **No undo** |
+| `delete_record` | Permanently delete any of 12 record types after typing its name back. **No undo** |
 | `team_insights` | **Admin only.** Team overview: feature map, adoption, habits, onboarding progress, coaching suggestions |
 | `record_content_use` | Called silently by content commands; records that an advert, Boolean etc. was made, never the text |
 | `usage_report` | **Admin only.** How each person uses the platform: activity, features, changes made, never-started |
@@ -127,8 +127,11 @@ Edit the list in the `closure_reasons` table — no deploy needed.
 
 Three carry extra weight:
 
-- **`delete_record`** is irreversible. The preview names the exact record; the audit log keeps a full
-  copy, which is the only trace left afterwards.
+- **`delete_record`** is irreversible. Anyone with a write token can delete, but the preview names the
+  exact record and the recruiter must type its name (or, for notes, tasks and other ID-only records,
+  its ID) back before the server deletes anything (3.87.0). The audit
+  log keeps who deleted what and the record's name, not a copy of the record: a full copy would keep
+  the personal data an erasure is meant to remove (29/10/2026).
 - **`send_email`** is the one action that leaves the building. It cannot be recalled. It refuses to
   send to anyone who has opted out, and `draft=true` saves it for a human to send instead.
 - **`update_deal` to Won** records revenue. RecruitCRM requires all four fields on an edit, so the
