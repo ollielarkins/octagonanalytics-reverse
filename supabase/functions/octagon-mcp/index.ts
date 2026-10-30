@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.89.0" };
+const SERVER = { name: "octagon-analytics", version: "3.89.1" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -1528,7 +1528,11 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       const inbox = await inboxSummary(actor.id);
       return toolText({ scope: "team", consultant: "Whole team",
         note: "Your login has no consultant desk, so this is the whole team's attention list: aging offers, stalled candidates and cold open roles. Pass consultant to see one person's day.",
-        aging_offers: st?.aging_offers ?? [], stalled: st?.stalled ?? [], cold_open_roles: cj?.cold_count ?? null, cold_jobs: (cj?.jobs ?? []).slice(0, 10),
+        // 3.89.1: the team list ran to 130+ stalled candidates, heavy for the start of every chat.
+        // Longest-stalled 25; the total says how many more stalled_report holds.
+        aging_offers: st?.aging_offers ?? [], stalled: (st?.stalled ?? []).slice(0, 25), stalled_total: (st?.stalled ?? []).length,
+        stalled_note: (st?.stalled ?? []).length > 25 ? `Showing the 25 longest-stalled of ${(st?.stalled ?? []).length}. Run stalled_report for all of them.` : undefined,
+        cold_open_roles: cj?.cold_count ?? null, cold_jobs: (cj?.jobs ?? []).slice(0, 10),
         active_in_play: null, placed_last_7d: null, inbox, inbox_line: inboxLine(inbox) });
     }
     const { data, error } = await db.rpc("my_day", { p_consultant_id: args?.consultant ? null : actor.id, p_consultant: args?.consultant ?? null });
