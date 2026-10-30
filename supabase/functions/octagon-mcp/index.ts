@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.85.0" };
+const SERVER = { name: "octagon-analytics", version: "3.86.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -1564,7 +1564,9 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
   if (name === "update_hiring_stage") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Hiring-stage changes require a write-enabled token (an admin sets can_write)." });
     const [byId, live] = await Promise.all([stageLookup(), liveHiringStages()]);
-    const mapped = byId.get(args.status_id);
+    // 3.86.0, 29/10/2026: Number() as live.get has. stage_lookup keys are integers, so a status_id
+    // sent as "3" found nothing, stage_metric was null and the CV Sent off-limit check was skipped.
+    const mapped = byId.get(Number(args.status_id));
     const liveStage = live.get(Number(args.status_id));
     if (!mapped && !liveStage) return toolText({ error: "unknown_stage", status_id: args.status_id, message: "No hiring stage with that id in any RecruitCRM pipeline. Look it up with reference_list kind=hiring_stages; never guess an id." });
     const proposed = { stage_name: liveStage?.label ?? mapped?.stage_name, stage_metric: mapped?.stage_metric ?? null };
@@ -1750,6 +1752,10 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         return toolText({ error: "opted_out", recipient: who,
           message: `${who} has opted out of email in RecruitCRM. Nothing has been sent. Opt-outs are a legal obligation, not a preference — contact them another way if it is genuinely necessary.` });
       }
+      // 3.86.0, 29/10/2026: off-limit candidates are never emailed (drafts included). This path
+      // checked opt-out only. Checked at preview and again at confirm, live, failing closed.
+      const chk = await liveOffLimit(hit.slug);
+      if (!chk.verified || chk.off) return offLimitRefusal(who, chk);
     } else if (args.contact_slug) {
       const det = await crm("GET", `/contacts/${args.contact_slug}`);
       const d = det.json?.data ?? det.json ?? {};
@@ -1851,6 +1857,12 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
     if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
     const job = jm[0];
+    // 3.86.0, 29/10/2026: show puts the candidate in front of the client and apply puts them on the
+    // job, so both get the live off-limit check CV Sent has. unassign and hide only reduce exposure.
+    if (action === "show" || action === "apply") {
+      const chk = await liveOffLimit(cand.slug);
+      if (!chk.verified || chk.off) return offLimitRefusal(cand.name, chk);
+    }
 
     const what: Record<string, string> = {
       unassign: `REMOVE ${cand.name} from "${job.title}" entirely — they leave that job's pipeline, along with their place in it.`,
@@ -1950,6 +1962,10 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         crm("GET", `/candidates/${cand.slug}/off-limit-history`),
         crm("GET", `/candidates/${cand.slug}`),
       ]);
+      // 3.86.0, 29/10/2026: fail closed. A failed read (429, 5xx) used to become {} and the verdict
+      // "No off-limit restriction recorded", which the spec-pitch flow took as clear to go ahead.
+      if (!cur.ok) return toolText({ error: "off_limit_unverified", candidate: cand.name, status: cur.status, currently_off_limit: null,
+        verdict: "Could not confirm this candidate's off-limit status with RecruitCRM. Treat them as NOT clear: do not approach or pitch until a check succeeds." });
       const c = cur.json?.data ?? cur.json ?? {};
       const isOff = !!(c.off_limit_status_id || c.off_limit_end_date);
       return toolText({ candidate: cand.name, currently_off_limit: isOff,
@@ -3022,8 +3038,10 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const movingStage = args.stage_id != null;
 
     // Enforced here, not only in the /pitch skill, so a pitch recorded any other way is still guarded.
-    // Checked at preview AND at confirm: the status can change in between.
-    if (!movingStage) {
+    // Checked at preview AND at confirm: the status can change in between. 3.86.0, 29/10/2026: stage
+    // moves are checked too; they skipped it, so an off-limit candidate's pitch could be moved on with
+    // the client. Closing out such a pitch is done in RecruitCRM.
+    {
       const chk = await liveOffLimit(cand.slug);
       if (!chk.verified || chk.off) return offLimitRefusal(cand.name, chk);
     }
@@ -3807,6 +3825,10 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     // No "already on the job" check against candidate_assignments: it is an assignment history and
     // keeps rows after an unassign, so it would wrongly block a re-assignment. RecruitCRM's own 422 is
     // the authority, handled below as no_change.
+    // 3.86.0, 29/10/2026: putting an off-limit candidate on a job is the first step to putting them
+    // forward, so assigning gets the same live, fail-closed check as pitch and CV Sent.
+    const offChk = await liveOffLimit(cand.slug);
+    if (!offChk.verified || offChk.off) return offLimitRefusal(cand.name, offChk);
     if (!args.confirm) return toolText({ mode: "preview", action: "assign_candidate", candidate: cand.name, job: job.title, job_id: job.recruitcrm_id, candidate_slug: cand.slug, job_slug: job.slug, acting_as: actor.id, instruction: "Show this to the recruiter. To apply, call again with confirm=true and the same candidate_slug and job_slug." });
     const r = await crm("POST", `/candidates/${encodeURIComponent(cand.slug)}/assign?job_slug=${encodeURIComponent(job.slug)}&updated_by=${encodeURIComponent(String(actor.id))}`);
     if (!r.ok) {

@@ -95,9 +95,10 @@ These are not style preferences; they protect candidates and clients.
 - **Every write is preview → confirm.** A write tool returns a preview first and applies only on
   `confirm=true`, with optimistic concurrency where a record can change in between. Don't add a
   write path that skips this.
-- **Off-limit is checked live.** Anything that puts a candidate in front of a client (pitch, CV
-  Sent) checks RecruitCRM directly and fails closed if it cannot. Never rely on the mirror's
-  `off_limit` flag for that decision.
+- **Off-limit is checked live.** Anything that puts a candidate in front of a client or on a job
+  (pitch and pitch stage moves, CV Sent, assign, apply, show to client) and any email to a candidate
+  checks RecruitCRM directly and fails closed if it cannot. Never rely on the mirror's `off_limit`
+  flag for that decision.
 - **Email:** never to an opted-out person; parse `is_email_opted_out` explicitly (it arrives as a
   string). Sent email cannot be recalled.
 - **Deletes are irreversible** in RecruitCRM. Keep the two-step confirmation.
