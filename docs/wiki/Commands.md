@@ -26,6 +26,7 @@ Start here. These are the ones worth using daily.
 | `/eod` | End-of-day stats — today's activity so far against where the week needs to be |
 | `/chase` | What to chase right now, across your whole pipeline, in priority order |
 | `/yesterday` | Yesterday's activity — CV sends, interview requests, interviews booked, call stats and placements, per consultant |
+| `/dailystats` | Yesterday's CVs sent and interview requests by name — candidate, company, job, current stage, who — the lists Dale sends round |
 
 ## Performance and billing
 

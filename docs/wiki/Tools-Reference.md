@@ -37,6 +37,7 @@ This page is for knowing what's possible, and for debugging when an answer looks
 | `client_status` | A company's status and its contacts' stages (list); change the status (write) | Yes |
 | `new_jobs_report` | Jobs created in a window, and which have no Job Order Form Complete note | No |
 | `interview_requests_unbooked` | Interview requests never booked in | Yes |
+| `daily_activity` | One day's CV sends and interview requests by name (candidate, company, job, current stage, who); previous working day by default | Yes |
 | `awaiting_feedback_report` | Interviewed, with nothing logged since | Yes |
 | `placements_with_fees` | Placements with their fee: each matched to at most one Won deal on the same job. Extra Won deals show as unmatched | Yes |
 | `call_hours_report` | Calls by hour of day, and evening calls after 17:00 | No |
