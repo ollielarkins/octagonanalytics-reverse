@@ -51,7 +51,7 @@ been the fee. Won deals have a median of £6,432 and 713 of 862 fall between £2
 
 | Term | Definition |
 |---|---|
-| **Billing** | `sum(deal_value)` where stage = Won, bucketed by `close_date`; a quarter runs start inclusive to end exclusive, so a close date later in the quarter counts. Deleted deals are excluded |
+| **Billing** | `sum(deal_value)` where stage = Won, bucketed by `close_date`; a quarter runs start inclusive to end exclusive, so a close date later in the quarter counts. Deleted deals are excluded. Billing also splits the quarter into Won to date (closed on or before today) and Won later this quarter |
 | **Pipeline value** | `sum(deal_value)` over deals at Open to Offered, not deleted — the forward indicator. Declined and Placed are not pipeline. Same figure on the dashboard and in billing (29/10/2026) |
 | **Forecast** | `sum(jobs.forecast_fee)` across open roles — £1,546,032 currently |
 | **Fee components** | `annual_salary` × `fee_percentage` ÷ 100 on the deal |

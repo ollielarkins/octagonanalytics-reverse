@@ -82,6 +82,7 @@ lands in `audit_log` with before and after.
 | `create_job` / `update_job` | Raise a new vacancy, or change one (status, salary, pay type, job type, workplace, categories, title, job order form answers). The preview shows how the job will look on octagongroup.co.uk and what it is missing. The description is written by the recruiter or drafted from an attached JD, then approved |
 | `create_deal` / `update_deal` | Raise a deal, or move it — **moving to Won is how billing is recorded** |
 | `create_candidate` / `update_candidate` | Add or edit a person. Refuses obvious duplicates |
+| `parse_cv` | Create a candidate from a CV emailed to your connected inbox, via RecruitCRM's resume parser, with the file attached. An existing match only gets empty fields filled |
 | `manage_client` | Create or edit a company or a contact |
 | `pitch_candidate` | Record a speculative pitch to a contact |
 | `log_activity` | Log a meeting (client visit) or a task |
