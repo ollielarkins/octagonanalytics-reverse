@@ -25,7 +25,8 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.dashboard]
-# Public read-only dashboard page.
+# RETIRED 03/11/2026: a stub that returns 410 Gone and no data. It used to render firm figures and
+# consultants by name for anyone. Left open (verify_jwt = false) only so old links get a clear 410.
 verify_jwt = false
 
 [functions.dashboard-data]

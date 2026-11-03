@@ -7,10 +7,9 @@ RecruitCRM stays the system of record. This platform mirrors it into Supabase, d
 exactly once, and serves those definitions to both the dashboards and Claude — so the two can never
 disagree.
 
-> [!WARNING]
-> **The public `dashboard` page is unauthenticated and this repo is public.** Firm figures and every
-> consultant by name are readable by anyone with its URL. `dashboard-data` was retired on 03/11/2026.
-> See [Architecture](Architecture#dashboard-data-is-unauthenticated).
+> [!NOTE]
+> The public `dashboard` page and `dashboard-data` were retired on 03/11/2026. No endpoint serves firm
+> figures without a token. See [Architecture](Architecture#dashboard-data-is-unauthenticated).
 
 ---
 
