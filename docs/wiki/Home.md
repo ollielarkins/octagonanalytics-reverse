@@ -8,9 +8,9 @@ exactly once, and serves those definitions to both the dashboards and Claude —
 disagree.
 
 > [!WARNING]
-> **`dashboard-data` is unauthenticated and this repo is public.** Firm revenue and every
-> consultant's individual figures are readable by anyone with the URL. See
-> [Architecture](Architecture#dashboard-data-is-unauthenticated). Still open as of 26/10/2026.
+> **The public `dashboard` page is unauthenticated and this repo is public.** Firm figures and every
+> consultant by name are readable by anyone with its URL. `dashboard-data` was retired on 03/11/2026.
+> See [Architecture](Architecture#dashboard-data-is-unauthenticated).
 
 ---
 

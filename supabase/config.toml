@@ -29,7 +29,8 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.dashboard-data]
-# Public read-only aggregates behind the dashboard page. No PII.
+# RETIRED 03/11/2026: a stub that returns 410 Gone and no data. It used to return firm revenue and
+# per-consultant figures to anyone. Left open (verify_jwt = false) only so old callers get a clear 410.
 verify_jwt = false
 
 [functions.feedback]

@@ -9,9 +9,9 @@ always-current mirror of the firm's recruitment data — exposed as **dashboards
 > then, carefully, let Claude act back into RecruitCRM.
 
 > [!WARNING]
-> **`dashboard-data` is unauthenticated and this repository is public.** It returns firm revenue,
-> the full funnel and every consultant by name with their individual figures, to anyone with the
-> URL. Still open as of 26/10/2026 — see [Data exposure](#data-exposure).
+> **The public `dashboard` page is unauthenticated and this repository is public.** It shows firm
+> figures and every consultant by name to anyone with the URL. `dashboard-data`, the JSON API
+> behind it, was retired on 03/11/2026 — see [Data exposure](#data-exposure).
 
 | | |
 |---|---|
@@ -89,7 +89,7 @@ supabase/
     recruitcrm-sync/      the mirror: backfill | incremental | reconcile | history | notes | offlimit | meetings
     recruitcrm-webhook/   near-live change trigger; tombstones on *.deleted events
     octagon-mcp/          the MCP connector: 73 tools, 26 prompts, OAuth bridge
-    dashboard-data/       unauthenticated JSON API; its only caller now is slack-command
+    dashboard-data/       RETIRED 03/11/2026: a stub that returns 410 Gone
     daily-queue/          the 08:30 action queue DMs, and the Monday manager exceptions DM
     slack-actions/        Slack interactivity: the queue's Done buttons, written back to RecruitCRM
     coach-dm/             the Octagon Coach DMs: 12:30, 16:45 and Monday 08:45
@@ -130,7 +130,7 @@ Postgres 17 · project name "Reporting for CRM"
 | `recruitcrm-sync` | true | The mirror. Modes: `backfill`, `incremental`, `reconcile`, `history_recent`, `notes_recent`, `offlimit`, `backfill_all` |
 | `octagon-mcp` | false | Remote MCP server. Authenticates its own callers via `mcp_tokens` |
 | `recruitcrm-webhook` | false | RecruitCRM POSTs on change. Verifies `?key=`; routes by record shape; tombstones on `*.deleted` |
-| `dashboard-data` | false | **Unauthenticated JSON API.** See the warning above |
+| `dashboard-data` | false | **Retired 03/11/2026.** Returns 410 Gone and no data |
 | `daily-queue` | true | 08:30 action queue DMs, and the Monday exceptions DM to managers. Driven by `pg_cron` with `cron_bearer` |
 | `slack-actions` | false | Slack interactivity for the queue's Done buttons. Verifies the Slack signature; previews, then writes the note on Confirm |
 | `coach-dm` | true | The Octagon Coach DMs, from its own Slack app. Driven by `pg_cron` with `cron_bearer` |
@@ -217,13 +217,16 @@ Connector access is by per-user token in `mcp_tokens`, not a server secret. The 
 
 ## Data exposure
 
-`GET /functions/v1/dashboard-data` requires no token, key or header, and returns firm Won revenue,
-the funnel, the deal pipeline and every consultant by name with their figures. The URL appears in
-this README and the wiki, in a repository GitHub reports as public.
+`dashboard-data`, which returned firm Won revenue, the funnel, the deal pipeline and every
+consultant's figures to anyone with the URL, was **retired on 03/11/2026**. It now returns 410 Gone
+and no data. Nothing live was still calling it: the deployed `slack-command` (the Slack `/dashboard`
+and `/kpis`) already reads `dashboard_json()` and the other reports directly with the service key, and
+the session-start hook no longer falls back to it. The repo copy of `slack-command` had drifted behind
+the live one and was brought up to date the same day.
 
-It stays open until the endpoint is authenticated or reduced to genuinely publishable fields.
-`web/dashboard.html`, the static page that read it, was removed on 28/10/2026. The remaining caller
-is `slack-command` (the Slack `/dashboard`), so that is the one to change when it is locked.
+**Still open:** the `dashboard` function is a public HTML page rendered from the same
+`dashboard_json()`, so it shows firm figures and consultants by name to anyone with its URL. It was
+made public by decision; whether it stays public is the open question.
 
 The repository itself is clean of credentials: no personal access tokens or service-role keys are
 committed. The only credentials in tracked files are Supabase **anon** JWTs in cron definitions,
@@ -310,7 +313,7 @@ Why the numbers are what they are. Fuller treatment in
 | M5 Claude query layer | ✅ Done — 73 tools, 26 prompts, 75 commands, per-user auth |
 | M6 Claude action layer | ✅ Done — live, 412 audited writes since 12/08/2026 |
 | Coaching layer (Bhav's priorities 1–8, Oct 2026) | ✅ Done — diary, call tagging, Won deal per placement, daily action queue, client visits, weekly plan from billing, event-triggered drafts, manager exceptions |
-| M7 Hardening & rollout | ⚠️ Partial — auth, monitoring and a full command test done; `dashboard-data` exposure open, no CI, throwaway functions still deployed |
+| M7 Hardening & rollout | ⚠️ Partial — auth, monitoring and a full command test done; `dashboard-data` retired 03/11/2026 but the public `dashboard` page is still open, no CI, throwaway functions still deployed |
 
 **The honest headline is still adoption.** 11 people hold an active token and 7 used it in the last
 30 days. The action queue DM reaches four of them, as a pilot. That, not capability, is what limits
