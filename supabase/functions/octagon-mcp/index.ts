@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.98.1" };
+const SERVER = { name: "octagon-analytics", version: "3.98.2" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -670,8 +670,16 @@ async function meetingsSearch(qs: URLSearchParams, maxPages = 10) {
 let companyMatchCache: { at: number; list: { re: RegExp; name: string }[] } | null = null;
 async function companyMatchers() {
   if (companyMatchCache && Date.now() - companyMatchCache.at < 10 * 60_000) return companyMatchCache.list;
-  const { data } = await db.from("clients").select("company_name,company_status").is("deleted_at", null)
-    .in("company_status", ["Client", "Engaged", "Passive", "Prospect"]);
+  // 3.98.2: paged. These are ~3,000 companies and PostgREST returns 1,000 rows by default, so until now
+  // two thirds of them could never be matched to a meeting title, and nothing said so.
+  const data: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data: page, error } = await db.from("clients").select("company_name,company_status").is("deleted_at", null)
+      .in("company_status", ["Client", "Engaged", "Passive", "Prospect"]).order("id").range(from, from + 999);
+    if (error || !page?.length) break;
+    data.push(...page);
+    if (page.length < 1000) break;
+  }
   const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const list = (data ?? []).map((c: any) => {
     const core = String(c.company_name ?? "").replace(/\b(ltd|limited|plc|llp|inc|group|uk|gmbh|holdings)\b\.?/gi, "").replace(/[(),]/g, " ").replace(/\s+/g, " ").trim();
