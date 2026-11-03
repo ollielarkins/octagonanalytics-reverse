@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.91.0" };
+const SERVER = { name: "octagon-analytics", version: "3.92.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -142,9 +142,9 @@ async function resolveContact(opts: { contact_slug?: string; client?: string; co
     return r.ok && rec ? [rec] : [];
   }
   if (!opts.client) return [];
-  const { data: cl } = await db.from("clients").select("company_slug,company_name")
-    .is("deleted_at", null).or(`company_slug.eq.${opts.client},company_name.ilike.%${opts.client}%`).limit(1);
-  if (!cl?.length) return [];
+  const rc = await resolveClient(opts.client);
+  if (!rc.pick) return [];
+  const cl = [rc.pick];
   const r = await crm("GET", `/contacts/search?company_slug=${encodeURIComponent(cl[0].company_slug)}`);
   let list = r.json?.data ?? (Array.isArray(r.json) ? r.json : []);
   if (opts.contact_name) {
@@ -185,13 +185,40 @@ const DELETABLE: Record<string, { path: string; key: "slug" | "id"; label: (r: a
 const JOB_STATUS: Record<string, number> = { closed: 0, open: 1, "on hold": 2, "on-hold": 2, onhold: 2, cancelled: 3, canceled: 3 };
 const JOB_STATUS_NAME: Record<number, string> = { 0: "Closed", 1: "Open", 2: "On Hold", 3: "Cancelled" };
 
-// Resolve a job the same way job_pipeline does: numeric id, exact slug, or partial title.
-async function resolveJob(q: string) {
-  const isNum = /^[0-9]+$/.test(q.trim());
-  let sel = db.from("jobs").select("recruitcrm_id,slug,title,status,company_slug,client_id").is("deleted_at", null);
-  sel = isNum ? sel.eq("recruitcrm_id", Number(q)) : sel.or(`slug.eq.${q},title.ilike.%${q}%`);
-  const { data } = await sel.limit(5);
-  return data ?? [];
+// 3.92.0: one ranked lookup for every tool (resolve_job, migration 0138). The old one took the first
+// five titles containing the text across every job ever and refused if there was more than one, so 93
+// of 142 Open jobs could not be named by their own title. Returns [the job] when the answer is clear
+// (ID, slug, a single exact-title or single live match), else up to 8 matches, live first. Every word
+// must appear in the title or client name, so "Field Service Engineer PDAS" works. preferLive=false
+// for reopening a job. did_you_mean rides on the array for the no-match reply (noJob).
+async function resolveJob(q: string, preferLive = true) {
+  const { data, error } = await db.rpc("resolve_job", { p_q: String(q ?? "").trim(), p_prefer_live: preferLive });
+  if (error || !data) return [] as any[];
+  const out: any[] = data.pick ? [data.pick] : (data.matches ?? []);
+  (out as any).did_you_mean = data.did_you_mean ?? [];
+  return out;
+}
+// What the recruiter needs to choose between jobs that share a title.
+function jobChoices(jm: any[]) {
+  return jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, client: j.client ?? null, status: j.status ?? null, owner: j.owner ?? null, opened: j.opened ?? null }));
+}
+function noJob(q: any, jm: any) {
+  return toolText({ error: "no_job", message: `No job matches '${q}'.`, did_you_mean: jm?.did_you_mean?.length ? jm.did_you_mean : undefined,
+    instruction: "If a did_you_mean entry is clearly the one, call again with its job_id; otherwise ask." });
+}
+
+// 3.92.0: companies the same way (resolve_client, migration 0138): compared without Ltd, plc, Group and
+// punctuation; among duplicates of one name, the one with Open jobs. Replaces eight copies of a bare
+// contains-match that called "Calnex Solutions" and "Calnex Solutions Ltd" ambiguous forever.
+async function resolveClient(q: any) {
+  const { data } = await db.rpc("resolve_client", { p_q: String(q ?? "").trim() });
+  return data ?? { pick: null, matches: [], also_matches: [], did_you_mean: [] };
+}
+function clientMiss(q: any, rc: any, code = "ambiguous_client") {
+  if (rc?.matches?.length) return toolText({ error: code, message: "More than one company matches. Say which.",
+    matches: rc.matches.map((c: any) => ({ name: c.company_name, open_jobs: c.open_jobs, last_job: c.last_job })),
+    instruction: "Ask which one, then call again with the exact name." });
+  return toolText({ error: "no_company", message: `No company matches '${q}'.`, did_you_mean: rc?.did_you_mean?.length ? rc.did_you_mean : undefined });
 }
 
 // ---- Job custom fields (DPE, Push & Tell) ------------------------------------------------------
@@ -1852,14 +1879,13 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       entity = "candidate"; slug = hit.slug; who = hit.name;
     } else if (args?.job) {
       const jm = await resolveJob(String(args.job));
-      if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
-      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
+      if (!jm.length) return noJob(args.job, jm);
+      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jobChoices(jm) });
       entity = "job"; slug = jm[0].slug; who = jm[0].title;
     } else if (args?.client) {
-      const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
-        .or(`company_slug.eq.${args.client},company_name.ilike.%${args.client}%`).limit(2);
-      if (!cl?.length) return toolText({ error: `No client matches '${args.client}'.` });
-      if (cl.length > 1) return toolText({ error: "ambiguous_client", matches: cl.map((c: any) => c.company_name) });
+      const rc = await resolveClient(args.client);
+      if (!rc.pick) return clientMiss(args.client, rc);
+      const cl = [rc.pick];
       entity = "company"; slug = cl[0].company_slug; who = cl[0].company_name;
     } else {
       return toolText({ error: "Give a candidate, job or client." });
@@ -1896,8 +1922,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (m.length > 1 && !m.some((c: any) => c.slug === args.candidate)) return toolText({ error: "ambiguous_candidate", matches: m.map((c: any) => c.name) });
     const cand = m.find((c: any) => c.slug === args.candidate) ?? m[0];
     const jm = await resolveJob(String(args.job ?? ""));
-    if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
-    if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
+    if (!jm.length) return noJob(args.job, jm);
+    if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jobChoices(jm) });
     const job = jm[0];
     // 3.86.0, 29/10/2026: show puts the candidate in front of the client and apply puts them on the
     // job, so both get the live off-limit check CV Sent has. unassign and hide only reduce exposure.
@@ -2072,10 +2098,9 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     // Attach a contact to its company.
     let companySlug: string | undefined, companyName: string | undefined;
     if (args.client) {
-      const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
-        .or(`company_slug.eq.${args.client},company_name.ilike.%${args.client}%`).limit(2);
-      if (!cl?.length) return toolText({ error: `No client matches '${args.client}'.` });
-      if (cl.length > 1) return toolText({ error: "ambiguous_client", matches: cl.map((c: any) => c.company_name) });
+      const rc = await resolveClient(args.client);
+      if (!rc.pick) return clientMiss(args.client, rc);
+      const cl = [rc.pick];
       companySlug = cl[0].company_slug; companyName = cl[0].company_name;
     }
 
@@ -2092,10 +2117,9 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (editing) {
       // Resolve a company given by name; contacts must be given by slug since they are not mirrored.
       if (kind === "company" && !/^[0-9a-zA-Z]{15,}$/.test(target)) {
-        const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
-          .or(`company_slug.eq.${target},company_name.ilike.%${target}%`).limit(2);
-        if (!cl?.length) return toolText({ error: `No company matches '${target}'.` });
-        if (cl.length > 1) return toolText({ error: "ambiguous_company", matches: cl.map((c: any) => c.company_name) });
+        const rc = await resolveClient(target);
+        if (!rc.pick) return clientMiss(target, rc, "ambiguous_company");
+        const cl = [rc.pick];
         target = cl[0].company_slug;
       }
       // company_name is required on every company edit — carry it forward like the other full-replace endpoints.
@@ -2138,12 +2162,9 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
   // field cannot be found, nothing is written.
   if (name === "client_status") {
     const action = String(args?.action ?? "list");
-    const { data: cl } = await db.from("clients").select("company_slug,company_name,company_status").is("deleted_at", null)
-      .or(`company_slug.eq.${args?.client},company_name.ilike.%${args?.client}%`).limit(5);
-    if (!cl?.length) return toolText({ error: "no_company", message: `No company matches '${args?.client}'.` });
-    const exact = cl.find((c: any) => c.company_slug === args?.client || String(c.company_name).toLowerCase() === String(args?.client).toLowerCase());
-    if (!exact && cl.length > 1) return toolText({ error: "ambiguous_company", matches: cl.map((c: any) => c.company_name), message: "More than one company matches. Say which." });
-    const co = exact ?? cl[0];
+    const rc = await resolveClient(args?.client);
+    if (!rc.pick) return clientMiss(args?.client, rc, "ambiguous_company");
+    const co = rc.pick;
     // Contacts at the company, live (not mirrored). Follows next_page_url for up to 10 pages.
     const contacts: any[] = [];
     let url: string | null = `/contacts/search?company_slug=${encodeURIComponent(co.company_slug)}`;
@@ -2309,14 +2330,13 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       relTo = hit.slug; relType = "candidate"; who = hit.name;
     } else if (args?.job) {
       const jm = await resolveJob(String(args.job));
-      if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
-      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
+      if (!jm.length) return noJob(args.job, jm);
+      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jobChoices(jm) });
       relTo = jm[0].slug; relType = "job"; who = jm[0].title;
     } else if (args?.client) {
-      const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
-        .or(`company_slug.eq.${args.client},company_name.ilike.%${args.client}%`).limit(2);
-      if (!cl?.length) return toolText({ error: `No client matches '${args.client}'.` });
-      if (cl.length > 1) return toolText({ error: "ambiguous_client", matches: cl.map((c: any) => c.company_name) });
+      const rc = await resolveClient(args.client);
+      if (!rc.pick) return clientMiss(args.client, rc);
+      const cl = [rc.pick];
       relTo = cl[0].company_slug; relType = "company"; who = cl[0].company_name;
     } else {
       return toolText({ error: "Give a candidate, job or client to read notes for." });
@@ -2904,17 +2924,16 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     const links: Record<string, any> = {};
     let linkDesc: string[] = [];
     if (args.client) {
-      const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
-        .or(`company_slug.eq.${args.client},company_name.ilike.%${args.client}%`).limit(2);
-      if (!cl?.length) return toolText({ error: `No client matches '${args.client}'.` });
-      if (cl.length > 1) return toolText({ error: "ambiguous_client", matches: cl.map((c: any) => c.company_name) });
+      const rc = await resolveClient(args.client);
+      if (!rc.pick) return clientMiss(args.client, rc);
+      const cl = [rc.pick];
       links.associated_companies = cl[0].company_slug; links.related_to = cl[0].company_slug; links.related_to_type = "company";
       linkDesc.push(`client ${cl[0].company_name}`);
     }
     if (args.job) {
       const jm = await resolveJob(String(args.job));
-      if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
-      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
+      if (!jm.length) return noJob(args.job, jm);
+      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jobChoices(jm) });
       links.associated_jobs = jm[0].slug; linkDesc.push(`job ${jm[0].title}`);
     }
     if (args.candidate) {
@@ -3038,17 +3057,16 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
 
     let companySlug: string | undefined, companyName: string | undefined;
     if (args.client) {
-      const { data: cl } = await db.from("clients").select("company_slug,company_name").is("deleted_at", null)
-        .or(`company_slug.eq.${args.client},company_name.ilike.%${args.client}%`).limit(2);
-      if (!cl?.length) return toolText({ error: `No client matches '${args.client}'.` });
-      if (cl.length > 1) return toolText({ error: "ambiguous_client", matches: cl.map((c: any) => c.company_name) });
+      const rc = await resolveClient(args.client);
+      if (!rc.pick) return clientMiss(args.client, rc);
+      const cl = [rc.pick];
       companySlug = cl[0].company_slug; companyName = cl[0].company_name;
     }
     let jobSlug: string | undefined, jobTitle: string | undefined;
     if (args.job) {
       const jm = await resolveJob(String(args.job));
-      if (!jm.length) return toolText({ error: `No job matches '${args.job}'.` });
-      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jm.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title })) });
+      if (!jm.length) return noJob(args.job, jm);
+      if (jm.length > 1) return toolText({ error: "ambiguous_job", matches: jobChoices(jm) });
       jobSlug = jm[0].slug; jobTitle = jm[0].title;
     }
 
@@ -3253,11 +3271,10 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Creating jobs requires a write-enabled token (an admin sets can_write)." });
     // Resolve the client from the mirror — the recruiter says "Thermoteknix", the API needs a slug.
     const cq = String(args.client ?? "").trim();
-    const { data: clients } = await db.from("clients").select("company_slug,company_name")
-      .is("deleted_at", null).or(`company_slug.eq.${cq},company_name.ilike.%${cq}%`).limit(5);
-    if (!clients?.length) return toolText({ error: `No client matches '${cq}'. Give the exact company name or its slug.` });
-    if (clients.length > 1 && !clients.some((c: any) => c.company_slug === cq)) {
-      return toolText({ error: "ambiguous_client", matches: clients.map((c: any) => c.company_name), instruction: "Ask which one, then call again with the exact name." });
+    const rc = await resolveClient(cq);
+    const clients: any[] = rc.pick ? [rc.pick] : [];
+    if (!rc.pick) {
+      return clientMiss(cq, rc);
     }
     const client = clients.find((c: any) => c.company_slug === cq) ?? clients[0];
 
@@ -3424,8 +3441,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     // The job spec, live from RecruitCRM: so a Boolean search, an advert or candidate matching can
     // start from the real job instead of the recruiter pasting the description into the chat.
     const matches = await resolveJob(String(args?.job ?? ""));
-    if (!matches.length) return toolText({ error: `No job matches '${args?.job}'.` });
-    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: matches.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, status: j.status })), instruction: "Ask which one, then call again with that job ID." });
+    if (!matches.length) return noJob(args?.job, matches);
+    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: jobChoices(matches), instruction: "Ask which one, then call again with that job ID." });
     const r = await crm("GET", `/jobs/${matches[0].slug}`);
     if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
     const j = r.json?.data ?? r.json ?? {};
@@ -3635,8 +3652,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     // changes. Scores and Job Grade are internal and never appear.
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Drafting requires a write-enabled token (an admin sets can_write)." });
     const matches = await resolveJob(String(args?.job ?? ""));
-    if (!matches.length) return toolText({ error: `No job matches '${args?.job}'.` });
-    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: matches.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, status: j.status })), instruction: "Ask which one, then call again with that job ID." });
+    if (!matches.length) return noJob(args?.job, matches);
+    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: jobChoices(matches), instruction: "Ask which one, then call again with that job ID." });
     const job = matches[0];
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(args?.first_cvs_by ?? ""))) return toolText({ error: "first_cvs_by needed", message: "Ask the consultant when the client will get the first CVs (YYYY-MM-DD). It is the one thing they commit to in the email." });
     const box = await myMailbox(actor.id);
@@ -3699,8 +3716,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
   if (name === "job_dpe") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Recording a DPE requires a write-enabled token (an admin sets can_write)." });
     const matches = await resolveJob(String(args.job ?? ""));
-    if (!matches.length) return toolText({ error: `No job matches '${args.job}'.` });
-    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: matches.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, status: j.status })), instruction: "Ask which one, then call again with that job ID." });
+    if (!matches.length) return noJob(args.job, matches);
+    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: jobChoices(matches), instruction: "Ask which one, then call again with that job ID." });
     const job = matches[0];
     // The consultant scores; nothing here infers a score. All six or none, since the total needs all six.
     const missing = Object.keys(DPE_SCORES).filter((k) => ![1, 2, 3, 4, 5].includes(Number(args[k])));
@@ -3756,9 +3773,9 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
 
   if (name === "update_job") {
     if (!actor.can_write) return toolText({ error: "Your token is read-only. Editing jobs requires a write-enabled token (an admin sets can_write)." });
-    const matches = await resolveJob(String(args.job ?? ""));
-    if (!matches.length) return toolText({ error: `No job matches '${args.job}'.` });
-    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: matches.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, status: j.status })), instruction: "Ask which one, then call again with that job ID." });
+    const matches = await resolveJob(String(args.job ?? ""), String(args.status ?? "").toLowerCase() !== "open");
+    if (!matches.length) return noJob(args.job, matches);
+    if (matches.length > 1) return toolText({ error: "ambiguous_job", matches: jobChoices(matches), instruction: "Ask which one, then call again with that job ID." });
     const job = matches[0];
 
     const web = jobWebsiteFields(args);
@@ -4006,7 +4023,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       if (rec?.slug) jobs = [{ slug: String(rec.slug), title: rec.name ?? rec.title ?? String(rec.slug), recruitcrm_id: rec.id, status: rec.job_status?.label ?? rec.job_status ?? null }];
     }
     if (!jobs.length) return toolText({ error: "job_not_found", message: "No job matches. Use job_pipeline or the job's RecruitCRM ID." });
-    if (jobs.length > 1) return toolText({ error: "ambiguous_job", message: "More than one job matches; ask which one.", matches: jobs.map((j: any) => ({ job_id: j.recruitcrm_id, title: j.title, status: j.status })) });
+    if (jobs.length > 1) return toolText({ error: "ambiguous_job", message: "More than one job matches; ask which one.", matches: jobChoices(jobs) });
     const job = jobs[0];
     if (String(job.status ?? "").toLowerCase() !== "open") return toolText({ error: "job_not_open", message: `${job.title} is ${job.status}, not Open. Reopen it first if this assignment is wanted.`, job_id: job.recruitcrm_id });
     // No "already on the job" check against candidate_assignments: it is an assignment history and
