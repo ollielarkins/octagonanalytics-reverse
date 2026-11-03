@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.98.0" };
+const SERVER = { name: "octagon-analytics", version: "3.98.1" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -4285,10 +4285,13 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     }
     const offset = Math.max(Number(args?.offset) || 0, 0), limit = Math.min(Math.max(Number(args?.limit) || 25, 1), 40);
     // custom_fields is keyed by field id as a string; PostgREST reads ->3 as an array index, so filter here.
-    const [{ data: openAll, error }, { data: cons }, { data: cls }] = await Promise.all([
+    const [{ data: openAll, error }, { data: cons }] = await Promise.all([
       db.from("jobs").select("recruitcrm_id,title,client_id,consultant_id,created_date,custom_fields").is("deleted_at", null).eq("status", "Open").order("recruitcrm_id"),
-      db.from("consultants").select("id,name"), db.from("clients").select("id,company_name").is("deleted_at", null)]);
+      db.from("consultants").select("id,name")]);
     if (error) return toolText({ error: error.message });
+    // Only the clients of these jobs: the whole table (4,800+) is past PostgREST's 1,000-row default.
+    const { data: cls } = await db.from("clients").select("id,company_name")
+      .in("id", [...new Set((openAll ?? []).map((j: any) => j.client_id).filter(Boolean))]);
     const ownerOf = new Map((cons ?? []).map((c: any) => [c.id, c.name]));
     const clientOf = new Map((cls ?? []).map((c: any) => [c.id, c.company_name]));
     const open = (openAll ?? []).filter((j: any) => !who || String(ownerOf.get(j.consultant_id) ?? "").toLowerCase().includes(who.toLowerCase()));
