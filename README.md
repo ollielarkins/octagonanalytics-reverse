@@ -8,11 +8,6 @@ always-current mirror of the firm's recruitment data — exposed as **dashboards
 > RecruitCRM into it reliably → define every metric once → show it and let Claude answer from it →
 > then, carefully, let Claude act back into RecruitCRM.
 
-> [!WARNING]
-> **The public `dashboard` page is unauthenticated and this repository is public.** It shows firm
-> figures and every consultant by name to anyone with the URL. `dashboard-data`, the JSON API
-> behind it, was retired on 03/11/2026 — see [Data exposure](#data-exposure).
-
 | | |
 |---|---|
 | Connector | `octagon-mcp` **3.89.1** — 75 tools, 26 prompts |
@@ -98,7 +93,7 @@ supabase/
     slack-command/        Slack /dashboard entry point
     digest-email/         scheduled digests
     feedback/             issue capture from the connect page
-    dashboard/            defunct — Supabase cannot serve HTML
+    dashboard/            RETIRED 03/11/2026: a stub that returns 410 Gone
     recruitcrm-probe/     throwaway API probe, locked and gutted
     recruitcrm-discover/  throwaway discovery probe, locked and gutted
 web/octagon-connect.html  connector login handoff page
@@ -138,7 +133,8 @@ Postgres 17 · project name "Reporting for CRM"
 | `inbox-sync` | true | Polls connected Outlook inboxes every 5 minutes. Metadata only |
 | `slack-command` | false | Slack `/dashboard`; verifies the signing secret |
 | `digest-email`, `feedback` | mixed | Scheduled digests; connect-page issue capture |
-| `dashboard`, `recruitcrm-probe`, `recruitcrm-discover`, `storage-upload` | — | Defunct or throwaway. Safe to delete |
+| `dashboard` | false | **Retired 03/11/2026.** Returns 410 Gone and no data. It had served the full `dashboard_json()` payload as plain text |
+| `recruitcrm-probe`, `recruitcrm-discover`, `storage-upload` | — | Throwaway. Safe to delete |
 
 `verify_jwt` is declared per function in `supabase/config.toml` so it travels with the repo and
 can't be flipped by a stray CLI flag.
@@ -224,9 +220,9 @@ and `/kpis`) already reads `dashboard_json()` and the other reports directly wit
 the session-start hook no longer falls back to it. The repo copy of `slack-command` had drifted behind
 the live one and was brought up to date the same day.
 
-**Still open:** the `dashboard` function is a public HTML page rendered from the same
-`dashboard_json()`, so it shows firm figures and consultants by name to anyone with its URL. It was
-made public by decision; whether it stays public is the open question.
+The public `dashboard` page, rendered from the same `dashboard_json()`, was **retired the same day**
+and also returns 410 Gone. The dashboard lives in the connector's `get_dashboard` widget, behind each
+person's token. No endpoint now serves firm figures without authentication.
 
 The repository itself is clean of credentials: no personal access tokens or service-role keys are
 committed. The only credentials in tracked files are Supabase **anon** JWTs in cron definitions,
@@ -313,7 +309,7 @@ Why the numbers are what they are. Fuller treatment in
 | M5 Claude query layer | ✅ Done — 73 tools, 26 prompts, 75 commands, per-user auth |
 | M6 Claude action layer | ✅ Done — live, 412 audited writes since 12/08/2026 |
 | Coaching layer (Bhav's priorities 1–8, Oct 2026) | ✅ Done — diary, call tagging, Won deal per placement, daily action queue, client visits, weekly plan from billing, event-triggered drafts, manager exceptions |
-| M7 Hardening & rollout | ⚠️ Partial — auth, monitoring and a full command test done; `dashboard-data` retired 03/11/2026 but the public `dashboard` page is still open, no CI, throwaway functions still deployed |
+| M7 Hardening & rollout | ⚠️ Partial — auth, monitoring and a full command test done; public `dashboard` and `dashboard-data` retired 03/11/2026, no CI, throwaway functions still deployed |
 
 **The honest headline is still adoption.** 11 people hold an active token and 7 used it in the last
 30 days. The action queue DM reaches four of them, as a pilot. That, not capability, is what limits

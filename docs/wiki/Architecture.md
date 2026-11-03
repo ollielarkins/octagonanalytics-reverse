@@ -19,7 +19,7 @@ immediately so the mirror doesn't lag behind a change you just made.
 | `recruitcrm-sync` | The mirror. Modes: backfill, incremental, reconcile, history_recent, notes_recent, offlimit | Locked — Supabase JWT |
 | `recruitcrm-webhook` | Near-real-time change trigger from RecruitCRM | Open — external caller |
 | `feedback` | Issue/feedback box on the connect page | Open — validated, rate-limited |
-| `dashboard` | Public dashboard page | **Open — genuinely unauthenticated. See the warning below** |
+| `dashboard` | Retired public dashboard page | Retired 03/11/2026: returns 410 Gone, no data |
 | `dashboard-data` | Retired JSON API | Retired 03/11/2026: returns 410 Gone, no data |
 | `slack-command` | Slack entry point | Open — external caller |
 | `daily-queue` | The 08:30 action queue DMs and the Monday manager exceptions DM, via the Team Briefs bot token | Locked — `pg_cron` presents `cron_bearer` |
@@ -89,9 +89,8 @@ every consultant's figures with no token, key or header, from a URL in this publ
 stub that returns 410 Gone. Nothing live still called it: `slack-command` already reads `dashboard_json()`
 directly with the service key, and the session-start hook no longer falls back to it.
 
-> [!WARNING]
-> **Still open:** the `dashboard` function is a public HTML page rendered from the same
-> `dashboard_json()`, so it shows firm figures and every consultant by name to anyone with its URL.
+The public `dashboard` page, rendered from the same `dashboard_json()`, was retired the same day and
+also returns 410 Gone. The dashboard is the connector's `get_dashboard` widget, behind each token.
 
 **Twelve entities are health-monitored**: candidates, clients, consultants, jobs, calls, deals, plus
 the three nightly reconciles. Live entities warn at 10 minutes stale and go critical at 30;
