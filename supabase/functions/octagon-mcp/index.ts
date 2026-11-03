@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.96.0" };
+const SERVER = { name: "octagon-analytics", version: "3.96.1" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -3050,6 +3050,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (args.salary != null) {
       const v = Number(args.salary);
       if (!Number.isFinite(v) || v <= 0) return toolText({ error: "bad_salary", message: "salary must be a positive number, e.g. 55000." });
+      // 13 of 2026's Won deals hold the salary in thousands ("39"), which breaks fee % and average salary.
+      if (v < 1000) return toolText({ error: "salary_in_thousands", message: `A salary of ${v} looks like thousands. Give the full annual figure, e.g. ${v * 1000}.` });
       cfChanges[DEAL_CF.salary] = String(v);
     }
     if (args.fee_pct != null) {
