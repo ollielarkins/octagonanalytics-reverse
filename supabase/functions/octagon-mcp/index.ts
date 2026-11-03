@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.98.2" };
+const SERVER = { name: "octagon-analytics", version: "3.99.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -1625,6 +1625,15 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       } catch (_e) { meetings_needing_type = null; }
     }
     const extra: any = meetings_needing_type ? { meetings_needing_type, meetings_line: `${meetings_needing_type} of your meetings from the last 14 days have no type - run meeting_review to pick them, so client visits count.` } : {};
+    // 3.99.0: one command to try, only when the person's own records give it a reason and they
+    // haven't used it in 28 days (command_tip, migration 0144). Own day only.
+    if (!args?.consultant && actor.id) {
+      const { data: tip } = await db.rpc("command_tip", { p_consultant_id: actor.id });
+      if (tip?.command) {
+        extra.try_today = { command: tip.command, why: tip.why };
+        extra.try_line = `Try today: ${tip.command} - ${tip.why}. Mention it once, in one line, after the attention list; don't repeat it in the same chat.`;
+      }
+    }
     // 3.72.0: today's and tomorrow's interviews and feedback due, from the RecruitCRM schedule.
     if (!args?.consultant && actor.id) {
       try {
