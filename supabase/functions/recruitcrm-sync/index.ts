@@ -1,5 +1,5 @@
 // recruitcrm-sync — RecruitCRM → Supabase mirror. Locked (verify_jwt=true).
-// Entities: consultants, clients, jobs, candidates, calls (call_activity via /call-logs), deals, meetings (diary window).
+// Entities: consultants, clients, contacts, jobs, candidates, calls (call_activity via /call-logs), deals, meetings (diary window).
 // Modes: backfill | backfill_all | incremental | reconcile | history (candidate_stage_events).
 // deals feeds the billing report (Won deal_value); owner-attributed via deals.owner_recruitcrm_id.
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -84,6 +84,15 @@ function dateField(obj: any, nameRe: RegExp) {
 const mapClient = (c: any) => ({
   recruitcrm_id: c.id, company_name: c.company_name ?? null, company_slug: c.slug ?? null, country: c.country ?? null, active: true,
   company_status: customField(c, /company status/i),
+});
+// 0145, 03/11/2026: contacts, so calls and notes logged against a contact can be tied to its company.
+// Only what linking and reporting need; email and phone stay in RecruitCRM.
+const mapContact = (c: any) => ({
+  recruitcrm_id: c.id, slug: c.slug ?? null, first_name: c.first_name ?? null, last_name: c.last_name ?? null,
+  name: nm(c.first_name, c.last_name), company_slug: c.company_slug ?? null,
+  designation: typeof c.designation === "string" ? c.designation.slice(0, 200) : null,
+  owner_recruitcrm_id: typeof c.owner === "object" && c.owner ? (c.owner.id ?? null) : (/^\d+$/.test(String(c.owner ?? "")) ? Number(c.owner) : null),
+  created_date: c.created_on ?? null, updated_date: c.updated_on ?? null, deleted_at: null,
 });
 const mapCandidate = (c: any) => ({
   recruitcrm_id: c.id, slug: c.slug ?? null, first_name: c.first_name ?? null, last_name: c.last_name ?? null,
@@ -762,6 +771,7 @@ Deno.serve(async (req) => {
       };
       if (entity === "all" || entity === "consultants") await step("consultants", () => syncConsultants());
       if (entity === "all" || entity === "clients") await step("clients", () => incremental("clients", "companies", mapClient, "clients"));
+      if (entity === "all" || entity === "contacts") await step("contacts", () => incremental("contacts", "contacts", mapContact, "contacts"));
       if (entity === "all" || entity === "candidates") await step("candidates", () => incremental("candidates", "candidates", mapCandidate, "candidates"));
       if (entity === "all" || entity === "jobs") await step("jobs", async () => { const [cb, sb] = await jobMaps(); return incremental("jobs", "jobs", mapJobFactory(cb, sb), "jobs"); });
       if (entity === "all" || entity === "calls") await step("calls", async () => { const cn = await consNameMap(); return incremental("calls", "call-logs", mapCallFactory(cn), "call_activity"); });
@@ -773,10 +783,11 @@ Deno.serve(async (req) => {
     if (mode === "reconcile") {
       if (entity === "consultants") return Response.json(await reconcileConsultants());
       const fn = entity === "clients" ? () => reconcilePaged("clients", "companies", "clients")
+               : entity === "contacts" ? () => reconcilePaged("contacts", "contacts", "contacts")
                : entity === "candidates" ? () => reconcilePaged("candidates", "candidates", "candidates")
                : entity === "jobs" ? () => reconcilePaged("jobs", "jobs", "jobs")
                : entity === "deals" ? () => reconcileDeals() : null;
-      if (!fn) return Response.json({ error: "reconcile needs entity=consultants|clients|candidates|jobs|deals" }, { status: 400 });
+      if (!fn) return Response.json({ error: "reconcile needs entity=consultants|clients|contacts|candidates|jobs|deals" }, { status: 400 });
       try { (globalThis as any).EdgeRuntime?.waitUntil(runBg(`reconcile:${entity}`, fn)); } catch {}
       return Response.json({ mode: "reconcile", entity, status: "started (background)" }, { status: 202 });
     }
@@ -785,12 +796,13 @@ Deno.serve(async (req) => {
     const maxPages = parseInt(url.searchParams.get("max_pages") ?? "1", 10);
     if (entity === "consultants") return Response.json(await syncConsultants());
     if (entity === "clients") return Response.json(await backfillLoop("clients", startPage, maxPages, "companies", mapClient, "clients"));
+    if (entity === "contacts") return Response.json(await backfillLoop("contacts", startPage, maxPages, "contacts", mapContact, "contacts"));
     if (entity === "candidates") return Response.json(await backfillLoop("candidates", startPage, maxPages, "candidates", mapCandidate, "candidates"));
     if (entity === "jobs") { const [cb, sb] = await jobMaps(); return Response.json(await backfillLoop("jobs", startPage, maxPages, "jobs", mapJobFactory(cb, sb), "jobs")); }
     if (entity === "calls") { const cn = await consNameMap(); return Response.json(await backfillLoop("calls", startPage, maxPages, "call-logs", mapCallFactory(cn), "call_activity")); }
     if (entity === "deals") return Response.json(await backfillLoop("deals", startPage, maxPages, "deals", mapDeal, "deals"));
     if (entity === "notes") return Response.json(await backfillLoop("notes", startPage, maxPages, "notes", mapNote, "notes"));
-    return Response.json({ error: "entity must be consultants|clients|candidates|jobs|calls|deals" }, { status: 400 });
+    return Response.json({ error: "entity must be consultants|clients|contacts|candidates|jobs|calls|deals" }, { status: 400 });
   } catch (e) {
     return Response.json({ error: String(e) }, { status: 500 });
   }
