@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.97.0" };
+const SERVER = { name: "octagon-analytics", version: "3.97.1" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -1853,8 +1853,15 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     // Drafts are never sent, so one preview listing every reply and one confirm saving them all is the
     // safe shape (up to 25, the per-confirmation limit). Emails flagged "never" (offers, pay, fees,
     // complaints, legal) are refused in a batch: those are drafted one at a time, on explicit request.
-    if (Array.isArray(args?.replies)) {
-      const items = args.replies.map((x: any) => ({ id: String(x?.message_id ?? "").trim(), text: String(x?.body ?? "").trim(), all: !!x?.reply_all }));
+    // A client holding the pre-3.97.0 tool list sends replies as a JSON string (seen at deploy, as with
+    // update_job's job_order_form): accept both, and refuse anything else rather than drop it.
+    let replies: any = args?.replies;
+    if (typeof replies === "string" && replies.trim()) {
+      try { replies = JSON.parse(replies); } catch { return toolText({ error: "bad_replies", message: "replies must be a list of { message_id, body, reply_all }." }); }
+      if (!Array.isArray(replies)) return toolText({ error: "bad_replies", message: "replies must be a list of { message_id, body, reply_all }." });
+    }
+    if (Array.isArray(replies)) {
+      const items = replies.map((x: any) => ({ id: String(x?.message_id ?? "").trim(), text: String(x?.body ?? "").trim(), all: !!x?.reply_all }));
       if (!items.length) return toolText({ error: "Give at least one reply in replies." });
       if (items.length > 25) return toolText({ error: "too_many", message: "At most 25 replies per confirmation. Split them into batches." });
       if (items.some((x: any) => !x.id || !x.text)) return toolText({ error: "Each reply needs a message_id and a body." });
