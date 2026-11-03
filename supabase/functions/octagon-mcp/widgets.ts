@@ -307,7 +307,7 @@ const CONFIRM_JS = String.raw`
 // tools as { ...the tool's own JSON, _card: { tool, kind, confirm_args, draft_args } }.
 var T={update_hiring_stage:['Move stage','Move stage'],assign_candidate:['Assign candidate','Assign'],manage_assignment:['Change assignment','Apply'],
 add_note:['Add note','Add note'],create_candidate:['New candidate','Create candidate'],update_candidate:['Edit candidate','Save changes'],
-create_job:['New job','Create job'],update_job:['Edit job','Save changes'],create_deal:['New deal','Create deal'],update_deal:['Edit deal','Save changes'],
+create_job:['New job','Create job'],update_job:['Edit job','Save changes'],handover:['Hand over desk','Move jobs'],create_deal:['New deal','Create deal'],update_deal:['Edit deal','Save changes'],
 log_activity:['Log activity','Log it'],manage_client:['Client record','Save'],pitch_candidate:['Record pitch','Record pitch'],
 job_dpe:['Record DPE','Record DPE'],post_digest:['Post digest','Post to Slack'],delete_record:['Delete record',''],
 send_email:['Email','Save draft'],push_tell:['Push & Tell email','Save to Outlook Drafts'],eow_email:['End-of-week email','Save to Outlook Drafts'],off_limit:['Off-limit status','Apply'],hotlist:['Hotlist','Apply'],inbox:['Inbox','Apply'],manage_tokens:['Revoke access','Revoke'],webhook_subscriptions:['Webhook','Apply'],client_status:['Change status','Apply changes'],draft_reply:['Reply draft','Save to Outlook Drafts'],dpe_email:['DPE email','Save to Outlook Drafts']};

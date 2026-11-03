@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.89.1" };
+const SERVER = { name: "octagon-analytics", version: "3.90.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -910,6 +910,7 @@ const TOOLS = [
   { name: "dpe_email", description: "Draft the DPE email for a job: Octagon's FIXED template, written by the server so it is identical every time, confirming the brief to the client after the briefing call (location, salary, day-to-day, ideal background, interview stages, interviewers, timescales, next steps). Missing facts read 'To be confirmed'. Scores and Job Grade never appear. Needs first_cvs_by (YYYY-MM-DD), the date the consultant commits to sending the first CVs. Recipient is the job's RecruitCRM contact (or contact_slug); opted-out contacts are refused. WRITE, two-step, OUTWARD-FACING draft: without confirm returns a preview; confirm=true saves it to the consultant's Outlook Drafts (never sent) and sets DPE Sent to today.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, first_cvs_by: { type: "string", description: "YYYY-MM-DD" }, contact_slug: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "job_dpe", description: "Record a job's DPE in RecruitCRM: the six scores the CONSULTANT gives (urgency, cooperation, track_record, commitment, process_quality, positioning, each 1-5 - never estimate one), then Total Score (out of 30) is calculated and written back with the Job Grade. The grade bands (A 25-30, B 19-24, C under 19) SUGGEST a grade; the consultant decides: pass grade=A/B/C to keep or override. If the job already has a grade that differs from the suggestion and no grade is passed, the tool returns grade_choice_needed instead of overwriting it. Plus optional findability (1-3, not in the total), briefing_call_date and dpe_sent_date (YYYY-MM-DD). WRITE, two-step, EXPLICIT-ONLY: call without confirm for a current-vs-new preview, get approval, then confirm=true with the same values. The write is read back from RecruitCRM and verified.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, urgency: { type: "integer" }, cooperation: { type: "integer" }, track_record: { type: "integer" }, commitment: { type: "integer" }, process_quality: { type: "integer" }, positioning: { type: "integer" }, grade: { type: "string", description: "A, B or C: the consultant's grade; omit to use the banded suggestion" }, findability: { type: "integer" }, briefing_call_date: { type: "string" }, dpe_sent_date: { type: "string" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
   { name: "update_job", description: "Edit an existing job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a before/after preview, get approval, then confirm=true. Identify the job by numeric ID, slug or part of its title. Only the fields you pass are changed — everything else is left alone. Use for 'close job 6011', 'put the Bosch role on hold', 'change the salary range on X', 'job 6106 is hourly', and to fill in or change the JOB ORDER FORM (the client briefing answers) with job_order_form. The preview's `website` section shows how the job will look on octagongroup.co.uk after the change and what is still missing. To write a website advert for a job with no description: call job_spec (it returns the Internal Job Description file's text), draft the advert from it under the same rules as create_job, get the recruiter's approval, then pass it as description. status: open | closed | on hold | cancelled. RecruitCRM edits go through this tool, never a browser.", inputSchema: { type: "object", properties: { job: { type: "string", description: "job ID, slug, or part of the title" }, status: { type: "string", description: "open | closed | on hold | cancelled" }, title: { type: "string", description: "new job title" }, description: { type: "string", description: "the job advert shown on the website (plain text is turned into paragraphs and bullet lists)" }, openings: { type: "integer" }, salary_min: { type: "number" }, salary_max: { type: "number" }, pay_type: { type: "string", description: "annual | monthly | weekly | daily | hourly" }, job_type: { type: "string", description: "Full Time | Part Time | Contract" }, workplace: { type: "string", description: "on-site | hybrid | remote" }, categories: { type: "string", description: "Job Categories, comma-separated (replaces the current list)" }, industry: { type: "string", description: "Job Industry, comma-separated (replaces the current list)" }, city: { type: "string" }, state: { type: "string", description: "state / county / region" }, country: { type: "string" }, job_order_form: { type: "object", description: "job order form answers, as { question: answer }. The question is the field's name in RecruitCRM, or enough of it to be unique (e.g. 'Background of the ideal candidate', 'Timescales', 'Interviewers'), or its field id. Also Job Categories and Job Industry (comma-separated, from their options). Leave out anything the recruiter did not give you; never guess. An empty answer clears the field.", additionalProperties: { type: "string" } }, reason: { type: "string", description: "why the role is closing - only for status closed/cancelled/on hold. Must be one of the configured reasons; call without it to see the list in the preview." }, reason_detail: { type: "string", description: "optional free text alongside reason" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["job"], additionalProperties: false } },
+  { name: "handover", description: "Hand a consultant's desk to someone else: moves the OWNER of their Open and On Hold jobs to another consultant, so those jobs and every candidate in play on them move to the new owner's day, stalled list and cold jobs. Use for a leaver, long leave or a desk change ('hand Chloe's jobs to Adam'). ADMINS AND MANAGERS ONLY. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview listing each job with its client, status, candidates in play and last activity, get approval, then confirm=true. Up to 25 jobs per confirmation; pass jobs (comma-separated job IDs from the preview) to move only some, or to do the rest in a second run. Funnel credit already earned stays with whoever did the work; open deals keep their owner (billing goes to the deal owner) and are listed so the manager can decide. RecruitCRM edits go through this tool, never a browser.", inputSchema: { type: "object", properties: { from: { type: "string", description: "the consultant whose jobs move (leavers included)" }, to: { type: "string", description: "the active consultant who takes them" }, jobs: { type: "string", description: "optional: comma-separated job IDs to move, from the preview; default all (max 25)" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["from", "to"], additionalProperties: false } },
   { name: "assign_candidate", description: "Assign a candidate to a job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The acting consultant is taken from your token. The preview checks both records first: candidate_slug takes the slug or RecruitCRM candidate ID (from find_candidate); job_slug takes the job's slug, its RecruitCRM job ID, or an exact title. A candidate or job that does not resolve to exactly one record, or a job that is not Open, is reported at preview, so a bad identifier never reaches the confirm. A candidate already on the job comes back as no_change, not an error.", inputSchema: { type: "object", properties: { candidate_slug: { type: "string", description: "candidate slug or RecruitCRM candidate ID" }, job_slug: { type: "string", description: "job slug, RecruitCRM job ID, or exact job title" }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["candidate_slug", "job_slug"], additionalProperties: false } },
   { name: "add_note", description: "Add a note to a candidate or job in RecruitCRM. WRITE, two-step, EXPLICIT-ONLY: call without confirm for a preview, get approval, then confirm=true. The note is attributed to the acting consultant (your token). target_type is 'candidate' or 'job'; target_slug is that record's slug (use find_candidate / job_pipeline to get it).", inputSchema: { type: "object", properties: { target_type: { type: "string", enum: ["candidate", "job"] }, target_slug: { type: "string" }, note: { type: "string", description: "the note text" }, note_type: { type: "string", enum: ["internal_interview", "job_order_form"], description: "optional. internal_interview files the note as 'Candidate - Internal Interview' (counts toward the internal interviews KPI; only when the call WAS an internal interview, only on a candidate). job_order_form files it as 'Job Order Form Complete' (counts toward the job order forms KPI; only on a job, only when the form really was completed). To fill in the form's own fields use update_job with job_order_form." }, confirm: { type: "boolean" }, ...AUTH_ARG }, required: ["target_type", "target_slug", "note"], additionalProperties: false } },
 ];
@@ -923,7 +924,7 @@ const TOOLS = [
 // migration 0103). That stops a re-rendered card, or a button press followed by a "yes" in chat,
 // applying the same change twice.
 const CARD_TOOLS = new Set(["update_hiring_stage", "assign_candidate", "manage_assignment", "add_note", "create_candidate", "parse_cv",
-  "update_candidate", "create_job", "update_job", "create_deal", "update_deal", "log_activity", "manage_client",
+  "update_candidate", "create_job", "update_job", "handover", "create_deal", "update_deal", "log_activity", "manage_client",
   "pitch_candidate", "job_dpe", "post_digest", "delete_record", "send_email", "draft_reply", "dpe_email"]);
 for (const t of TOOLS as any[]) if (CARD_TOOLS.has(t.name)) {
   t.inputSchema = { ...t.inputSchema, properties: { ...(t.inputSchema?.properties ?? {}), card_nonce: { type: "string", description: "Internal: copy it from _card.confirm_args when confirming a preview. Never invent one." } } };
@@ -3880,6 +3881,90 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       not_applied: webNotApplied.length ? webNotApplied : undefined,
       note: webNotApplied.length ? `${webNotApplied.join(", ")} did not save in RecruitCRM: say so plainly and give the manual step (set it on the job in RecruitCRM). Do not try another way such as a browser.`
         : jofResult && !jofResult.ok ? "Some job order form answers did not save: say which, and do not try another way such as a browser." : "Job updated in RecruitCRM and the mirror refreshed." });
+  }
+
+  if (name === "handover") {
+    // 3.90.0, 03/11/2026: leavers' desks had no way to move. A job's owner drives every desk view
+    // (my_day, stalled, cold jobs are job-owner attributed), so changing the owner moves the job and its
+    // in-play candidates together. Stage events keep their actor, so earned funnel credit stays put.
+    if (!actor.can_write) return toolText({ error: "Your token is read-only. A handover requires a write-enabled token (an admin sets can_write)." });
+    if (!actor.sees_team) return toolText({ error: "Admins and managers only: a handover moves another consultant's jobs." });
+    const { data: cons } = await db.from("consultants").select("id,recruitcrm_id,name,active,deleted_at");
+    const pick = (q: any) => {
+      const n = String(q ?? "").trim().toLowerCase(); if (!n) return [];
+      const all = (cons ?? []).filter((c: any) => String(c.name ?? "").toLowerCase().includes(n));
+      const exact = all.filter((c: any) => c.name.toLowerCase() === n); return exact.length ? exact : all;
+    };
+    const fm = pick(args.from), tm = pick(args.to);
+    if (fm.length !== 1) return toolText({ error: fm.length ? "ambiguous_consultant" : "no_consultant", given: args.from, matches: fm.map((c: any) => c.name) });
+    if (tm.length !== 1) return toolText({ error: tm.length ? "ambiguous_consultant" : "no_consultant", given: args.to, matches: tm.map((c: any) => c.name) });
+    const from = fm[0], to = tm[0];
+    if (from.id === to.id) return toolText({ error: "same_consultant", message: "from and to are the same person." });
+    if (!to.active || to.deleted_at) return toolText({ error: "inactive_consultant", message: `${to.name} is not an active consultant, so cannot take jobs.` });
+
+    const { data: owned } = await db.from("jobs").select("recruitcrm_id,slug,title,status,company_slug,created_date")
+      .eq("consultant_id", from.id).is("deleted_at", null).in("status", ["Open", "On Hold"]).order("created_date", { ascending: false });
+    let jobs = owned ?? [];
+    if (!jobs.length) return toolText({ error: "nothing_to_move", message: `${from.name} owns no Open or On Hold jobs.` });
+    if (args.jobs != null && String(args.jobs).trim() !== "") {
+      const wanted = String(args.jobs).split(",").map((x) => Number(x.trim())).filter((x) => Number.isFinite(x) && x > 0);
+      const ownedIds = new Set(jobs.map((j: any) => Number(j.recruitcrm_id)));
+      const stray = wanted.filter((x) => !ownedIds.has(x));
+      if (stray.length) return toolText({ error: "not_their_job", job_ids: stray, message: `Not Open or On Hold jobs owned by ${from.name}. Use job IDs from the preview.` });
+      jobs = jobs.filter((j: any) => wanted.includes(Number(j.recruitcrm_id)));
+    }
+    const remaining = Math.max(0, jobs.length - 25);
+    jobs = jobs.slice(0, 25);
+
+    if (!args.confirm) {
+      const slugs = jobs.map((j: any) => j.slug);
+      const [{ data: ev }, { data: cl }, { data: deals }] = await Promise.all([
+        db.from("candidate_stage_events").select("candidate_slug,job_slug,stage_metric,event_date,event_timestamp").in("job_slug", slugs).order("event_timestamp", { ascending: false }),
+        db.from("clients").select("company_slug,company_name").in("company_slug", jobs.map((j: any) => j.company_slug).filter(Boolean)),
+        db.from("deals").select("deal_value").eq("owner_recruitcrm_id", from.recruitcrm_id).is("deleted_at", null)
+          .in("deal_stage", ["Open", "CV Sent", "Interview Request", "1st Interview", "2nd Interview", "3rd Interview", "Offered"]),
+      ]);
+      // Current stage per candidate on each job: the newest event wins.
+      const latest = new Map<string, any>();
+      for (const e of ev ?? []) { const k = `${e.candidate_slug}|${e.job_slug}`; if (!latest.has(k)) latest.set(k, e); }
+      const ACTIVE = ["cv_sent", "interview_request", "first_interview", "second_interview", "third_interview", "offered"];
+      const client = new Map((cl ?? []).map((c: any) => [c.company_slug, c.company_name]));
+      const rows = jobs.map((j: any) => {
+        const mine = [...latest.values()].filter((e: any) => e.job_slug === j.slug);
+        const last = mine.reduce((m: string | null, e: any) => (!m || e.event_date > m ? e.event_date : m), null);
+        return { job_id: j.recruitcrm_id, title: j.title, client: client.get(j.company_slug) ?? null, status: j.status,
+          in_play: mine.filter((e: any) => ACTIVE.includes(e.stage_metric)).length, offers_out: mine.filter((e: any) => e.stage_metric === "offered").length,
+          last_activity: last ?? "none" };
+      }).sort((a: any, b: any) => b.in_play - a.in_play);
+      const openDeals = deals ?? [];
+      return toolText({ mode: "preview", action: "handover",
+        from: `${from.name}${from.active && !from.deleted_at ? "" : " (left)"}`, to: to.name,
+        jobs_moving: rows.length, candidates_in_play: rows.reduce((n: number, r: any) => n + r.in_play, 0), jobs: rows,
+        not_in_this_run: remaining ? `${remaining} more job(s) beyond the 25-per-confirmation limit: run again for the rest after this one.` : undefined,
+        open_deals_staying: openDeals.length ? { count: openDeals.length, value: openDeals.reduce((n: number, d: any) => n + Number(d.deal_value ?? 0), 0),
+          note: `Open deals keep their owner, so their billing stays with ${from.name}. Changing a deal's owner is a separate manager decision, made in RecruitCRM.` } : undefined,
+        what_happens: `Each job's owner becomes ${to.name}. Its candidates move to ${to.name}'s day, stalled list and cold jobs. Funnel credit already earned stays with whoever did the work.`,
+        rule: NO_BROWSER, instruction: "Show this to the manager. To apply, call again with confirm=true." });
+    }
+
+    const moved: any[] = [], failed: any[] = [];
+    for (const j of jobs) {
+      const r = await crmForm(`/jobs/${j.slug}`, { owner_id: to.recruitcrm_id, updated_by: actor.id });
+      if (!r.ok) { failed.push({ job_id: j.recruitcrm_id, title: j.title, error: `RecruitCRM ${r.status}` }); continue; }
+      // Read back: an edit RecruitCRM accepts but ignores would otherwise report success.
+      const back = await crm("GET", `/jobs/${j.slug}`);
+      const owner = Number((back.json?.data ?? back.json)?.owner ?? NaN);
+      if (owner !== Number(to.recruitcrm_id)) { failed.push({ job_id: j.recruitcrm_id, title: j.title, error: "owner did not change in RecruitCRM" }); continue; }
+      moved.push({ job_id: j.recruitcrm_id, title: j.title });
+      await audit({ actor: String(actor.id), action: "handover", entity: "job", entity_id: j.slug,
+        before: { owner: from.recruitcrm_id, owner_name: from.name }, after: { owner: to.recruitcrm_id, owner_name: to.name }, via: "claude" });
+    }
+    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/recruitcrm-sync?mode=incremental&entity=jobs`,
+      { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
+    return toolText({ mode: "applied", from: from.name, to: to.name, moved: moved.length, failed: failed.length ? failed : undefined, jobs: moved,
+      not_in_this_run: remaining ? `${remaining} more job(s) still owned by ${from.name}: run handover again for them.` : undefined,
+      note: failed.length ? "Some jobs did not move: say which, and give the manual step (change the job owner in RecruitCRM). Do not try another way such as a browser."
+        : `All ${moved.length} job(s) now belong to ${to.name}; the mirror refreshes within a minute.` });
   }
 
   if (name === "assign_candidate") {
