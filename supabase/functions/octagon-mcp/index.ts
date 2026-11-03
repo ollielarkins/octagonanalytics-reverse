@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.96.1" };
+const SERVER = { name: "octagon-analytics", version: "3.96.2" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -845,10 +845,27 @@ function errorCode(out: any): string | null {
   const t = out?.content?.[0]?.text;
   if (typeof t !== "string" || !t.startsWith('{"error"')) return null;
   let j: any = null; try { j = JSON.parse(t); } catch { return "unparsed"; }
-  const code = typeof j?.error === "string" && /^[a-z_]{2,40}$/.test(j.error) ? j.error : "message";
+  let code = typeof j?.error === "string" && /^[a-z_]{2,40}$/.test(j.error) ? j.error : null;
+  // 3.96.2: a prose error ("No candidate matches 'X'.") used to log as "message", which said nothing.
+  // Its wording, minus every quoted value and number, names it without the record: the values tools
+  // put into error text are quoted, so a name or slug never reaches the log.
+  if (!code) {
+    const words = String(j?.error ?? "").replace(/'[^']*'|"[^"]*"|`[^`]*`/g, " ").replace(/[0-9]+/g, " ")
+      .split(/[.:;(—]/)[0].toLowerCase().replace(/[^a-z ]+/g, " ").trim().split(/\s+/).filter(Boolean).slice(0, 5);
+    code = words.length ? "msg:" + words.join("_") : "message";
+  }
   const st = Number.isInteger(j?.status) ? ` ${j.status}` : "";
   return (code + st).slice(0, 60);
 }
+// 3.96.2: outcomes that are the tool doing its job, not failing: asking which record was meant,
+// refusing a bad value with the reason, or catching a second confirm. They keep their code in the log
+// but count as ok, so the error figures in usage_report and platform_health mean real failures.
+// From 21/10 to 03/11/2026 these were 41 of 64 logged errors.
+const NOT_A_FAILURE = new Set(["ambiguous_job", "ambiguous_client", "ambiguous_company", "ambiguous_candidate", "ambiguous_consultant",
+  "ambiguous_deal", "ambiguous_question", "no_job", "no_company", "no_consultant", "no_desk", "already_applied", "possible_duplicate",
+  "off_limit", "start_date_required", "scores_needed", "salary_in_thousands", "bad_salary", "bad_fee_pct", "bad_start_date",
+  "not_their_job", "same_consultant", "nothing_to_move", "inactive_consultant", "job_not_open", "not_an_option", "unknown_question", "unknown_reason"]);
+const isFailure = (out: any, code: string | null) => !resultOk(out) && !(code && NOT_A_FAILURE.has(code));
 function logCall(actorId: any, tool: string, ok = true, error: string | null = null) {
   db.from("mcp_call_log").insert({ consultant_recruitcrm_id: actorId ?? null, tool, ok, ...(error ? { error } : {}) }).then(() => {}, () => {});
 }
@@ -1403,7 +1420,7 @@ async function callTool(name: string, args: any, req: Request) {
         const { error } = await db.from("mcp_card_confirms").insert({ nonce, tool: name, consultant_recruitcrm_id: actor.id });
         if (error) {
           const dup = error.code === "23505";
-          logCall(actor.id, name, false, dup ? "already_applied" : "card_check_failed");
+          logCall(actor.id, name, dup, dup ? "already_applied" : "card_check_failed");
           return (MIXED_TOOLS.has(name) ? mixedWrap : cardWrap)(name, { ...args, confirm: true }, toolText({ error: dup ? "already_applied" : "card_check_failed",
             message: dup ? "This change was already applied from this preview, so nothing was changed again. Ask for a fresh preview to make another change."
                          : "Could not check this confirmation, so nothing was changed. Try again in a moment." }));
@@ -1411,7 +1428,7 @@ async function callTool(name: string, args: any, req: Request) {
       }
     }
     let out = await runTool(name, args, req, actor);
-    if (name !== "record_content_use") logCall(actor.id, name, resultOk(out), errorCode(out));
+    if (name !== "record_content_use") { const code = errorCode(out); logCall(actor.id, name, !isFailure(out, code), code); }
     if (CARD_TOOLS.has(name)) out = cardWrap(name, args, out);
     else if (REPORT_TOOLS.has(name)) out = viewWrap(name, out);
     else if (MIXED_TOOLS.has(name)) out = mixedWrap(name, args, out);
