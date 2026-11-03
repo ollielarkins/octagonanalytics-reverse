@@ -230,7 +230,8 @@ version endpoint and one real tool call would have caught the first two within s
 
 | Item | Status |
 |---|---|
-| `dashboard-data` is unauthenticated on a public repo | **Open. Highest priority.** Exposes firm revenue and per-consultant figures to anyone with the URL |
+| `dashboard-data` is unauthenticated on a public repo | **Fixed 03/11/2026.** Retired; returns 410 Gone |
+| The public `dashboard` page shows firm figures and consultants by name | **Open.** Public by decision; whether it stays public is undecided |
 | Three `octagongroup.co.uk` job subscriptions disappeared 15/09/2026 | Open. Ids 37785/37786/37788 vanished during a subscription change; cause not established. Restorable |
 | `/myday` and `/dayplan` fail for admin tokens | Open. `my_day` scopes to the caller's desk and an admin has no consultant record |
 | 64 ghost deals with null `recruitcrm_id` | Pending deletion. £0, none Won, inflate pipeline counts |
