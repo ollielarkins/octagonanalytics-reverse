@@ -12,7 +12,8 @@
 -- 4. 64 deals with no RecruitCRM id, all created 08/07/2026 by an early import (CV Sent, Interview
 --    Request, Placed; none Won), sat in the mirror. They are soft-deleted (deleted_at), so every report
 --    that excludes deleted deals ignores them. Reversible: clear deleted_at.
--- 5. /hygiene gains won_fee_pct_over_100: two deals carry a fee amount in the percentage field.
+-- 5. /hygiene gains won_fee_pct_over_100: a fee amount typed into the percentage field (one Won deal
+--    from 2025 on 04/11/2026; a second is Lost, so not listed).
 
 -- 1
 insert into app_settings (key, value, updated_at)
@@ -209,7 +210,7 @@ as $function$
       (select count(*) from won_rows where annual_salary > 0 and annual_salary < 1000),
       (select jsonb_agg(j order by close_date desc) from (select * from won_rows where annual_salary > 0 and annual_salary < 1000 order by close_date desc limit (select n from w)) x)
     -- 0149: a fee % over 100 is a fee amount typed into the percentage field. Any year, not just the
-    -- window: the two found on 04/11/2026 were both from 2025.
+    -- window: the one found on 04/11/2026 is from 2025.
     union all select 2, 'won_fee_pct_over_100', 'Won deals whose fee % is over 100 (a fee amount typed into the percentage field)', 'Correct it with /won (fee_pct), e.g. 18 for 18%.',
       (select count(*) from deals d left join who o on o.recruitcrm_id = d.owner_recruitcrm_id
         where d.deleted_at is null and d.deal_stage = 'Won' and d.fee_percentage > 100 and (p_consultant is null or o.name ilike '%' || p_consultant || '%')),
