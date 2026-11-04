@@ -12,6 +12,7 @@
 // category and one button to tag them as shown, and a one-line message replaces the stats when someone
 // is ahead with nothing urgent. The coach_log row is written before posting, so the buttons can carry
 // its id, and deleted again if Slack refuses the message.
+//
 // Needs COACH_BOT_TOKEN (chat:write, im:write, users:read, users:read.email). Driven by pg_cron
 // through coach_if_due(), which presents app_settings.cron_bearer, so the function stays locked.
 
