@@ -118,7 +118,7 @@ Deno.serve(async (req) => {
         .eq("consultant_recruitcrm_id", b.consultant_recruitcrm_id);
     }
   }
-  // Counts only: the anon key that can trigger this run is public, so the response carries no mail data.
+  // Counts only, never mail data: only cron (CRON_SECRET) or the service role can call this (0132), but keep the response bare.
   const status = failed ? `error ${failed}/${(boxes ?? []).length} mailboxes` : `ok mailboxes=${(boxes ?? []).length} +${added}`;
   await db.from("sync_state").upsert({ entity: "inbox", last_synced_at: failed ? undefined : now, last_run_at: now, last_status: status }, { onConflict: "entity" });
   return Response.json({ ok: !failed, mailboxes: (boxes ?? []).length, added, failed });
