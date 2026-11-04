@@ -10,6 +10,8 @@
 // every call and its category (the preview), the press is the recruiter's confirmation, and only the
 // calls in that message are touched, each checked to be theirs and still untagged, read back, and
 // stopped at the first problem. A message sent in shadow mode never writes: it says what it would do.
+//
+// 0148: "Away? Pick your last day off" pauses the coach up to and including that date (coach_pause).
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -139,6 +141,25 @@ async function handleItem(p: any) {
   await markItem(p, idx, msg);
 }
 
+// 0148: "Away? Pick your last day off". No coach messages up to and including that date.
+async function handleAway(p: any) {
+  const a = p.actions?.[0];
+  const cid = Number(String(a?.block_id ?? "").replace(/^away:/, ""));
+  const until = String(a?.selected_date ?? "");
+  const reply = (text: string) => p.channel?.id
+    ? slack("chat.postMessage", { channel: p.channel.id, thread_ts: p.message?.ts, text })
+    : Promise.resolve();
+  if (!cid || !/^\d{4}-\d{2}-\d{2}$/.test(until)) return;
+  if (!(await allowedFor(p, cid))) return reply("That button belongs to someone else's coach, so nothing changed.");
+  const days = (Date.parse(until + "T12:00:00Z") - Date.parse(today() + "T12:00:00Z")) / 86400_000;
+  if (days < 0) return reply("That date has already gone, so nothing changed. Pick your last day off.");
+  if (days > 60) return reply("That's more than 60 days away, so nothing changed. Pick a date in the next two months.");
+  await db.from("coach_pause").upsert({ consultant_recruitcrm_id: cid, slot: "all", until }, { onConflict: "consultant_recruitcrm_id,slot" });
+  const back = new Date(Date.parse(until + "T12:00:00Z") + 86400_000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 10).split("-").reverse().join("/");
+  return reply(`Got it. No coach messages until you're back on ${fmt(back)}. To change it, pick another date.`);
+}
+
 async function handle(p: any) {
   const a = p.actions?.[0]; let v: any = {}; try { v = JSON.parse(String(a?.value ?? "{}")); } catch { /* ignore */ }
   const cid = Number(v.c), slot = String(v.slot ?? "");
@@ -180,9 +201,9 @@ Deno.serve(async (req) => {
   let p: any = null;
   try { p = JSON.parse(new URLSearchParams(raw).get("payload") ?? "null"); } catch { /* not ours */ }
   const aid = p?.actions?.[0]?.action_id;
-  if (p?.type === "block_actions" && ["coach_pause", "coach_mute", "coach_unmute", "coach_item", "coach_tag"].includes(aid)) {
+  if (p?.type === "block_actions" && ["coach_pause", "coach_mute", "coach_unmute", "coach_item", "coach_tag", "coach_away"].includes(aid)) {
     // Answer Slack within 3 seconds; do the work after.
-    const work = ["coach_item", "coach_tag"].includes(aid) ? handleItem(p) : handle(p);
+    const work = aid === "coach_away" ? handleAway(p) : ["coach_item", "coach_tag"].includes(aid) ? handleItem(p) : handle(p);
     try { (globalThis as any).EdgeRuntime?.waitUntil(work); } catch { await work; }
   }
   return new Response("", { status: 200 });

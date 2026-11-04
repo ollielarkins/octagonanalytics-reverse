@@ -86,7 +86,10 @@ function blocksFor(n: any, slot: string, cid: number, logId: number, shadowFor: 
   blocks.push({ type: "actions", elements: [
     { type: "button", action_id: "coach_pause", text: { type: "plain_text", text: "Pause for today" }, value: JSON.stringify({ c: cid, slot: "all" }) },
     { type: "button", action_id: "coach_mute", text: { type: "plain_text", text: `Mute the ${slot === "midday" ? "12:30" : slot === "wrap" ? "16:45" : "Monday"} message` }, value: JSON.stringify({ c: cid, slot }) },
-  ] });
+    // 0148: leave isn't in RecruitCRM, so the person tells the coach. A date picker carries no value,
+    // so the consultant id rides in the block_id.
+    { type: "datepicker", action_id: "coach_away", placeholder: { type: "plain_text", text: "Away? Pick your last day off" } },
+  ], block_id: `away:${cid}` });
   if (shadowFor) blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "_Shadow mode: consultants are not getting these yet._" }] });
   return { blocks, text: head };
 }
@@ -140,7 +143,7 @@ Deno.serve(async (req) => {
     }
   }
   const sent = results.filter((r) => r.sent).length;
-  const failed = results.filter((r) => !r.sent && !["nothing to say", "paused"].includes(r.reason));
+  const failed = results.filter((r) => !r.sent && !["nothing to say", "paused", "no activity today"].includes(r.reason));
   await record(failed.length ? `partial:${slot} ${sent} sent, ${failed.length} failed` : `ok:${slot} ${sent} sent${shadow ? " (shadow)" : ""}`);
   return Response.json({ slot, shadow, sent, results });
 });
