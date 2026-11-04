@@ -6,6 +6,68 @@
 
 ---
 
+## Status at 04/11/2026
+
+For anyone deciding what to build next: what is done, what is running as a pilot or in shadow, and
+what is open. Everything below this section is kept as history; items it lists as future work are
+marked **Done** with a date where they have since shipped.
+
+*Last reviewed 04/11/2026.* Connector `octagon-mcp` 3.99.1 (80 tools, 26 prompts), 82 slash commands in four
+plugins, migrations `0001`-`0148`.
+
+| Milestone | Status at 04/11/2026 |
+|---|---|
+| **M0-M3** Foundations, data model, sync, semantic layer | Done. The mirror covers consultants, clients, contacts (since 03/11/2026, no email or phone), jobs, candidates, stage history, calls, deals, meetings, notes and off-limit flags |
+| **M4** Dashboards | Done. The dashboard is the connector's `get_dashboard` widget (20/10/2026); the public page and its JSON API were retired 03/11/2026 |
+| **M5** Claude query layer | Done |
+| **M6** Claude action layer | Done. Live since the first audited write on 12/08/2026; 516 writes in `audit_log` at 04/11/2026 |
+| **M7** Hardening and rollout | Partial. See the open items |
+
+### Done since 26/10/2026
+
+- Platform audit fixes (29/10-30/10/2026): confirm gate enforced server-side (0131), OAuth redirect
+  allowlist, locked functions need the service role or `CRON_SECRET` (0132), billing bounded to the
+  quarter with deleted deals out (0133), partial sync failures flagged (0134), off-limit checked on
+  every path to a client and failing closed, deletes need the record's name typed back, leaver
+  auto-revoke (0136).
+- Public `dashboard` and `dashboard-data` retired, 03/11/2026: no unauthenticated endpoint serves
+  firm figures.
+- Command gap review, all 13 items closed 03/11/2026: `/handover`, `/silver` (0137), `/lapsed`
+  (0139), `/aftercare` (0140), `/hygiene` (0141), deal salary, fee % and start date in
+  `update_deal` (0142, 0143), `/jdcheck`, ranked job and company lookup (0138), batch
+  `draft_reply`, and a "try today" command tip in `my_day` (0144).
+- Contacts mirror (0145, 0146), 03/11/2026.
+- Octagon Coach v2 and v3 (0147, 0148), 04/11/2026: Done/Snooze, one-press call tagging, Away date,
+  Monday offers, Friday look-back, and `likely_call_type()` for untagged calls, shown beside tagged
+  counts and never added in.
+
+### In shadow or pilot
+
+| Item | State at 04/11/2026 |
+|---|---|
+| Octagon Coach DMs | Shadow mode: previews go to the admin only, for a four-person pilot list |
+| Daily action queue DMs | Live to a four-person pilot |
+| `/handover`, `parse_cv` in `/newcandidate`, batch `draft_reply` save | Built 03/11/2026; not yet run for real |
+
+### Open
+
+| Item | Notes |
+|---|---|
+| Deal ownership gating | `update_deal` and `activity_report` do not check that the caller owns the record |
+| OAuth token expiry | Tokens advertise a 90-day lifetime but never expire |
+| 64 orphan deals | Deals in the mirror with no RecruitCRM id (count checked 04/11/2026) |
+| Webhook key in URL | `recruitcrm-webhook` takes its secret as `?key=`, so it can reach logs |
+| Coach live rollout | Turn shadow mode off once the pilot previews are reviewed |
+| EOW email Outlook drafts | `eow_email` can save to Outlook Drafts; no draft has been saved through it yet |
+| Job-board alert emails (saved searches read from the inbox) | Discussed 04/11/2026, not started |
+| `cron_manifest` drift | `recruitcrm-assignment-sweep` and `weekly-usage-slack` run but are not declared |
+| Supabase CLI | Returns 403 since 04/11/2026; deploys go through the Supabase MCP tools meanwhile |
+| CI | None yet |
+| RecruitCRM target report | Compare with our own targets (see Tier 1 below) |
+| Direct Devyce feed | Blocked on Devyce (see Tier 3 below) |
+
+---
+
 ## Status (as of 2026-08-04)
 
 | Milestone | Status |
@@ -210,11 +272,17 @@ whole funnel — pitched → engaged → placed — with no new tables.
 **Worth doing first.** It converts an "untracked" metric into a measured one and it has a
 BD-reporting payoff.
 
+**Done 10/08/2026** (octagon-mcp 3.32.2): `pitch_candidate` records a pitch and `pitch_history`
+reports them (`/pitch`, `/pitches`).
+
 ### Client visits — meetings
 
 `GET/POST /v1/meetings`, `/v1/meetings/search`, and `GET /v1/meeting-types`. If a client visit is
 logged as a meeting of the right type, the fourth untracked KPI is a sync away — the same shape as
 the Devyce call-activity work in migration 0027.
+
+**Done 10/08/2026** (octagon-mcp 3.34.1): meetings are synced and logged through `log_activity`;
+client visits are reported by `client_visits` (`/visits`, 26/10/2026).
 
 ### Leads — contact stages
 
@@ -222,12 +290,17 @@ the Devyce call-activity work in migration 0027.
 the *company* status custom field has no Lead value. The contact-level sales pipeline is a
 different mechanism and may carry it. Needs a look before we keep saying leads are untrackable.
 
+**Done 10/08/2026:** leads are counted from logged notes (`notes_kpi`). Contact stages and company
+status are read and set by `client_status` (20/10/2026).
+
 ### Targets — a report we are reimplementing by hand
 
 `GET /v1/target-report/get`. We built `weekly_targets`, `billing_targets`, `kpis_report()` and
 `billing_report()` ourselves. RecruitCRM has a target report of its own. At minimum, worth
 comparing against, in case the firm's real targets already live there and ours are a parallel
 truth — exactly the failure mode decision D1 exists to prevent.
+
+*Still open at 04/11/2026* (raised again in the 29/10/2026 audit).
 
 ---
 
@@ -245,6 +318,9 @@ we infer it from the client's most recent job and fall back to `1`. Thermoteknix
 the guess entirely. `custom-call-types` would let the Devyce BD/client-call mapping be driven by the
 real list instead of three hardcoded label strings.
 
+**Done 10/08/2026** (octagon-mcp 3.30.1): `reference_list` looks these up, which also fixed the
+currency fallback.
+
 ### Search endpoints — better lookup than ILIKE over the mirror
 
 `/v1/candidates/search`, `/v1/companies/search`, `/v1/jobs/search`, `/v1/deals/search`,
@@ -260,6 +336,9 @@ and enter the value" is *the* revenue-recording action at Octagon and Claude can
 billing is the number everyone cares about, this is arguably the highest-value write after jobs.
 `GET /v1/deals-pipeline` gives the stage list.
 
+**Done 10/08/2026** (octagon-mcp 3.33.0): `create_deal` and `update_deal` (`/newdeal`, `/won`).
+Salary, fee % and start date added to `update_deal` on 03/11/2026.
+
 ### Placements — richer than we assumed
 
 We concluded the placement record carries no money, which is true of its top-level fields. But
@@ -272,6 +351,8 @@ We concluded the placement record carries no money, which is true of its top-lev
 `GET/POST /v1/tasks`. `daily_activity` had a `tasks_added` column that was actually populated
 (2,060 in 2025, 824 in 2026) before that table was dropped. Tasks are real, they are in the API,
 and they are a genuine activity signal we currently ignore.
+
+**Done 10/08/2026** (octagon-mcp 3.34.1): tasks are created with `log_activity` (`/task`).
 
 ### Call logs — see individual calls, and categorise them from Claude
 
@@ -294,6 +375,10 @@ hours, when Devyce posts late). Logged times are Devyce's batch time, not the re
 Cheap related fix: run the incremental sync at :02/:17/:32/:47 so it lands just after each Devyce
 batch.
 
+**Done 26/10/2026** (octagon-mcp 3.75.0, 3.76.0): `call_tagging` lists untagged calls with a
+suggested category and sets it, preview then confirm (`/tagcalls`). `call_notes` reads Devyce call
+summaries (20/10/2026).
+
 ---
 
 ## Tier 3 — new capability, not currently part of the product
@@ -304,24 +389,32 @@ batch.
   (Devyce → Supabase, exposed through `octagon-mcp`), **not** as a separate MCP server: one set of
   call numbers that matches the dashboards, one token per recruiter, and calls matched to
   RecruitCRM records. Recordings/transcripts are special-care personal data — see
-  `docs/GDPR-REVIEW.md` before storing any.
+  `docs/GDPR-REVIEW.md` before storing any. *Still blocked at 04/11/2026.*
 
 - **Invoicing** (`/v1/invoices`, `/v1/invoice-status`, `/v1/invoice-templates`) — a finance layer
   we have never touched. Would connect placements to actual cash rather than deal value.
+  *Built 10/08/2026 (`invoices_report`); closed 03/11/2026 without a command, because RecruitCRM
+  holds no invoices: invoicing happens outside it.*
 - **Timesheets** (`/v1/timesheets`) — only relevant if Octagon does contract placements; the deal
   custom fields include Start date and End date, which suggests some do.
 - **Hotlists** (`/v1/hotlists`) — shared talent pools. A natural home for `match_candidates`
   output: "shortlist these five" could write a hotlist instead of ending in chat.
+  **Done 10/08/2026** (`hotlist`, `/hotlist`).
 - **Email and sequences** (`/v1/emails`, `/v1/drafts`, `/v1/email-sequences/search`,
   `/v1/email/opt-out/status`) — we generate outreach copy but cannot send or track it. Note the
   opt-out endpoints: any sending feature must respect them.
+  **Done 10/08/2026** for single emails (`send_email`, opt-out checked); sequences not built.
 - **Enrollments and subscriptions** — candidate/contact nurture sequences.
 - **Files** (`POST /v1/files`, `GET /v1/files/{entity}/{slug}`) — CVs and job specs.
+  **Done 10/08/2026** for reading (`files_list`); `job_spec` reads Internal JD files (26/10/2026).
 - **Resume parser** (`POST /v1/candidates/resume-parser`) — paste a CV, get a structured candidate.
   Pairs naturally with the existing `candidate_intake` prompt.
+  **Done 30/10/2026** (`parse_cv`, wired into `/newcandidate` on 03/11/2026).
 - **Candidate record depth** — work history, education history, off-limit status, question and
   answers. `off-limit` in particular is a compliance feature we are blind to: we could be
   reporting on or pitching candidates who are marked off-limit.
+  **Done 10/08/2026** (`candidate_profile`, `off_limit`); off-limit is checked live on every path to
+  a client since 30/10/2026.
 
 ---
 
@@ -332,6 +425,9 @@ notes, tasks, meetings, invoices, placements, call logs and hotlists. None of th
 exposed through Claude. The system's whole safety story is preview → confirm → audit on a small set
 of additive actions; a delete tool is a different risk class and RecruitCRM's own UI already has
 one.
+
+*Reversed 10/08/2026:* `delete_record` was added (octagon-mcp 3.31.0) behind the two-step confirm;
+since 30/10/2026 it also needs the record's name typed back.
 
 **Bulk mark-off-limit / mark-as-available.** Same reasoning — bulk state changes across records
 are not something to drive from a chat interface.
@@ -353,6 +449,9 @@ are not something to drive from a chat interface.
 Before any of it: no write has yet succeeded through this platform. `audit_log` is empty. The
 first successful `update_job` matters more than any item on this list, because every write tool
 above inherits the same untested path.
+
+*Superseded:* the first audited write succeeded on 12/08/2026, and steps 1-5 above are done
+(10/08/2026 and 26/10/2026); see the markers in each section.
 
 ---
 

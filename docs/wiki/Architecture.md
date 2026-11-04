@@ -1,186 +1,207 @@
 # Architecture
 
+For anyone who needs to know how data gets from RecruitCRM to Claude and Slack, what each piece does and how it is protected.
+
+*Last reviewed 04/11/2026.*
+
+**On this page:** [Data flow](#data-flow) · [Edge functions](#edge-functions) · [What is mirrored](#what-is-mirrored) · [Sync](#sync) · [Webhooks](#webhooks) · [The metrics layer](#the-metrics-layer) · [The write path](#the-write-path) · [Security model](#security-model) · [Retired: dashboard and dashboard-data](#retired-dashboard-and-dashboard-data) · [Rendering](#rendering) · [Repo layout](#repo-layout) · [Known engineering gaps](#known-engineering-gaps)
+
+## Data flow
+
+RecruitCRM is the system of record. Supabase holds a read-only mirror of it, SQL functions turn the mirror into figures, and the `octagon-mcp` connector hands those figures to each person's Claude. Slack gets the same figures from the same functions. Writes go back to RecruitCRM, never to the mirror directly.
+
+```mermaid
+flowchart LR
+  RC[RecruitCRM API] -->|poll, pg_cron| SYNC[recruitcrm-sync]
+  RC -->|webhooks| WH[recruitcrm-webhook]
+  WH -->|sync now| SYNC
+  SYNC --> DB[(Supabase tables)]
+  OL[Outlook via Microsoft Graph] -->|inbox-poll| INB[inbox-sync]
+  INB --> DB
+  DB --> FN[SQL functions: the metrics layer]
+  FN --> MCP[octagon-mcp connector]
+  MCP --> CL[Claude]
+  MCP -->|confirmed writes| RC
+  FN -->|digests, SQL webhook| SL[Slack]
+  FN --> DQ[daily-queue] --> SL
+  FN --> CD[coach-dm] --> SL
+  SL -->|button presses| SA[slack-actions / coach-actions]
+  SA -->|confirmed writes| RC
 ```
-RecruitCRM  ──►  recruitcrm-sync  ──►  Supabase (Postgres)  ──►  RPCs / views  ──►  octagon-mcp  ──►  Claude
- (system of      (edge function,        (the mirror)            (the metrics       (MCP server +
-  record)         pg_cron)                                       layer)             prompts)
-     ▲                                                                                    │
-     └────────────────── writes, two-step, audited ──────────────────────────────────────┘
-```
 
-Reads come from the mirror. Writes go to RecruitCRM, then the affected records are refreshed
-immediately so the mirror doesn't lag behind a change you just made.
+Reads always come from the mirror. After a write, the connector refreshes the affected records straight away, so the mirror does not lag behind a change you just made.
 
-## Components
+There is no AI on the server. Every piece of drafting happens in the person's own Claude; the Slack messages are rule-based.
 
-| Component | What it is | Auth |
+## Edge functions
+
+`verify_jwt` for every function is declared in `supabase/config.toml`, so it travels with the repo and a stray CLI flag cannot flip it. `verify_jwt = true` on its own is not enough, because the anon key is public: the locked functions also call `trustedCaller()` from `supabase/functions/_shared/caller.ts`, which accepts only the service-role key or an `x-octagon-cron` header equal to `CRON_SECRET` (see [Security model](#security-model)).
+
+### Live
+
+| Function | What it does | How it is protected |
 |---|---|---|
-| `octagon-mcp` | Remote MCP server. 72 tools plus 26 prompts; returns data, not presentation | Open — per-user Octagon tokens + OAuth 2.1 bridge |
-| `recruitcrm-sync` | The mirror. Modes: backfill, incremental, reconcile, history_recent, notes_recent, offlimit | Locked — Supabase JWT |
-| `recruitcrm-webhook` | Near-real-time change trigger from RecruitCRM | Open — external caller |
-| `feedback` | Issue/feedback box on the connect page | Open — validated, rate-limited |
-| `dashboard` | Retired public dashboard page | Retired 03/11/2026: returns 410 Gone, no data |
-| `dashboard-data` | Retired JSON API | Retired 03/11/2026: returns 410 Gone, no data |
-| `slack-command` | Slack entry point | Open — external caller |
-| `daily-queue` | The 08:30 action queue DMs and the Monday manager exceptions DM, via the Team Briefs bot token | Locked — `pg_cron` presents `cron_bearer` |
-| `slack-actions` | Slack interactivity: the queue's Done buttons. Opens a preview, writes the note to RecruitCRM as the consultant on Confirm | Open — verifies Slack's signature |
-| `digest-email` | Renders the scheduled digests | Locked — `pg_cron` |
-| `inbox-sync` | Polls connected Outlook inboxes via Microsoft Graph, metadata only | Locked — `pg_cron` |
-| `recruitcrm-probe` / `recruitcrm-discover` | Read-only API shape probes. Temporary | Locked |
+| `octagon-mcp` | The connector: a remote MCP server (streamable HTTP), version 3.99.1, 80 tools and 26 prompts. Reads the metrics layer, writes to RecruitCRM on confirmation, serves the inline widgets | Open (`verify_jwt = false`). Every tool call authenticates a per-user Octagon token or OAuth session token against `mcp_tokens` |
+| `recruitcrm-sync` | The mirror. Modes: `incremental`, `history_recent`, `notes_recent`, `reconcile`, `offlimit`, `assignment_sweep`, `meetings_quarter`, and per-entity backfill | Locked: JWT plus `trustedCaller()`. Holds the RecruitCRM API token |
+| `recruitcrm-webhook` | Receives RecruitCRM's change notifications, logs them, tombstones deletions and fires an incremental sync for the entity | Open. Requires the shared `?key=` secret (`WEBHOOK_SECRET`) |
+| `inbox-sync` | Polls connected Outlook inboxes through Microsoft Graph every 5 minutes. Stores envelopes only (sender, subject, time, thread, category), never bodies | Locked: JWT plus `trustedCaller()`. Holds the Graph app secret |
+| `daily-queue` | The 08:30 action queue DMs and the Monday manager exceptions DM, from the Team Briefs bot | Locked: JWT plus `trustedCaller()`. Holds `SLACK_BOT_TOKEN` |
+| `coach-dm` | The Octagon Coach DMs at 12:30, 16:45 and Monday 08:45 | Locked: JWT plus `trustedCaller()`. Holds `COACH_BOT_TOKEN` |
+| `coach-actions` | The coach's buttons: Done, Snooze, Pause, Mute, Away date, and one-press call tagging (the only one that writes to RecruitCRM) | Open. Every request must carry a valid Slack signature (`COACH_SIGNING_SECRET`) |
+| `slack-actions` | The action queue's Done buttons: opens a preview, writes the note to RecruitCRM as the consultant on Confirm | Open. Every request must carry a valid Slack signature (`SLACK_BRIEFS_SIGNING_SECRET`) |
+| `slack-command` | Slack slash commands `/dashboard` and `/kpis` | Open. Verifies Slack's signature (`SLACK_SIGNING_SECRET`) before anything else |
+| `feedback` | The issue and feedback box on the connect page | Open, by necessity. Field validation, a length cap, a honeypot and a per-IP rate limit |
+| `digest-email` | Renders the digests as email. Deployed, but its schedules were unscheduled in 0073 when the digests moved to Slack | Locked: JWT plus `trustedCaller()` |
+| `recruitcrm-probe` | Read-only API shape probe. Temporary | Locked: JWT plus `trustedCaller()` |
 
-`verify_jwt` for every function is declared in `supabase/config.toml` so it travels with the repo
-and can't be flipped by a stray CLI flag. Anything marked "open" authenticates its own callers.
+### Retired
+
+| Function | State |
+|---|---|
+| `dashboard` | 410 Gone, no data, since 03/11/2026. Left open only so old links get a clear 410 |
+| `dashboard-data` | 410 Gone, no data, since 03/11/2026. Same |
+| `storage-upload` | Retired. No source in the repo; `verify_jwt = true` |
+| `recruitcrm-discover` | 410 Gone stub, locked. Unused |
+
+## What is mirrored
+
+| Table | From RecruitCRM | Notes |
+|---|---|---|
+| `consultants` | Users | `recruitcrm_id` is the canonical identity; names are display only. Leavers stay, marked inactive |
+| `clients` | Companies | Company status included |
+| `contacts` | Contacts | Name, company, job title, owner. No email or phone, since 0145 |
+| `jobs` | Jobs | Includes job custom fields (0090), so DPE scores and grades are reportable |
+| `candidates` | Candidates | Includes the off-limit flag, end date and reason |
+| `candidate_stage_events` | Hiring-stage history | The single source for the whole funnel |
+| `candidate_assignments` | Candidate-job assignments | Caught by the history feed and an hourly sweep |
+| `call_activity` | Devyce call logs | Metadata and category only: no phone numbers, no call notes |
+| `deals` | Deals | Billing is Won deal value |
+| `meetings` | Meetings | This quarter and last, refreshed daily |
+| `notes` | Notes | What makes leads, internal interviews and job order forms countable |
+
+Not mirrored: candidate CVs and files (read live when asked), Devyce call summaries (`call_notes` reads them live and never stores them), and email bodies.
+
+`stage_lookup` maps RecruitCRM's integer stage ids to a `(stage_metric, stage_name)`. `audit_log` records every write.
 
 ## Sync
 
-Page size 100, 100ms between pages.
+Polling is the guarantee; webhooks are the fast path. All jobs are `pg_cron`, and the full schedule is in the [Operations Runbook](Operations-Runbook#cron-schedule).
 
-| Job | Schedule |
+| Feed | How often |
 |---|---|
-| Incremental sync (all entities) | Every 15 minutes |
-| Candidate stage history (recent) | Every minute |
-| Notes (re-walk newest pages) | Every 15 minutes |
-| Candidates deletion pass — starts | 05:40 and 18:40 UTC |
-| Candidates deletion pass — drains | Every 3 minutes |
-| Reconcile — clients | Hourly at :05 |
-| Reconcile — jobs | Hourly at :12 |
-| Reconcile — deals | Hourly at :18 |
-| Reconcile — consultants | 03:00 daily |
-| Off-limit refresh | Hourly at :25 |
-| Assignment sweep | Hourly at :40 |
-| Meetings, this quarter and last | 06:10 daily |
-| Sync health watchdog | Every 5 minutes |
-| Cron manifest watchdog | Every 10 minutes |
+| Incremental, all entities including contacts | Every 15 minutes |
+| Candidate stage history (the funnel feed) | Every minute |
+| Notes | Every 15 minutes |
+| Off-limit flags | Hourly |
+| Assignment sweep | Hourly |
+| Deletion detection (reconciles) | Clients, jobs, deals hourly; consultants and contacts nightly; candidates twice a day |
+| Meetings | Daily |
 
-The reconciles are staggered at :05, :12 and :18 so they never contend with each other or with the
-candidates pass on the half hour. They are full page-walks — 47 pages for clients, 61 for jobs, 16
-for deals, ~520 for candidates — because that is the only way to detect a deletion by polling.
+The incremental walk moves its watermark only after a complete walk. If it stops early (a 429 or the page cap), it saves its place in `sync_state.cursor` and resumes there, so it can re-read rows but never skip them.
 
-The candidates pass and its drain are a **pair**: the pass (`start_page=1`) resets the cursor and
-begins a walk, the drain resumes it across the ~13 chunks a full pass needs. Neither works alone.
-Restoring one without the other, as happened on 15/09/2026, means the pass restarts forever and
-never completes, so `retire_unseen_candidates` never runs at all.
+Reconciles are full page-walks, because walking every record is the only way to spot a deletion by polling. They are staggered at :05, :12 and :18 so they do not contend. The candidate reconcile is a **pair**: `backfill-candidates-pass` resets the cursor and starts a walk, and `backfill-candidates-drain` resumes it every 3 minutes until done, when `retire_unseen_candidates` runs. Neither works alone.
 
 ## Webhooks
 
-RecruitCRM pushes changes to `recruitcrm-webhook`. 15 subscriptions are registered, including
-`candidate.deleted`, `job.deleted`, `company.deleted`, `deal.deleted`,
-`candidate.hiringstage.updated`, `deal.stage.updated` and `job.status.updated`.
+RecruitCRM pushes changes to `recruitcrm-webhook`, including `candidate.deleted`, `job.deleted`, `company.deleted`, `deal.deleted`, `candidate.hiringstage.updated`, `deal.stage.updated` and `job.status.updated`. Admins manage the subscriptions with `webhook_subscriptions`.
 
-Three things are worth knowing:
+1. **RecruitCRM never names the event in the body.** We choose each subscription's `target_url`, so the event name rides on the URL (`?event=job.deleted`) and the handler reads it there.
+2. **Routing is by record shape, not keywords.** The original router keyword-scanned the body, and job payloads contain `note_for_candidates`, so 68 job and 16 company payloads were routed to candidates. It now trusts the event name and falls back to distinctive top-level keys.
+3. **Deletions are handled, not synced.** The incremental sync only walks records that still exist, so the row is tombstoned directly.
 
-1. **RecruitCRM never names the event in the body.** Every payload is a full record with no
-   `event`/`type` field. Since we choose the `target_url` per subscription, the name rides on the URL
-   (`?event=job.deleted`) and the handler reads it from there.
-2. **Routing is by record shape, not keywords.** The original router keyword-scanned the whole body
-   in a fixed order, and a job payload contains `note_for_candidates`, so it matched the candidate
-   rule first — 68 job and 16 company payloads were routed to "candidates" and spent refreshing the
-   wrong entity. It now trusts the event name, falling back to distinctive top-level keys.
-3. **Deletions are handled, not synced.** The incremental sync only walks records that still exist,
-   so firing it for a delete does nothing at all. The row is tombstoned directly instead.
-
-Webhooks are the fast path; the polling sync stays as the guarantee. Deliveries get missed, and the
-poll is what makes the mirror converge anyway.
-
-## `dashboard-data` is unauthenticated
-
-**Retired 03/11/2026.** `dashboard-data` returned firm Won revenue, the funnel, the deal pipeline and
-every consultant's figures with no token, key or header, from a URL in this public repo. It is now a
-stub that returns 410 Gone. Nothing live still called it: `slack-command` already reads `dashboard_json()`
-directly with the service key, and the session-start hook no longer falls back to it.
-
-The public `dashboard` page, rendered from the same `dashboard_json()`, was retired the same day and
-also returns 410 Gone. The dashboard is the connector's `get_dashboard` widget, behind each token.
-
-**Twelve entities are health-monitored**: candidates, clients, consultants, jobs, calls, deals, plus
-the three nightly reconciles. Live entities warn at 10 minutes stale and go critical at 30;
-reconciles warn at 26 hours, critical at 50. The dashboard shows a red banner and names the failing
-feed rather than quietly serving stale figures.
-
-## Data model
-
-**Core:** `consultants`, `clients`, `jobs`, `candidates`, `deals` — UUID primary keys,
-`recruitcrm_id` as the external key, `slug` where other payloads reference by slug.
-
-**Events:** `candidate_stage_events` is the single source for the whole funnel. `call_activity`
-holds Devyce telephony (metadata only — no phone numbers, no call notes). `notes` mirrors RecruitCRM
-notes, which is what makes leads and internal interviews countable. `audit_log` records every
-write.
-
-**Identity:** `consultants.recruitcrm_id` is canonical. Name columns are display-only.
-`stage_lookup` maps RecruitCRM's integer stage IDs to `(stage_metric, stage_name)`.
-
-`daily_activity` was removed on 10/08/2026 — never connected to a source, superseded by
-`candidate_stage_events` and `call_activity`, and half its columns were never populated.
+Deliveries get missed. The poll is what makes the mirror converge anyway.
 
 ## The metrics layer
 
-Every figure comes from a view or an RPC — `dashboard_json`, `funnel_report`, `client_report`,
-`kpis_report`, `billing_report`, `my_day`, `rejection_report`, `fee_analysis` and the rest. Nothing
-queries base tables ad hoc. That's what guarantees the dashboards and Claude can't disagree.
+Every figure comes from a SQL function or view: `dashboard_json`, `funnel_report`, `kpis_report`, `billing_report`, `my_day`, `fee_analysis`, `data_hygiene` and the rest. Nothing queries base tables ad hoc, which is what guarantees the dashboards, Slack and Claude cannot disagree. They are `security definer` and granted to `service_role` only.
 
-All are `security definer`, granted to `service_role` only.
+Identity is `consultants.recruitcrm_id`. Funnel events go to the person who made the move, calls to the caller, billing to the deal owner. See [Metrics and Definitions](Metrics-and-Definitions).
 
-## Identity and access
+## The write path
 
-Tokens live hashed in `mcp_tokens`, mapped to a consultant, with `can_write` and `is_admin` per
-token. Identity is derived server-side from the bearer token on every call and can never be set by
-a tool argument.
+Every write tool is two-step: a preview, then a confirm that must match it.
 
-claude.ai requires OAuth, so there's a bridge: you paste your Octagon token into a hosted login
-page, it's validated against `mcp_tokens`, and an OAuth access token is issued that maps to the same
-consultant with the same `can_write` and `is_admin`. claude.ai gets OAuth; we keep per-user
-identity.
+```mermaid
+sequenceDiagram
+  participant C as Claude
+  participant M as octagon-mcp
+  participant DB as Supabase
+  participant R as RecruitCRM
+  C->>M: tool call without confirm
+  M->>DB: store card_nonce, tool, person, exact args (mcp_card_previews)
+  M-->>C: preview card
+  C->>M: confirm=true + _card.confirm_args
+  M->>DB: check nonce matches; mark used (mcp_card_confirms)
+  M->>R: write, attributed to the consultant (updated_by)
+  M->>R: read the change back
+  M->>DB: audit_log row, refresh the mirror
+  M-->>C: applied
+```
+
+- **The nonce is stored at preview** (0131). A confirm is applied only if its `card_nonce` was issued for the same tool, the same person and the exact arguments the preview offered, within 24 hours. A missing, invented or altered nonce gets `preview_required` or `preview_mismatch` and nothing changes.
+- **Each nonce applies once** (`mcp_card_confirms`, 0103), so a re-rendered card, or a button press followed by "yes" in chat, cannot apply the same change twice.
+- **Stage moves check for conflicts.** `update_hiring_stage` refuses if the candidate's stage has changed since the preview (`expected_status_id`).
+- **Writes are read back** where RecruitCRM allows: client status, call tagging, deals, DPE scores and the website fields on jobs. `update_hiring_stage` refreshes the candidate's stage history in the mirror instead.
+- **Extra guards.** Off-limit is checked live on every client-facing path and fails closed if it cannot be verified. Deletes need the record's name typed back (`confirm_name`). Batches are capped at 25 records per confirmation.
+
+The Slack buttons follow the same rule: the message is the preview and the press is the confirmation, and only the records in that message are touched.
+
+## Security model
+
+| Control | What it does |
+|---|---|
+| Per-user tokens | `mcp_tokens` holds SHA-256 hashes only, each mapped to a consultant with `can_write`, `is_admin` and `can_view_usage`. Identity comes from the token on every call and can never be set by a tool argument |
+| OAuth bridge | claude.ai needs OAuth, so the connect page exchanges a pasted Octagon token for an OAuth session token with the same rights (PKCE S256 required). Redirects are allowed only to claude.ai and claude.com's callback URLs |
+| Leaver auto-revoke | When a consultant is marked inactive or deleted, a trigger (0136) switches off all their tokens, including OAuth sessions, and stops their inbox being polled, with an `audit_log` row. Admin tokens are never touched |
+| `CRON_SECRET` | Locked functions accept only the service-role key or `x-octagon-cron` = `CRON_SECRET`. `pg_cron` sends it through `public.cron_headers()`, which reads it from Vault. Fails closed if unset |
+| Slack signatures | `coach-actions`, `slack-actions` and `slack-command` reject any request without a valid Slack signature for their own app |
+| Webhook secret | `recruitcrm-webhook` requires its `?key=` secret |
+| Row-level security | Internal tables such as `mcp_card_previews` and `mcp_card_confirms` deny `anon` and `authenticated` outright |
+| No PII in the mirror where avoidable | No contact emails or phones, no call notes, no email bodies |
+
+## Retired: dashboard and dashboard-data
+
+Both were retired on 03/11/2026 and now return 410 Gone with no data. `dashboard-data` returned firm Won revenue, the funnel and per-consultant figures to anyone with its URL, and the public `dashboard` page rendered the same data as HTML. Nothing live still called them: `slack-command` reads `dashboard_json()` directly with the service key.
+
+The dashboard is now the connector's `get_dashboard` widget, behind each person's token.
 
 ## Rendering
 
-Two inline MCP Apps widgets, defined in `supabase/functions/octagon-mcp/widgets.ts` and served by
-`resources/read` with `_meta.ui` (empty CSP, `prefersBorder`):
+Inline MCP Apps widgets, defined in `supabase/functions/octagon-mcp/widgets.ts`:
 
-- **Dashboard** (`ui://octagon/dashboard`, from `get_dashboard`) — branches on the viewer. Inline it
-  is a summary card (recruiters: their desk; admins: firm figures) with an **Open dashboard** button;
-  fullscreen is the full desk or firm-plus-team view.
-- **Scorecard** (`ui://octagon/scorecard`, from `weekly_kpis` and `billing`) — branches on payload
-  shape: one recruiter gets progress bars, managers and admins a team table.
+| Widget | Used by |
+|---|---|
+| Dashboard | `get_dashboard`: a summary card with an Open dashboard button, branching on whether the viewer is a recruiter or admin |
+| Scorecard | `weekly_kpis` and `billing` |
+| Confirm card | The two-step write tools: the preview and its Confirm button |
+| Report view | Over 40 read tools: headline figures inline with a full view |
+| Mixed | Tools that both read and write (`off_limit`, `hotlist`, `inbox`, `call_tagging` and others): a report view for reads, the confirm card for previews |
 
-Each widget is one self-contained HTML page: the MCP Apps SDK browser client inlined
-(`ext_apps_bundle.ts`, regenerated by `scripts/build-ext-apps-bundle.js`), the Octagon theme kit
-(Claude host style variables for structure, Octagon accents adjusted per theme), and a render
-function. Nothing loads from outside. `scripts/check-widgets.js` parses the emitted pages.
-
-History: `get_dashboard` stopped advertising its widget in **3.40.1** because the host so often
-mounted nothing. The cause was the widgets' own hand-rolled postMessage handshake, which never
-completed `ui/initialize` or reported a size. **3.63.0** moved both widgets onto the SDK and
-**3.64.0** linked `get_dashboard` again (`DASHBOARD_WIDGET_LINKED` in `widgets.ts`), together with
-octagon-dashboard 0.5.0, which stopped redrawing the bare dashboard with visualize. Scoped
-dashboards are still drawn by that plugin from `structuredContent`.
-
-`weekly_kpis` and `billing` still advertise `ui://octagon/scorecard` and still carry that risk.
+Each widget is one self-contained HTML page: the MCP Apps SDK client inlined (`ext_apps_bundle.ts`, built by `scripts/build-ext-apps-bundle.js`), the Octagon theme kit and a render function. Nothing loads from outside. `scripts/check-widgets.js` parses the emitted pages. Scoped dashboards are drawn by the octagon-dashboard plugin from the tool's data.
 
 ## Repo layout
 
 ```
 supabase/
   config.toml          verify_jwt per function
-  functions/           edge functions
-  migrations/          0000–0122, sequential, replayable
+  functions/           edge functions; _shared/ holds caller.ts and graph.ts
+  migrations/          0000-0148, sequential
 docs/
   DECISIONS.md         design decisions with status and rationale
   wiki/                these pages
 rollout/               system instructions and templates
-web/                   OAuth login handoff page
+slack/                 the Octagon Coach app manifest
+scripts/               widget and connect-page checks, the SDK bundle build
+web/                   the connect page (OAuth login handoff)
 ```
 
 ## Known engineering gaps
 
 - **No test suite and no CI.** Every change is verified by hand.
-- **Two throwaway probe functions still deployed** (`recruitcrm-probe`, `recruitcrm-discover`).
-- **Two cron jobs are not in `cron_manifest`**: `weekly-usage-slack` and `recruitcrm-assignment-sweep`.
-  The watchdog won't notice if either disappears.
-- **Unbounded selects** remain on `stage_lookup` and `consultants`. Both are far under the 1,000-row
-  cap so they're safe today, but they should use the `allRows` helper — an unbounded select on
-  `clients` is what caused the 40% orphaned-jobs bug.
+- **Two cron jobs are not in `cron_manifest`:** `weekly-usage-slack` and `recruitcrm-assignment-sweep`. The watchdog will not notice if either disappears.
+- **`recruitcrm-probe` is still deployed.** It is locked and read-only, but temporary.
+- **Unbounded selects** remain on `stage_lookup` and `consultants`. Both are far under the 1,000-row cap, but they should use the `allRows` helper: an unbounded select on `clients` once caused the orphaned-jobs bug.
 
 ---
 
-**See also:** [Operations Runbook](Operations-Runbook) for running and fixing it · [Data Caveats](Data-Caveats) for what the pipeline cannot tell you · [Metrics and Definitions](Metrics-and-Definitions) for the layer on top
+**Related:** [Operations Runbook](Operations-Runbook) · [Data Caveats](Data-Caveats) · [Metrics and Definitions](Metrics-and-Definitions) · [Inbox](Inbox)

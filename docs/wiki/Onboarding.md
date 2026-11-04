@@ -1,207 +1,189 @@
-# Onboarding — start to finish
+# Onboarding
 
-For a recruiter joining Octagon Analytics. Fifteen minutes to set up, then a first week that builds
-from "look at my desk" to "run my day from it".
+For a recruiter starting on Octagon Analytics: how to connect, what to learn in your first week, and
+the rules that keep RecruitCRM and candidates safe.
+
+*Last reviewed 04/11/2026.*
+
+**On this page:** [Get connected](#get-connected) · [Before you trust a number](#before-you-trust-a-number) ·
+[Your first week](#your-first-week) · [What arrives in Slack](#what-arrives-in-slack) ·
+[Making changes](#making-changes) · [Never do this](#never-do-this) ·
+[Something not working?](#something-not-working)
 
 ---
 
-## Part 1 — Get connected
+## Get connected
 
-### Step 1. Get your access token
+About fifteen minutes, once.
 
-Ask Ollie to mint you one. It maps to **you**: your figures are scoped to your desk, and anything
-you change in RecruitCRM is attributed to your name, not to a shared service account.
+### 1. Get your access token
 
-Treat it like a password. Don't paste it into chats, tickets or shared docs.
+Ask Ollie to mint you one. It maps to **you**: your figures are scoped to your desk, and anything you
+change in RecruitCRM is attributed to your name, not a shared account. Treat it like a password: never
+paste it into a chat, ticket or shared doc.
 
-Two things are set on your token when it's created:
+Three things are set on your token when it is created:
 
-- **Write access** — whether you can change anything in RecruitCRM at all. Everyone currently holding
-  a token has it.
-- **Admin** — whether you see the whole team or just your own desk. Recruiters see their own.
+| Setting | What it controls |
+|---|---|
+| Write access | Whether you can change anything in RecruitCRM at all |
+| Admin | Whether you see the whole team or just your own desk. Recruiters see their own |
+| Usage viewer | Whether you can see team usage views without full admin |
 
-### Step 2. Add the connector
+### 2. Add the connector
 
-**claude.ai (web or desktop):**
+The connector may already be set up for the whole organisation; if so, just enable it and sign in.
+Otherwise, in claude.ai (web or desktop):
 
 1. Settings → Connectors → Add custom connector
 2. Name: `Octagon Analytics`
 3. URL: `https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp`
-4. When prompted to authenticate, paste your Octagon token into the login page
-5. Save and enable
+4. Connect. Claude opens Octagon's **Connect your account** page. Paste your token and press
+   **Authorize**. You are sent straight back to Claude.
 
-If the connector has already been pushed out org-wide, you may only need to enable it and sign in.
+If the page says the token wasn't recognised, check you pasted all of it, or ask Ollie for a new one.
 
-Use it in **Cowork** or an ordinary **chat** — both work the same way and both read the same data.
-There is nothing extra to install.
+### 3. The plugins arrive on their own
 
-### Step 2b. Turn auto mode on
+The slash commands come from four Octagon plugins, published org-wide, so there is nothing to install.
 
-In Cowork, switch **auto mode** on before you start. Without it you are asked to approve each step
-individually, which turns a ten-second answer into a dozen clicks and is the single most common
-reason people give up on it in the first week.
+| Plugin | Who gets it |
+|---|---|
+| octagon-reporting | Everyone. Read-only reporting, lookup, writing aids and your day |
+| octagon-dashboard | Everyone. The inline dashboard and `/kpi` |
+| octagon-actions | Only people who should write to RecruitCRM |
+| octagon-admin | Managers and admins |
 
-If the connector's tools are missing, or everything returns an authentication error, your token is
-wrong or revoked. Tokens were rotated on 15/09/2026 — anything issued before that date is dead, so
-ask Ollie for a new one rather than trying to fix it.
+### 4. Turn auto mode on (Cowork)
 
-### Step 3. Check it worked
+In Cowork, switch **auto mode** on. Without it you approve every step individually, which turns a
+ten-second answer into a dozen clicks. Writes still stop for your confirmation either way.
 
-Start a new chat and ask:
+### 5. Check it worked
 
-> show me my dashboard
+Start a new chat and say **dashboard**. You should see **Your desk** with your name and your own
+numbers. If you see a whole-team view instead, your token is resolving as an admin: tell Ollie.
 
-You should get **Your desk — <your name>** with your own numbers. If you see "Octagon Recruitment
-Dashboard" with a whole-team table instead, your token is resolving as an admin — tell Ollie.
+| What you see | What it means |
+|---|---|
+| An authentication error | Token wrong or revoked. Ask Ollie for a new one |
+| Nothing happens | The connector isn't enabled in that chat |
+| A command you expected is missing | A connector release added it: reconnect, or start a new chat |
 
-If you get an authentication error, your token is wrong or revoked. If nothing happens at all, the
-connector isn't enabled in that chat.
-
-### What admins can see
-
-Admins can see how each person uses the platform: which features, how often, when, and what kind
-of change was made (e.g. "3 stage moves on 12/10/2026"). They can't see which candidate or what you
-wrote through this view, and chats that don't use the Octagon connector aren't counted. It exists to
-help people get set up and to spot problems, not to measure performance.
-
----
-
-## Part 2 — Read this before you trust a number
-
-Three things will look broken on day one and aren't. Knowing them up front saves you raising them as
-bugs — and saves you drawing the wrong conclusion.
-
-**Your BD and client call counts will look too low.** They only count Devyce calls that have been
-*categorised*. Firm-wide only about a quarter of calls are tagged. Your dashboard shows your own
-tagging rate right underneath, so you can see whether a red number means "call more" or "tag your
-calls". Usually it's the second one.
-
-**On Monday morning everything reads 0.** The KPI week runs Monday to Sunday. A fresh week genuinely
-is 0/10 CV sends. Come back Wednesday.
-
-**Shortlist looks odd.** The stage is only used by some of the desk, so there are fewer shortlist
-events than CV sends. Don't read it as the top of your funnel.
-
-Full list on the **[Data Caveats](Data-Caveats)** page. Worth five minutes before you quote anything
-to a client.
+> [!NOTE]
+> Admins can see how each person uses the platform: which features, how often, and what kind of
+> change was made (for example "3 stage moves"). Not which candidate, and not what you wrote. Chats
+> that don't use the connector aren't counted. It exists to help people get set up, not to measure
+> performance.
 
 ---
 
-## Part 3 — Your first week
+## Before you trust a number
 
-### Day 1 — your desk
+Three things look broken on day one and aren't.
 
-If you're in the action queue pilot, your day starts in Slack: at 08:30 a DM lists your calls for
-today, ranked. Ask Claude **prep my queue** (or type `/queue`) and the admin for each one is drafted for
-you to check. Press **Done** on a call in Slack and it logs a note in RecruitCRM once you confirm.
+- **BD and client call counts look low.** They count only Devyce calls that have been tagged with a
+  category, and most calls aren't (about 12% in October 2026). `/week`, `/eod` and the coach show,
+  next to the tagged count, how many untagged calls look like BD or client calls. Those don't count
+  until tagged: `/tagcalls` fixes it in a few clicks.
+- **Monday morning reads 0.** The KPI week runs Monday to Sunday. A fresh week genuinely is 0 of 10
+  CV sends. Early-week gaps are expected.
+- **Shortlist looks thin.** Only some of the desk use that stage, so it isn't the top of your funnel.
+  The funnel is CV Sent → Interview Request → 1st → 2nd → 3rd → Offered → Placed.
 
-> show me my dashboard
-
-You get, in order: your headline cards, your week against target, your quarterly billing against
-target, then the part that actually matters — **aging offers** and **stalled candidates**, most
-overdue first, followed by your 2026 funnel.
-
-The attention list is the point. It's every candidate on your open roles who has gone quiet: offers
-out 5–60 days with no response, and candidates sitting at an active stage with no movement for
-10–60 days. It deliberately excludes anything older than 60 days, because that's abandoned rather
-than stalled.
-
-Then:
-
-> what's my day?
-
-Same data, action-ordered.
-
-### Day 2 — your numbers
-
-> how am I doing this week?
-> what's my billing this quarter?
-> which of my roles have gone cold?
-
-Cold means an open role with no candidate activity for 14 days.
-
-### Day 3 — a live role
-
-> what's happening on the <job title> role?
-> who have we got in play for <client>?
-
-### Day 4 — content
-
-Paste a job spec and ask for what you need:
-
-> write me the LinkedIn advert and the website advert for this
-> build me Boolean strings for job boards and LinkedIn
-> write a client pitch I can use on the phone
-> find me the top 5 candidates on the CRM for this
-
-It won't invent a salary — you'll get a `[placeholder]` if you didn't give it one. That's deliberate.
-
-### Day 5 — the whole vacancy
-
-> new job kickoff for <job title>
-
-Runs Octagon's vacancy checklist end to end: research and pitch, a top-5 CRM shortlist with reasons,
-then adverts, Boolean and InMail on request.
+The weekly minimums are 10 CV sends, 5 interview requests, 4 interviews, 5 BD calls and 5 client
+calls. Full list of soft spots on [Data Caveats](Data-Caveats).
 
 ---
 
-## Part 4 — Making changes (write access)
+## Your first week
 
-Only if write access is enabled on your token.
+### The five commands to learn first
 
-Every change is **two-step**. You ask, it shows you exactly what will change, you confirm, and only
-then does it touch RecruitCRM. Nothing is written on the strength of the model's judgement alone.
+| Command | When | What you get |
+|---|---|---|
+| `/myday` | First thing | Interviews to prep, feedback due, aging offers, stalled candidates, cold roles, plus one command worth trying today |
+| `/queue` | After the 08:30 DM | Today's ranked calls, with the admin for each drafted for you to check |
+| `/chase` | Mid-morning | What to chase across your whole pipeline, in priority order |
+| `/week` | Any time | This week against every KPI target, with the gap named |
+| `/eod` | End of day | Today on all five KPIs in one table, against where the week needs to be |
 
-> move <candidate> to 1st interview on the <job> role
+You don't need command syntax: "what's my day?", "how am I doing this week?" and "prep my queue" work
+just as well. Type `/` to see the rest, or read [Commands](Commands).
 
-You'll get a preview: current stage, proposed stage, which job. Say yes and it applies, writes an
-audit record, and refreshes the mirror immediately so your dashboard is right straight away.
+### A practical week
 
-Far more than three things: hiring stages, assigning and unassigning candidates, notes, jobs, deals,
-candidates, companies, contacts, pitches, meetings, tasks, hotlists, off-limit flags, email and
-deletions. All attributed to you.
-
-**Closing a job or losing a deal asks you why.** Pick from the list it offers — "Filled by client
-directly", "Counter-offer accepted", "Budget pulled" and so on — or add your own detail. It is
-optional and you can skip it, but it is the only way "why do we lose" ever becomes answerable. Any
-other deal stage move takes a free-text note instead.
-
-Two writes are different and are guarded harder. **Deletion is permanent** — there is no undo and no
-restore, and it asks twice. **Email cannot be recalled**, so drafting is the default and it will
-never send to someone who has opted out.
-
-> **Status:** 44 writes have been made through this system, the first on 12/08/2026 — mostly hiring
-> stage moves. Every one is in `audit_log` with who did it and what changed.
+| Day | Do this |
+|---|---|
+| Monday | Connect. Say **dashboard**, then `/myday`. Run `/tagcalls` on last week's calls so your BD and client numbers are real |
+| Tuesday | Start from the 08:30 DM and `/queue`. Work the list; press **Done** in Slack as you go |
+| Wednesday | Pick a live role: `/pipeline` for who's in play, `/coldjobs` for roles with no activity in 7 days, `/silver` for interview-tested candidates to put forward |
+| Thursday | Content on a real role: `/advert`, `/boolean`, `/match`. Missing details come back as `[placeholders]`, never invented |
+| Friday | `/week` to see the gap, `/eod` before you finish. If you have write access, `/pushtell` drafts your client updates |
 
 ---
 
-## Part 5 — Getting good at it
+## What arrives in Slack
 
-**Ask in plain English.** "How did I do in Q2 compared to Q1" works. You don't need command syntax.
+| Message | When | Who gets it | What to do |
+|---|---|---|---|
+| Morning brief | 07:30 | #briefs | Read it: yesterday's numbers and each consultant's diary |
+| Action queue DM | 08:30 weekdays | The pilot group | Your ranked calls. `/queue` drafts the admin; **Done** logs the call in RecruitCRM after a preview |
+| Coach DMs | 12:30, 16:45, Monday 08:45 | Shadow mode: Oliver only for now | Named suggestions with Done and Snooze; at 16:45, one-press tagging of today's calls |
+| Day End | 17:30 | #briefs | The day's activity, including untagged calls |
+| Weekly | Monday 08:00 | #briefs | The week ahead |
 
-**Slash commands exist for the common things** — type `/` to see all 57. The ones worth learning
-first: `/myday`, `/dayplan`, `/week`, `/billing`, `/chase`, `/pipeline`, `/coldjobs`, `/funnel`.
+---
 
-`/myday` and `/dayplan` scope to your own desk, so they need your token to map to a consultant
-record. Admin tokens have no desk and will get "consultant not found" — that is expected, not a
-fault.
+## Making changes
 
-**It will tell you when it can't answer.** If a number genuinely isn't in the data you'll get "that
-isn't tracked" rather than a made-up figure. That's the system working.
+Only with write access and the octagon-actions plugin.
 
-**Leads, internal interviews, pitched candidates and client visits ARE reportable.** They were long
-believed untrackable; they are not. Leads and internal interviews are note types, pitches are
-RecruitCRM's pitch feature, client visits are meetings — all now readable. Just ask. Bear in mind
-they count what was *logged*, so a lead nobody wrote a note about won't appear.
+Every change is **two-step**. You ask; Claude shows a preview card with exactly what will change (for
+a stage move: the candidate, the job, current stage and new stage); you press **Confirm** or say yes;
+only then does it touch RecruitCRM. The change is attributed to you, written to the audit log, and
+the mirror refreshes so your figures are right straight away.
 
-**Ask it to show its working.** "Where does that number come from?" gets you the definition.
+```mermaid
+flowchart LR
+  A[You ask] --> B[Preview card] --> C{Confirm?}
+  C -- yes --> D[Written to RecruitCRM<br/>as you, audited]
+  C -- no --> E[Nothing changes]
+```
+
+- **One preview, one confirm.** A confirm only works for the preview it came from, and covers at most
+  25 records.
+- **Closing a job or losing a deal asks why.** Pick a reason or skip it, but it is the only way "why
+  do we lose" becomes answerable.
+- **Moving to Placed** needs the candidate's start date.
+- **Deletes are permanent.** No undo. You type the record's name back to confirm.
+- **Email can't be recalled.** Drafting is the default and drafts go to your Outlook Drafts. It
+  checks opt-out first. Replies from your [Inbox](Inbox), Push & Tell and the end-of-week email are
+  always drafts.
+
+---
+
+## Never do this
+
+> [!WARNING]
+> - **No bulk export.** Candidate names and notes are PII: internal only, never pasted into a client
+>   email unless already shared with that client.
+> - **Never through the RecruitCRM website.** Changes go through the connector. If no command can make
+>   a change, Claude says so and gives you the manual step; don't ask it to open RecruitCRM in a
+>   browser.
+> - **Drafts, not sends.** Read every email, InMail and pitch before it leaves you. Spec pitches stay
+>   anonymised until the client engages, and off-limit candidates are never pitched or emailed.
+
+**It will tell you when it can't answer.** "That isn't tracked" is the system working, not failing.
+Leads, internal interviews and job order forms are note types (`/noteskpi`), pitches are RecruitCRM's
+pitch feature (`/pitches`), and client visits are meetings (`/visits`): they all count only what was
+logged. Ask "where does that number come from?" to get the definition.
 
 ---
 
 ## Something not working?
 
-Ping Ollie on Slack with what you asked, what you expected and what you got. Screenshots help.
+Post in #troubleshooting, or message Ollie, with what you asked, what you expected and what you got.
+Screenshots help. The **Report an issue** link on the connect page reaches Ollie too.
 
----
-
-**See also:** [Tools Reference](Tools-Reference) for everything you can ask · [Data Caveats](Data-Caveats) before you quote a number · [Metrics and Definitions](Metrics-and-Definitions) for what each figure counts · [Commands](Commands)
+**Related:** [Commands](Commands) · [Data Caveats](Data-Caveats) · [Metrics and Definitions](Metrics-and-Definitions) · [Inbox](Inbox)
