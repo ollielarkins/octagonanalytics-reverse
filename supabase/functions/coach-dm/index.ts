@@ -6,6 +6,13 @@
 // prompt to use in the person's own Claude.
 //
 // Shadow mode (app_settings.coach_shadow = 'true'): every DM goes to coach_shadow_email, labelled.
+//
+// 0147 (04/11/2026): each suggestion carries Done and Snooze to tomorrow (an overflow menu, handled by
+// coach-actions), the 16:45 message lists today's untagged client-contact calls with a suggested
+// category and one button to tag them as shown, and a one-line message replaces the stats when someone
+// is ahead with nothing urgent. The coach_log row is written before posting, so the buttons can carry
+// its id, and deleted again if Slack refuses the message.
+//
 // Needs COACH_BOT_TOKEN (chat:write, im:write, users:read, users:read.email). Driven by pg_cron
 // through coach_if_due(), which presents app_settings.cron_bearer, so the function stays locked.
 
@@ -34,23 +41,43 @@ const SUBTITLE: Record<string, string> = {
   monday: "Your plan for the week, worked back from your billing target",
 };
 
-function blocksFor(n: any, slot: string, cid: number, shadowFor: string | null) {
+const TYPE_SHORT: Record<string, string> = { "Contact - Client": "Client", "Contact - Prospect (BD)": "BD", "Contact - Client Info": "Client info" };
+
+function blocksFor(n: any, slot: string, cid: number, logId: number, shadowFor: string | null) {
   const head = (shadowFor ? `Preview for ${shadowFor}: ` : "") + String(n.headline ?? "Your coach");
-  const blocks: any[] = [
-    { type: "header", text: { type: "plain_text", text: head.slice(0, 150) } },
-    { type: "context", elements: [{ type: "mrkdwn", text: SUBTITLE[slot] ?? "" }] },
-  ];
-  const stats: any[] = n.stats ?? [];
-  if (stats.length) blocks.push({ type: "section", fields: stats.slice(0, 10).map((s: any) => ({ type: "mrkdwn",
-    text: `*${esc(s.label)}*\n${esc(s.value)}${s.ok === false && !n.early_week ? "  ·  _behind_" : ""}` })) });
+  const blocks: any[] = [{ type: "header", text: { type: "plain_text", text: head.slice(0, 150) } }];
   const actions: any[] = n.actions ?? [];
-  if (n.quiet && slot === "midday") {
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: "On plan and your queue is clear. Good morning's work." } });
-  } else if (actions.length) {
+  if (n.short) {
+    // Ahead, or on plan with a clear queue: one line, no stats.
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: esc(n.short) } });
+  } else {
+    blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: SUBTITLE[slot] ?? "" }] });
+    const stats: any[] = n.stats ?? [];
+    if (stats.length) blocks.push({ type: "section", fields: stats.slice(0, 10).map((s: any) => ({ type: "mrkdwn",
+      text: `*${esc(s.label)}*\n${esc(s.value)}${s.ok === false && !n.early_week ? "  ·  _behind_" : ""}` })) });
+  }
+  if (actions.length) {
     blocks.push({ type: "divider" });
     const title = slot === "midday" ? "*This afternoon*" : slot === "monday" ? "*This week*" : "*Before you go*";
-    blocks.push({ type: "section", text: { type: "mrkdwn", text: [title, ...actions.map((a: any, i: number) =>
-      `${i + 1}. ${esc(a.text)}${a.prompt ? `  ·  ask Claude: \`${esc(a.prompt)}\`` : ""}`)].join("\n").slice(0, 2900) } });
+    blocks.push({ type: "section", text: { type: "mrkdwn", text: title } });
+    actions.forEach((a: any, i: number) => {
+      const line = `${i + 1}. ${esc(a.text)}${a.prompt ? `  ·  ask Claude: \`${esc(a.prompt)}\`` : ""}`;
+      if (a.kind === "tag_calls" && Array.isArray(a.calls) && a.calls.length) {
+        // The list is the preview: every call and the category it will get. The button applies exactly this.
+        const rows = a.calls.map((c: any) => `• ${esc(c.at)} · ${esc(c.minutes)} min · ${esc(c.with ?? "a contact")}${c.company ? `, ${esc(c.company)}` : ""}`
+          + ` → *${esc(TYPE_SHORT[c.type] ?? c.type)}* _(${esc(c.why)})_`);
+        blocks.push({ type: "section", block_id: `a${i}`, text: { type: "mrkdwn", text: [line, ...rows].join("\n").slice(0, 2900) } });
+        blocks.push({ type: "actions", block_id: `t${i}`, elements: [
+          { type: "button", action_id: "coach_tag", style: "primary", text: { type: "plain_text", text: a.calls.length === 1 ? "Tag it as shown" : `Tag these ${a.calls.length} as shown` },
+            value: `t|${logId}|${i}` }] });
+        blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: "Want a different category on any of them? Ask Claude: `/tagcalls`" }] });
+        return;
+      }
+      blocks.push({ type: "section", block_id: `a${i}`, text: { type: "mrkdwn", text: line.slice(0, 2900) },
+        accessory: { type: "overflow", action_id: "coach_item", options: [
+          { text: { type: "plain_text", text: "Done" }, value: `d|${logId}|${i}` },
+          { text: { type: "plain_text", text: "Snooze to tomorrow" }, value: `s|${logId}|${i}` }] } });
+    });
   }
   if (n.tip?.command) blocks.push({ type: "context", elements: [{ type: "mrkdwn",
     text: `Try today: \`${esc(n.tip.command)}\` ${esc(n.tip.why)}.` }] });
@@ -98,9 +125,15 @@ Deno.serve(async (req) => {
       if (!target) { results.push({ consultant: c.name, sent: false, reason: "no Slack user for their email" }); continue; }
       const im = await slack("conversations.open", { users: target });
       if (!im.ok) { results.push({ consultant: c.name, sent: false, reason: `conversations.open: ${im.error}` }); continue; }
-      const msg = blocksFor(n, slot, c.recruitcrm_id, shadow ? c.name : null);
+      // Log first, so the buttons can carry the row's id; remove it again if Slack refuses the message.
+      const { data: log, error: logErr } = await db.from("coach_log")
+        .insert({ consultant_recruitcrm_id: c.recruitcrm_id, slot, shadow, suggested: n.suggested ?? [], actions: n.actions ?? [] })
+        .select("id").single();
+      if (logErr || !log) { results.push({ consultant: c.name, sent: false, reason: `coach_log: ${logErr?.message ?? "no row"}` }); continue; }
+      const msg = blocksFor(n, slot, c.recruitcrm_id, log.id, shadow ? c.name : null);
       const post = await slack("chat.postMessage", { channel: im.channel.id, text: msg.text, blocks: msg.blocks, unfurl_links: false });
-      if (post.ok) await db.from("coach_log").insert({ consultant_recruitcrm_id: c.recruitcrm_id, slot, shadow, suggested: n.suggested ?? [] });
+      if (post.ok) await db.from("coach_log").update({ channel: im.channel.id, message_ts: post.ts }).eq("id", log.id);
+      else await db.from("coach_log").delete().eq("id", log.id);
       results.push({ consultant: c.name, sent: !!post.ok, actions: (n.actions ?? []).length, reason: post.ok ? undefined : `chat.postMessage: ${post.error}` });
     } catch (e) {
       results.push({ consultant: c.name, sent: false, reason: String(e).slice(0, 160) });
