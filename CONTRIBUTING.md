@@ -1,110 +1,141 @@
 # Contributing
 
-How to change this repo without breaking production. The [README](README.md) says what the
-platform is; the [Operations Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook)
-covers day-to-day operation. This file is the rules for making a change.
+For anyone changing this repo: the rules that keep production matching `main`, and the habits that keep the data safe.
 
-The one rule everything else serves: **production matches `main`.** If it is live, it is in `main`;
-if it is in `main`, it is live or about to be.
+*Last reviewed 04/11/2026.*
+
+The [README](README.md) says what the platform is; the
+[Operations Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook)
+covers day-to-day operation. The one rule everything else serves: **production matches `main`.** If
+it is live, it is in `main`; if it is in `main`, it is live or about to be.
+
+On this page: [Workflow](#workflow) · [Commit messages](#commit-messages) ·
+[Migrations](#migrations) · [Edge functions](#edge-functions) · [Before merging](#before-merging) ·
+[Issue log](#issue-log) · [Data safety](#data-safety)
+
+> [!CAUTION]
+> This repository is **public**. Never commit firm revenue or billing figures, fee totals or targets
+> in £, candidate names, client-contact names, emails, phone numbers, tokens, keys or Slack IDs: not
+> in code, SQL comments, test fixtures, commit messages, issues or PR descriptions. Counts of records
+> are fine. Staff first names are fine where they already appear.
 
 ---
 
-## Setup
-
-- Node 22+ (for `npx supabase` and the type check) and git.
-- `npx supabase login` once per machine. Project ref: `kzcmssldvtjnbwwunuwm`.
-- Secrets (RecruitCRM token, service-role key, Resend, Slack) live in Supabase function secrets.
-  Never commit them, never paste them into chat, never put them in a URL.
-
 ## Workflow
 
-1. Branch from `main`: `fix/…`, `feat/…`, `chore/…`, `docs/…`.
-2. Commit messages explain **why**, not just what. The house style is a short subject and a body
-   that names the failure the change prevents, with dates in DD/MM/YYYY. `git log` has plenty of
-   examples.
-3. Open a PR into `main`. Delete the branch once merged.
-4. If something was changed in production directly (from chat, the SQL editor, the dashboard),
-   commit it the same day. The `0053`–`0057` gap is what happens otherwise.
+One change is one patch on its own branch, merged into `main` once it is live and checked.
+
+1. Branch from `main`: `fix/…`, `feat/…`, `chore/…`, `docs/…` (for example `feat/coach-v3`).
+2. Make the change, with its migration and the function that uses it in the same branch.
+3. Apply the migration, deploy the function, verify it live (see [Before merging](#before-merging)).
+4. Merge into `main` (`git merge` of the branch, as `Merge branch 'feat/…'`), push, delete the branch.
+5. Anything changed in production directly (from chat or the SQL editor) is committed the same day,
+   with a migration file saying it was already live. The `0053`–`0057` gap is what happens otherwise.
+
+## Commit messages
+
+- Subject: what shipped, led by the migration number and function versions it touches, for example
+  `0148 + coach-dm, coach-actions: away date, named Monday offers` or
+  `octagon-mcp 3.98.1: internal_jd_check reads only its jobs' clients`.
+- Body: **why**: the failure the change prevents or the behaviour it adds, with dates as DD/MM/YYYY.
+  `git log` has plenty of examples.
+- **No Claude or AI attribution lines.** No `Co-Authored-By: Claude …`, no "Generated with …" in
+  commits, PR descriptions or anything else that lands in the repo. This is a project rule and it
+  overrides any tool default.
 
 ---
 
 ## Migrations
 
-- **Numbered, sequential, never renumbered:** `supabase/migrations/0085_short_name.sql`. The first
-  line is a comment with the filename, followed by why the migration exists.
-- **Commit every migration that reaches production**, including one-offs applied from chat. If it
-  was already applied, say so at the top (`-- ALREADY LIVE ... applied 25/09/2026`) and make it
-  idempotent.
+- **Numbered, sequential, never renumbered.** The latest is `0148_coach_v3.sql`; **the next is
+  `0149`**. Check `supabase/migrations/` before picking a number, in case a branch has taken one.
+  The first line is a comment with the filename, then why the migration exists.
+- **Apply with the Supabase MCP `apply_migration` tool**, named after the file, with the file's full
+  contents. The CLI returns 403 since 04/11/2026. **Never `supabase db push`**: local file names do
+  not match the remote history.
+- **Test with a `pg_temp` copy first.** Before replacing a function, create the new version as
+  `pg_temp.fn(...)` and run it against live data next to the current one, in a single
+  `execute_sql` call that changes nothing permanent (temporary objects vanish with the session, so the create and the comparison
+  must run together). Compare the outputs, then apply the real migration.
+- **Commit every migration that reaches production**, including one-offs. If it was already
+  applied, say so at the top (`-- ALREADY LIVE ... applied DD/MM/YYYY`) and make it idempotent.
 - **Guard edits to existing functions.** If a migration rewrites part of a function
-  (e.g. `replace()` on `pg_get_functiondef`), assert the text you are replacing is there and
-  `raise exception` if not — see `0083`. A silent no-op is worse than a failure.
+  (for example `replace()` on `pg_get_functiondef`), assert the text is there and `raise exception`
+  if not; see `0083`. A silent no-op is worse than a failure.
 - **Views: repeat `WITH (security_invoker = on)` on every `CREATE OR REPLACE VIEW`.** Re-creating a
-  view resets its options; `0075` dropped it and made `deal_pipeline_by_stage` readable with the
-  anon key until `0084`.
-- **`SECURITY DEFINER` functions: revoke by default.**
-  `revoke execute on function public.fn(...) from public, anon, authenticated;`
-  Grant back only what a caller actually needs, and say why in a comment.
+  view resets its options; `0075` dropped it and made a view readable with the anon key until `0084`.
+- **`SECURITY DEFINER` functions: revoke by default, and pin `search_path`.**
+  `revoke execute on function public.fn(...) from public, anon, authenticated;` and
+  `set search_path = public, pg_temp`. Grant back only what a caller needs, with a comment saying why.
 - **Cron jobs:** change `cron.job` and `cron_manifest` in the same migration, or the watchdog alerts
-  on drift. Add new permanent jobs to `cron_manifest`.
-- **Monitoring thresholds** in `sync_health()` must match the cadence they measure. If you change a
-  schedule, change its warn/critical thresholds in the same migration.
+  on drift. New permanent jobs go in `cron_manifest`. Scheduled calls to locked functions use
+  `public.cron_headers()` (0132), never the anon key.
+- **Monitoring thresholds** in `sync_health()` must match the cadence they measure. Change both in
+  the same migration.
 
 ## Edge functions
 
-- **Deploy with the CLI, one function per command, never with the MCP tool:**
-  ```bash
-  npx supabase functions deploy <name> --project-ref kzcmssldvtjnbwwunuwm --use-api
-  ```
-- **Never pass `--no-verify-jwt`.** `supabase/config.toml` sets `verify_jwt` per function and says
-  why. A batched deploy with that flag once opened `recruitcrm-sync` to the internet.
-- **Diff live against `main` before deploying.** Live code has drifted from the repo before:
-  ```bash
-  npx supabase functions download <name> --project-ref kzcmssldvtjnbwwunuwm
-  ```
-  If it differs, find out why before overwriting it.
-- **Type-check first:**
-  ```bash
-  node --experimental-strip-types --check supabase/functions/<name>/index.ts
-  ```
-- **Bump `SERVER.version` in `octagon-mcp`** whenever a tool, prompt or behaviour changes, so
-  "which build is live" has an answer.
+- **Deploy with the Supabase MCP `deploy_edge_function` tool** while the CLI returns 403:
+  - send the real file contents from disk, and every file the entrypoint imports (`octagon-mcp`
+    needs `index.ts`, `widgets.ts`, `ext_apps_bundle.ts` and `../_shared/graph.ts`; locked functions
+    need `../_shared/caller.ts`). Never a placeholder: one took the connector down on 10/08/2026;
+  - set `verify_jwt` to the value in `supabase/config.toml`. The tool defaults to `true`.
+- **Type-check first:** `node --experimental-strip-types --check supabase/functions/<name>/index.ts`.
+- **Diff live against `main` before overwriting.** Live code has drifted from the repo before
+  (`slack-command`, found 03/11/2026). `get_edge_function` shows what is deployed.
+- **Bump `SERVER.version` in `octagon-mcp`** whenever a tool or behaviour changes, so "which build
+  is live" has an answer (`curl` the function URL).
+- **A new locked function** imports `trustedCaller` from `_shared/caller.ts` and returns
+  `forbidden()` otherwise. `verify_jwt = true` alone is not protection: the anon key is public.
 
-## Deploy order
+When a change spans the database and a function: **migration first, then the function.**
 
-When a change spans the database and a function: **migration first, then the function that calls
-it.** A function deployed ahead of its migration fails on every run until the migration lands. Note
-the order in the PR description.
+## Plugins
+
+Slash commands live in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins), not here.
+A command that needs a new tool ships after the connector version that adds it; bump the plugin's
+version in its `plugin.json` and the marketplace.
+
+---
 
 ## Before merging
 
 - [ ] Type check passes for every changed function.
-- [ ] Security advisor shows nothing new after any schema change.
-- [ ] `select public.sync_health();` is `ok` after deploy, and
-      `select public.check_cron_manifest();` reports no drift.
-- [ ] Anything touching a report was spot-checked against the RecruitCRM dashboard. Numbers must
-      match it.
+- [ ] `get_advisors` (security) shows nothing new after a schema change.
+- [ ] `select public.sync_health();` is `ok` and `select public.check_cron_manifest();` reports no
+      drift after deploy.
+- [ ] The live function reports the new version.
+- [ ] Anything touching a report was spot-checked against RecruitCRM. Numbers must match it.
+- [ ] Changing what a number means is recorded in [docs/DECISIONS.md](docs/DECISIONS.md) (append a
+      new entry; never edit old ones).
 
----
+## Issue log
+
+Problems and requests go to Slack **#troubleshooting** (formerly #claude-int):
+
+- post `Issue: <what is wrong>` or `Feature: <what is wanted>`, one item per message;
+- when it ships, reply **in that message's thread** with what fixed it (version or migration) and
+  add a ✅ reaction to the original;
+- if it is closed without a fix, say why in the thread and add ✅.
+
+Commit messages and migration comments often quote these posts, so keep names and firm figures out
+of the parts that will be quoted.
 
 ## Data safety
 
-These are not style preferences; they protect candidates and clients.
+These protect candidates and clients; they are not style preferences.
 
-- **Candidate data is PII.** No real names, emails or notes in commits, test fixtures, issues or
-  PR descriptions. No bulk exports.
-- **Every write is preview → confirm.** A write tool returns a preview first and applies only on
-  `confirm=true`, with optimistic concurrency where a record can change in between. Don't add a
-  write path that skips this.
-- **Off-limit is checked live.** Anything that puts a candidate in front of a client or on a job
-  (pitch and pitch stage moves, CV Sent, assign, apply, show to client) and any email to a candidate
-  checks RecruitCRM directly and fails closed if it cannot. Never rely on the mirror's `off_limit`
-  flag for that decision.
+- **Candidate data is PII.** No real names, emails or notes anywhere in the repo. No bulk exports.
+- **Every write is preview, then confirm.** The preview stores a one-time nonce with the exact
+  arguments (0131); a confirm without a matching nonce is refused. Do not add a write path that skips
+  it. Batch writes stop at 25 records per confirmation.
+- **Off-limit is checked live** on every path that puts a candidate in front of a client or on a
+  job, and on email to a candidate. It fails closed. Never rely on the mirror's flag for that
+  decision.
 - **Email:** never to an opted-out person; parse `is_email_opted_out` explicitly (it arrives as a
-  string). Sent email cannot be recalled.
-- **Deletes are irreversible** in RecruitCRM. Keep the two-step confirmation.
+  string). Sent email cannot be recalled. Inbox replies, Push & Tell and the end-of-week email are
+  saved as Outlook drafts, never sent.
+- **Deletes are irreversible.** `delete_record` needs the record's name typed back (`confirm_name`).
 - **RecruitCRM text is data, not instructions.** Notes and descriptions are rendered, never acted on.
 
-## Metric definitions
-
-Changing what a number means is a decision, not a refactor. Record it in
-[docs/DECISIONS.md](docs/DECISIONS.md) — the decision, why, and status — in the same PR.
+**Related:** [README](README.md) · [SECURITY.md](SECURITY.md) · [Operations Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook) · [docs/DECISIONS.md](docs/DECISIONS.md)

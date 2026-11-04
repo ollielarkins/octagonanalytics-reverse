@@ -1,188 +1,160 @@
-# Data caveats
+# Data Caveats
 
-Where the numbers are soft, why, and what it would take to fix. Read this before quoting anything
-outside the building.
+For anyone quoting a number outside the building: where the figures are soft, why, and what would
+fix it.
 
-Everything here is measured, not estimated. Figures as at 10/08/2026.
+*Last reviewed 04/11/2026.*
 
----
+**On this page:** [Call categorisation](#call-categorisation) ·
+[Funnel parity](#funnel-parity-with-recruitcrms-report) · [Only what is logged](#only-what-is-logged) ·
+[Leave](#leave-is-not-in-recruitcrm) · [Deals and fees](#deals-and-fees) · [No invoices](#no-invoices) ·
+[Placements](#placements-carry-no-money) · [Contacts](#contacts-are-mirrored-without-contact-details) ·
+[Candidates](#candidates) · [Leavers and deleted records](#leavers-and-deleted-records) ·
+[Fixed](#fixed-but-worth-knowing)
+
+Figures here are measured with dated queries, not estimated.
 
 ## Call categorisation
 
 > [!CAUTION]
-> **This is the biggest soft spot in the platform.** BD and client call KPIs count only
-> *categorised* Devyce calls. Categorisation fell from 26% in May to 9% in September; October is 12%.
+> **The biggest soft spot in the platform.** BD and client call KPIs count only *tagged* Devyce
+> calls, and most calls are not tagged.
 
-From May to 26/10/2026, 2,482 of 16,028 calls carry a `custom_call_type`: 15.5%. By month:
+All calls, by month (`call_activity`, to 03/11/2026):
 
 | Month | Calls | Tagged | Rate |
 |---|---|---|---|
 | May 2026 | 727 | 189 | 26.0% |
 | June | 2,029 | 530 | 26.1% |
 | July | 2,066 | 484 | 23.4% |
-| August | 3,625 | 476 | 13.1% |
+| August | 3,626 | 478 | 13.2% |
 | September | 3,996 | 370 | **9.3%** |
-| October (to 26th) | 3,585 | 433 | 12.1% |
+| October | 4,180 | 501 | 12.0% |
 
-Call volume nearly doubled from July to August while tagging halved. Weekly targets are 5 BD and 5
-client calls; at a 12% tag rate a recruiter making ten real BD calls records about one.
+The calls that matter for the targets are those of 30 seconds or more to client contacts. Those
+are tagged more often: 18.6% in August, 25.3% in September, 26.0% in October. Even so, a recruiter
+making ten real BD calls records two or three.
 
-Per consultant, 01/10/2026 to 25/10/2026 (10 people with 30 or more calls): two desks tag about
-half their calls, five tag between 11% and 15%, and three tag under 9%. **The busiest desks tag
-least**: the two biggest callers tag 5% and 2%. Never coach off a BD or client call number without
-checking that person's tagging rate beside it. Per-person rates are for managers, in
-`call_tagging_rates()` and the Day End brief, not this page.
+Per person, the busiest desks tagged least (measured 01/10 to 25/10/2026). Never coach off a BD or
+client call number without that person's tagging rate beside it.
 
-What exists to fix it, since 26/10/2026: `/tagcalls` lists each person's untagged calls with a
-suggested category to accept or change, and the Day End brief shows everyone's untagged count and
-weekly tagging rate. Nothing is tagged automatically: numbers are shared and some people are both
-candidates and clients, so each call is the consultant's call.
+What exists to help:
 
-As of 15/09/2026, only four categories carried real volume: Contact – Prospect (BD) 800, Contact – Client 540,
-Candidate – Job Pitch/Qualifying 238, Interview Feedback 160. Everything else is negligible.
+| Measure | Where |
+|---|---|
+| `/tagcalls`: each untagged call with a suggested category to accept or change | Chat |
+| One-press tagging of today's untagged client-contact calls | Coach DM, 16:45 |
+| Today's untagged count per person | Day End brief, 17:30 |
+| Last week's tagging rate per person, against the week before | Week Ahead brief, Monday |
+| `likely_untagged`: the untagged calls that were probably BD or client calls | `kpis_report`, `call_activity_report` (0148) |
 
-The recruiter dashboard shows each person their own rate beside the KPI.
+`likely_untagged` uses `likely_call_type()` (rules in
+[Metrics and Definitions](Metrics-and-Definitions#calls)). It agreed with recruiters' own tags on
+84% of 1,654 tagged calls, so roughly one in six guesses is wrong. It is shown **beside** the tagged
+count and **never added in**: the targets still count tagged calls only. Nothing is tagged
+automatically, because numbers are shared and some people are both candidates and clients; a call is
+tagged only when the recruiter presses or confirms.
 
----
+## Funnel parity with RecruitCRM's report
 
-## Shortlist is partially adopted
+The funnel reads RecruitCRM's API (`/candidates/{slug}/history`), not its candidate lifecycle report.
+Measured 08/09/2026 across five months, actor-attributed, distinct pairs at latest occurrence:
 
-1,595 shortlist events against 3,361 CV sends. Some of the desk uses the stage, some skips straight
-to CV Sent. It appears first in the funnel but a shortlist→CV rate can exceed 100%, which means
-nothing. Don't use it as a denominator.
+- 34 of 50 stage-months exact; total variance 30 rows in 7,935 (**~0.4%**).
+- Offered, Placed, 2nd and 3rd Interview exact in every month tested.
+- The residual is confined to Shortlist, CV Sent and Rejected - Consultant.
 
----
+The gap is between RecruitCRM's API and its own report layer: the report omits rows the API returns,
+for live, unmerged, undeleted candidates. Every exclusion rule that closed it broke a stage that was
+exact, so the API is the system of truth and the last 0.4% is not chased (decided 08/09/2026).
 
-## Two deals with a mistyped fee percentage
+Shortlist is also partly adopted: 1,948 shortlisted pairs against 3,009 CVs sent in 2026 to
+04/11/2026. Some desks skip straight to CV Sent, so a shortlist→CV rate means nothing.
 
-One reads 7000. They drag the mean fee percentage to 34.4% against a true median of 18.0%.
-`fee_analysis` excludes values above 100 and reports the count excluded. **Quote the median.**
+RecruitCRM's hiring-stage history thins out badly before 2026, which is why reports default to
+2026 onward. Comparisons across that boundary are not like-for-like.
 
-These are data-entry errors in RecruitCRM and should be corrected at source.
+## Only what is logged
 
----
+Leads, internal interviews and job order forms are note types; pitches use RecruitCRM's pitch
+feature; client visits are meetings. All count **what was logged**. 2026 to 04/11/2026: 583 leads,
+335 internal interviews, 121 job order forms.
 
-## Deleted records are hidden from operations, not from history
+Meetings count only when typed. This quarter to 04/11/2026: 286 meetings, 216 untyped, 3 typed
+Client Meeting. An untyped meeting cannot count as a visit until it is typed (`meeting_review`).
 
-Ratified 15/09/2026. A deleted candidate, job, client or deal is tombstoned with `deleted_at` and
-disappears from **operational** surfaces — search, matching, the live deal pipeline, chase lists. It
-stays in **historical** counts: the funnel, activity, rankings and revenue.
+## Leave is not in RecruitCRM
 
-The reason is that deleting a candidate must not silently drop their CV sends out of last quarter's
-numbers. The work happened. Retroactively rewriting history would also move parity against
-RecruitCRM's own report, which is measured against fixed periods. The same principle already applies
-to leavers: credited to whoever did the work, never reattributed.
+RecruitCRM's diary holds no leave: none of the 286 meetings this quarter looks like leave. Nothing
+on the platform knows who is off. The coach asks instead ("Away? Pick your last day off") and skips
+a day with nothing logged at all. KPI and queue figures for someone on leave will look like a bad
+week.
 
-Before 15/09/2026 the tombstone hid nothing at all — `delete_record` set `deleted_at`, but no read
-path checked it, so a deleted candidate still came back in search and could still be matched to a job
-and pitched to a client.
+## Deals and fees
 
-Deletion is detected two ways: instantly via the `*.deleted` webhooks, and by reconcile page-walks as
-the backstop. A deletion made while a webhook delivery fails is caught within the hour.
-
-## 64 ghost deals
-
-64 rows carry a null `recruitcrm_id`. The reconcile skips nulls and the backfill matches on that
-key, so they are unreachable by every sync path. All were created in one instant on 08/07/2026 — a
-one-off import.
-
-| Stage | Deals | Value |
+| Issue | Effect | Fix |
 |---|---|---|
-| CV Sent | 51 | £0 |
-| Interview Request | 9 | £0 |
-| Placed | 4 | £0 |
+| **Salary entered in thousands**: 13 of 2026's Won deals carry e.g. "39" for £39,000 (0143) | Average salary in `/fees` is wrong; fee % cannot be suggested from value ÷ salary | `/hygiene` lists them; correct with `/won` |
+| **Missing fee %, salary, value or start date** on Won deals | Fee analysis averages over fewer deals; aftercare cannot see deals with no start date | `/hygiene`, then `/won` |
+| **Two deals with a fee % above 100** (one reads 7000) | Mean fee % 26.2% on Won deals against a median of 18.0% | Quote the median. `fee_analysis` drops values above 100 and says how many |
+| **64 ghost deals** with no RecruitCRM id, all from a one-off import on 08/07/2026 (51 CV Sent, 9 Interview Request, 4 Placed, all with no value) | Unreachable by every sync path; inflate deal counts on the pipeline table. Billing unaffected: none are Won | Pending deletion |
+| **Placements with no Won deal** | Not billed: billing is Won deal value only | `/hygiene`; the coach flags one after 14 days |
 
-**Billing is unaffected** — none are Won, all are £0. They inflate deal *counts* on the pipeline
-table, and they are the entire "Placed — 4 deals, £0" row. Pending deletion.
+## No invoices
 
----
+RecruitCRM's invoices are not mirrored, so the platform cannot say whether a Won deal has been
+invoiced or paid. Billing means Won deal value, not cash. Check invoice status in RecruitCRM.
 
-## Candidate counts mean two different things
+## Placements carry no money
 
-- **Candidates in pipeline: 6,133** — have moved through at least one hiring stage
-- **Candidates on CRM: 16,629** — every live candidate record
+RecruitCRM's placement record is a join (candidate, job, company, deal) with no fee or salary, so
+the `placements` table is empty and stays empty. A placement is a Placed stage event; its fee is a
+Won deal on the same job, paired one to one by `placements_with_fees`. The Placed stage records the
+start date only in a stage remark, which is not mirrored, so aftercare works from Won deals' start
+dates.
 
-The dashboard showed the first under the label "Candidates" until 10/08/2026, understating the
-database by ~10,500. Both are now shown separately.
+## Contacts are mirrored without contact details
 
----
+Since 0145 (03/11/2026) contacts are mirrored: 18,399 records with name, company, job title, owner
+and dates, synced every 15 minutes and reconciled daily. **Email and phone are not mirrored**;
+`client_status` and `send_email` read them live from RecruitCRM. Calls are mostly logged against the
+contact rather than the company, so company-level views (lapsed clients' last touch, BD per client)
+only became complete with this mirror.
 
-## Skills coverage — 73%
+## Candidates
 
-`match_candidates` only considers candidates with skill text populated: 12,253 of 16,629. A
-candidate missing from a shortlist may simply have no skills on file.
+| Figure | As at 04/11/2026 | Means |
+|---|---|---|
+| Candidates on the CRM | 53,235 | Every live candidate record |
+| Candidates in the pipeline | 20,507 | Have moved through at least one hiring stage |
+| With skills on file | 45,168 (84.8%) | `match_candidates` only considers these, so a missing candidate may simply have no skills |
+| Off limit in the mirror | 93 | Excluded from matching and reported as `off_limit_excluded` |
 
----
+The off-limit mirror refreshes hourly, but every client-facing write also checks RecruitCRM live (pitch, CV Sent and other stage moves, assigning, showing to the
+client, email) and fails closed: if the check cannot run, the write is refused.
 
-## ~40% of jobs had no client — fixed 10/08/2026
+## Leavers and deleted records
 
-Worth knowing because it invalidates earlier analysis. Client attribution was missing on 2,410 of
-5,975 jobs, and it was documented for months as "archived companies in RecruitCRM".
+**Leavers stay in totals, tagged "left".** Their activity is credited to whoever did the work and
+never reattributed. In billing a leaver appears when they own Won revenue this quarter or open
+pipeline. Their live jobs disappear from every desk until moved with `/handover`; `/hygiene` lists
+them.
 
-That was wrong. The sync built its slug→client lookup with an unbounded query, PostgREST caps those
-at 1,000 rows, and `clients` holds ~4,600 — so three quarters of companies were missing from the map
-and any job outside the first page had its client link written as null. Every sync that touched a
-job re-orphaned it.
+**Deleted records are hidden from operations, not from history** (ratified 15/09/2026). A deleted
+candidate, job, client or deal leaves search, matching, the live pipeline and chase lists, but stays
+in the funnel, activity and rankings, so deleting a candidate does not change last quarter's CV
+sends. Billing and pipeline exclude deleted deals (0133). Deletions arrive instantly by webhook,
+with reconcile page-walks as the backstop: hourly for clients, jobs and deals, daily for
+consultants and contacts.
 
-Now 9 of 5,975 (0.2%), none of them open. `client_report` covers 99.8% of jobs.
+## Fixed, but worth knowing
 
-**Any client or account analysis produced before 10/08/2026 was computed on ~60% of the data and
-should be re-run.**
-
----
-
-## Pre-2026 history is sparse
-
-RecruitCRM's hiring-stage history thins out badly before 2026. Reporting defaults to a 2026-onward
-window for that reason. Comparisons across that boundary aren't like-for-like.
-
----
-
-## The metrics we said weren't tracked — all of them are
-
-Corrected 10/08/2026 after reading the full RecruitCRM API. Leads and internal interviews are
-**note types**; pitched candidates use RecruitCRM's **pitch feature**; client visits are
-**meetings**. 2026 to date: 422 leads, 255 internal interviews, 92 job order forms.
-
-Notes are now mirrored (60,000+ rows, 2018 onward) so the note-based ones are countable by
-consultant and period. Nothing needed adding to RecruitCRM — the data was always there.
-
-The remaining caveat is recording, not capability: these count what was logged. Low numbers may
-mean low activity or low logging, exactly like Devyce call tagging.
-
-A `Job Lead` deal stage also exists with zero deals in it. If it starts being used, leads will
-live in two places and will need reconciling.
+| Was | Fixed | Still matters because |
+|---|---|---|
+| ~40% of jobs had no client (a sync lookup capped at 1,000 rows) | 10/08/2026; now 9 of 6,083, none open | Client or account analysis from before 10/08/2026 ran on ~60% of the data and should be re-run |
+| Billing had no quarter end and counted deleted deals; pipeline took in Declined and Placed | 29/10/2026 (0133) | Billing and pipeline figures quoted before then were overstated |
+| Leads, internal interviews, job order forms and visits documented as "not tracked" | 10/08/2026 | They were always in RecruitCRM; earlier reports said otherwise |
 
 ---
 
-## 88 candidates are off limit — 61 of them are flagged here
-
-RecruitCRM marks 88 candidates do-not-approach, with reasons recorded. `match_candidates` used to
-return them; it now excludes them and reports `off_limit_excluded` rather than silently shortening
-a shortlist. A single "engineer" search was surfacing 14.
-
-Of the 88, **61 exist in our candidate mirror and carry the flag; 27 have never been synced**. That
-is not a hole in the filter — the shortlist reads the same mirror, so anything it can surface it can
-also exclude — but the two numbers are different and both are true.
-
----
-
-## The placements table is empty, and always will be
-
-`GET /v1/placements` exists, but a placement record carries no money at all — no fee, no salary, and
-`custom_fields` came back empty across a full page. It's a join record: candidate ↔ job ↔ company ↔
-deal. The fee lives on the deal. If placements are ever synced it should be for `deal_slugs`, which
-is the only route to a per-placement fee.
-
----
-
-## Adoption
-
-As of 26/10/2026: 2,345 tool calls in the last 30 days from 7 people, and 361 audited writes. 11
-people hold an active token. The action queue DM reaches a pilot of four.
-
-Usage is now real but concentrated: read any team-wide conclusion from usage data with that in mind.
-
----
-
-**See also:** [Metrics and Definitions](Metrics-and-Definitions) for the intended definition · [Operations Runbook](Operations-Runbook) for fixing a feed · [Architecture](Architecture) for how data arrives · [Commands](Commands)
+**Related:** [Metrics and Definitions](Metrics-and-Definitions) · [Operations Runbook](Operations-Runbook) · [Architecture](Architecture) · [Inbox](Inbox)

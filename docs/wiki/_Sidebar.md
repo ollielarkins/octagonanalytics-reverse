@@ -18,13 +18,13 @@
 
 ---
 
-**New here?** Read [Onboarding](Onboarding),
-then [Data Caveats](Data-Caveats)
-before you quote a number to anyone.
+**New here?** [Onboarding](Onboarding), then
+[Data Caveats](Data-Caveats) before you quote
+a number to anyone.
 
 **Quoting a figure?**
-[Metrics](Metrics-and-Definitions) tells you
-what it counts.
+[Metrics](Metrics-and-Definitions) says what it counts.
 
 **Something broken?**
-[Runbook](Operations-Runbook) → Incidents.
+[Operations Runbook](Operations-Runbook), or post in
+#troubleshooting.
