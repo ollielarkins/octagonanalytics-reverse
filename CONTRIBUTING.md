@@ -47,12 +47,11 @@ One change is one patch on its own branch, merged into `main` once it is live an
 
 ## Migrations
 
-- **Numbered, sequential, never renumbered.** The latest is `0148_coach_v3.sql`; **the next is
-  `0149`**. Check `supabase/migrations/` before picking a number, in case a branch has taken one.
+- **Numbered, sequential, never renumbered.** The latest is `0150_claude_deals.sql`; **the next is
+  `0151`**. Check `supabase/migrations/` before picking a number, in case a branch has taken one.
   The first line is a comment with the filename, then why the migration exists.
 - **Apply with the Supabase MCP `apply_migration` tool**, named after the file, with the file's full
-  contents. The CLI returns 403 since 04/11/2026. **Never `supabase db push`**: local file names do
-  not match the remote history.
+  contents. **Never `supabase db push`**: local file names do not match the remote history.
 - **Test with a `pg_temp` copy first.** Before replacing a function, create the new version as
   `pg_temp.fn(...)` and run it against live data next to the current one, in a single
   `execute_sql` call that changes nothing permanent (temporary objects vanish with the session, so the create and the comparison
@@ -75,11 +74,14 @@ One change is one patch on its own branch, merged into `main` once it is live an
 
 ## Edge functions
 
-- **Deploy with the Supabase MCP `deploy_edge_function` tool** while the CLI returns 403:
-  - send the real file contents from disk, and every file the entrypoint imports (`octagon-mcp`
-    needs `index.ts`, `widgets.ts`, `ext_apps_bundle.ts` and `../_shared/graph.ts`; locked functions
-    need `../_shared/caller.ts`). Never a placeholder: one took the connector down on 10/08/2026;
-  - set `verify_jwt` to the value in `supabase/config.toml`. The tool defaults to `true`.
+- **Deploy with the CLI**, one function per command:
+  `npx supabase functions deploy <name> --project-ref kzcmssldvtjnbwwunuwm --use-api --yes`.
+  First check `npx supabase projects list` shows this project: a CLI signed in to another account
+  returns 403 for everything (04-05/11/2026). Never pass `--no-verify-jwt`.
+- **The Supabase MCP `deploy_edge_function` tool** is a fallback for small functions only: send the
+  real file contents and every file the entrypoint imports (locked functions need
+  `../_shared/caller.ts`), never a placeholder (one took the connector down on 10/08/2026), and set
+  `verify_jwt` from `supabase/config.toml` (the tool defaults to `true`). Not for `octagon-mcp`.
 - **Type-check first:** `node --experimental-strip-types --check supabase/functions/<name>/index.ts`.
 - **Diff live against `main` before overwriting.** Live code has drifted from the repo before
   (`slack-command`, found 03/11/2026). `get_edge_function` shows what is deployed.

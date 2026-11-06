@@ -3,7 +3,7 @@
 The landing page for everyone at Octagon: what the platform is, where to go for what, and what has
 changed recently.
 
-*Last reviewed 04/11/2026.*
+*Last reviewed 06/11/2026.*
 
 Live recruitment analytics on top of RecruitCRM, with a Claude interface recruiters use directly to
 ask questions and take defined actions. RecruitCRM stays the system of record. The platform mirrors
@@ -41,7 +41,7 @@ flowchart LR
 | Page | For |
 |---|---|
 | **[Onboarding](Onboarding)** | Getting connected and through your first week. Start here if you're a recruiter. |
-| **[Commands](Commands)** | All 82 slash commands, grouped by what you are trying to do. |
+| **[Commands](Commands)** | All 83 slash commands, grouped by what you are trying to do. |
 | **[Tools Reference](Tools-Reference)** | Every question the system can answer, and how to ask it. |
 | **[Inbox](Inbox)** | Reading your Outlook inbox from Claude and drafting replies. |
 | **[Metrics and Definitions](Metrics-and-Definitions)** | What each number actually means. Read before quoting anything. |
@@ -66,6 +66,9 @@ flowchart LR
 - `/silver` (rejected at 2nd, 3rd or Offered, with open roles to put them forward for), `/lapsed`
   (past clients gone quiet, with a call plan), `/aftercare` (check-in calls due on placements),
   `/dailystats` (yesterday's CVs and interview requests by name).
+- `/claudedeals`: what Claude has contributed to deals, with candidates it found or put on a job kept
+  apart from stage moves it only recorded. `/match` now logs its suggestions, so a CV sent from them
+  counts even when the candidate was added in RecruitCRM.
 
 **Keeping the data right**
 - `/hygiene` lists the gaps that make fee, billing, desk and call figures wrong. `/won` now sets
@@ -95,7 +98,7 @@ and the commit log.
 
 | | |
 |---|---|
-| Connector | octagon-mcp 3.99.1, 80 tools and 26 prompts |
+| Connector | octagon-mcp 3.100.0, 81 tools and 26 prompts |
 | Commands | 82, in four plugins: octagon-reporting 0.2.15, octagon-actions 0.2.14, octagon-dashboard 0.5.0, octagon-admin 0.2.2 |
 | Database | Supabase Postgres 17, 148 migrations, 26 scheduled jobs watched by a cron manifest |
 | Slack | Morning brief 07:30, Day End 17:30, weekly Monday 08:00; 08:30 queue DM; coach DMs (shadow) |

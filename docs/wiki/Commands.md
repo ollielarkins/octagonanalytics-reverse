@@ -2,9 +2,9 @@
 
 For recruiters and managers: every slash command, grouped by what you are trying to do, and which ones change RecruitCRM.
 
-*Last reviewed 04/11/2026.*
+*Last reviewed 06/11/2026.*
 
-82 commands in four plugins. Type `/` in Cowork or a chat to see them, or ask in plain English: every
+83 commands in four plugins. Type `/` in Cowork or a chat to see them, or ask in plain English: every
 command is a shortcut for something you can phrase yourself. Add context after a command to narrow it,
 for example `/find a candidate that hasn't been contacted this week` or `/funnel Q2`.
 
@@ -125,6 +125,7 @@ flowchart LR
 | `/placements` | Placements with the fee attached | No |
 | `/newdeal` | Create a deal: how revenue enters the system | Yes |
 | `/won` | Mark a deal Won with its value, annual salary, fee % and start date, or fill those in on a deal already Won | Yes |
+| `/claudedeals` | Claude's part in deals: candidates Claude found or put on a job, how far they got, the Won and Offered value behind them, and the admin Claude only recorded, kept separate | No |
 
 ## Writing content
 
@@ -196,7 +197,7 @@ not in this one. Each is `plugins/<plugin>/skills/<command>/SKILL.md`.
 
 | Plugin | Version | Commands |
 |---|---|---|
-| `octagon-reporting` | 0.2.15 | 46: numbers, pipeline, candidates, content, your day |
+| `octagon-reporting` | 0.2.17 | 47: numbers, pipeline, candidates, content, your day |
 | `octagon-actions` | 0.2.14 | 24: everything that changes RecruitCRM, plus `/digest` and `/formattedcv` |
 | `octagon-admin` | 0.2.2 | 10: managers and admins |
 | `octagon-dashboard` | 0.5.0 | 2: `/dashboard`, `/kpi` |

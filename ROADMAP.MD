@@ -12,7 +12,7 @@ For anyone deciding what to build next: what is done, what is running as a pilot
 what is open. Everything below this section is kept as history; items it lists as future work are
 marked **Done** with a date where they have since shipped.
 
-*Last reviewed 04/11/2026.* Connector `octagon-mcp` 3.99.1 (80 tools, 26 prompts), 82 slash commands in four
+*Last reviewed 04/11/2026.* Connector `octagon-mcp` 3.100.0 (81 tools, 26 prompts), 83 slash commands in four
 plugins, migrations `0001`-`0148`.
 
 | Milestone | Status at 04/11/2026 |
@@ -61,7 +61,7 @@ plugins, migrations `0001`-`0148`.
 | EOW email Outlook drafts | `eow_email` can save to Outlook Drafts; no draft has been saved through it yet |
 | Job-board alert emails (saved searches read from the inbox) | Discussed 04/11/2026, not started |
 | `cron_manifest` drift | `recruitcrm-assignment-sweep` and `weekly-usage-slack` run but are not declared |
-| Supabase CLI | Returns 403 since 04/11/2026; deploys go through the Supabase MCP tools meanwhile |
+| Supabase CLI | Fixed 06/11/2026: the 403s were the CLI signed in to a different account (`npx supabase login`) |
 | CI | None yet |
 | RecruitCRM target report | Compare with our own targets (see Tier 1 below) |
 | Direct Devyce feed | Blocked on Devyce (see Tier 3 below) |

@@ -66,9 +66,10 @@ RecruitCRM marks them inactive.
    this one and `octagon-plugins` (pull it before auditing commands; a stale copy has misled a
    review before).
 3. **Supabase access:** you need a member account on project `kzcmssldvtjnbwwunuwm`.
-   Since 04/11/2026 the CLI returns 403 for this account, so migrations and deploys go through the
-   Supabase MCP tools in Claude Code (`apply_migration`, `deploy_edge_function`, read-only
-   `execute_sql`). Never `db push`.
+   Sign the CLI in with that account (`npx supabase login`) and check `npx supabase projects list`
+   shows the project: signed in to another account, everything returns 403. Functions deploy with
+   the CLI; migrations go through the Supabase MCP `apply_migration` tool in Claude Code (with
+   read-only `execute_sql` for checks). Never `db push`.
 4. **Your own connector token**, minted as above, to test tools as a real user. To use the connector
    from Claude Code:
 

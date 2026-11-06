@@ -41,7 +41,7 @@ There is no AI on the server. Every piece of drafting happens in the person's ow
 
 | Function | What it does | How it is protected |
 |---|---|---|
-| `octagon-mcp` | The connector: a remote MCP server (streamable HTTP), version 3.99.1, 80 tools and 26 prompts. Reads the metrics layer, writes to RecruitCRM on confirmation, serves the inline widgets | Open (`verify_jwt = false`). Every tool call authenticates a per-user Octagon token or OAuth session token against `mcp_tokens` |
+| `octagon-mcp` | The connector: a remote MCP server (streamable HTTP), version 3.100.0, 81 tools and 26 prompts. Reads the metrics layer, writes to RecruitCRM on confirmation, serves the inline widgets | Open (`verify_jwt = false`). Every tool call authenticates a per-user Octagon token or OAuth session token against `mcp_tokens` |
 | `recruitcrm-sync` | The mirror. Modes: `incremental`, `history_recent`, `notes_recent`, `reconcile`, `offlimit`, `assignment_sweep`, `meetings_quarter`, and per-entity backfill | Locked: JWT plus `trustedCaller()`. Holds the RecruitCRM API token |
 | `recruitcrm-webhook` | Receives RecruitCRM's change notifications, logs them, tombstones deletions and fires an incremental sync for the entity | Open. Requires the shared `?key=` secret (`WEBHOOK_SECRET`) |
 | `inbox-sync` | Polls connected Outlook inboxes through Microsoft Graph every 5 minutes. Stores envelopes only (sender, subject, time, thread, category), never bodies | Locked: JWT plus `trustedCaller()`. Holds the Graph app secret |

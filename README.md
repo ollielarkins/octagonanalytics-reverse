@@ -56,8 +56,8 @@ flowchart LR
 
 | Path | What is there |
 |---|---|
-| `supabase/migrations/` | Schema, semantic layer, RPCs, RLS and cron, numbered `0001`–`0148`. Next is `0149` |
-| `supabase/functions/octagon-mcp/` | The MCP connector: 80 tools and 26 prompts, the OAuth bridge, MCP Apps widgets (`widgets.ts`, `ext_apps_bundle.ts`). Version 3.99.1 |
+| `supabase/migrations/` | Schema, semantic layer, RPCs, RLS and cron, numbered `0001`–`0150`. Next is `0151` |
+| `supabase/functions/octagon-mcp/` | The MCP connector: 81 tools and 26 prompts, the OAuth bridge, MCP Apps widgets (`widgets.ts`, `ext_apps_bundle.ts`). Version 3.100.0 |
 | `supabase/functions/recruitcrm-sync/` | The mirror: backfill, incremental, reconcile, history, notes, off-limit, meetings, assignment sweep |
 | `supabase/functions/recruitcrm-webhook/` | Near-live change trigger from RecruitCRM; tombstones on `*.deleted` events |
 | `supabase/functions/daily-queue/` | 08:30 action queue DMs and the Monday manager exceptions DM |
@@ -75,7 +75,7 @@ flowchart LR
 | `scripts/` | Repo checks: widget bundle build, widget and connect-page checks |
 | `rollout/` | Org instructions for claude.ai and recruiter templates |
 | `slack/` | The Octagon Coach Slack app manifest |
-| `plugins/` | Pointer only. The 82 slash commands live in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) |
+| `plugins/` | Pointer only. The 83 slash commands live in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) |
 | `docs/wiki/` | Source of the GitHub wiki (a separate git repo; see below) |
 | `docs/DECISIONS.md` | Append-only design decision log |
 | `ROADMAP.MD`, `PROJBRIEF.MD` | Roadmap with current status; the original brief, kept as history |
@@ -94,22 +94,31 @@ flowchart LR
 ## Deploying
 
 > [!WARNING]
-> Since 04/11/2026 the Supabase CLI returns 403 for this account (`functions deploy` and
-> `db query`). Until that is fixed, migrations and functions go through the **Supabase MCP tools**:
-> `apply_migration` and `deploy_edge_function`. Never use `supabase db push`: the local file names
-> do not match the remote migration history.
+> Never use `supabase db push`: the local file names do not match the remote migration history, so
+> it would try to re-apply everything.
 
-**Migrations.** Apply with `apply_migration`, using the file's name (`0149_short_name`) and its full
-contents, then commit the same file. Test risky SQL first; see
+**Sign in first.** The Supabase CLI must be signed in to the account that owns the project
+(`npx supabase login`). If `npx supabase projects list` doesn't show `kzcmssldvtjnbwwunuwm`, every
+deploy and query returns 403. That is what happened on 04-05/11/2026: the CLI was signed in to a
+different account, and it was not a lost permission.
+
+**Migrations.** Apply with the Supabase MCP `apply_migration` tool, using the file's name
+(`0151_short_name`) and its full contents, then commit the same file. Test risky SQL first; see
 [CONTRIBUTING.md](CONTRIBUTING.md#migrations).
 
-**Edge functions.** `deploy_edge_function` uploads file contents, so:
+**Edge functions.** Deploy with the CLI, one function per command:
 
-- Send the real files from disk, every one the entrypoint imports: for `octagon-mcp` that is
-  `index.ts`, `widgets.ts`, `ext_apps_bundle.ts` and `../_shared/graph.ts`; for a locked function,
-  `../_shared/caller.ts`. A placeholder string once took the connector down (10/08/2026).
-- Set `verify_jwt` to the value in `supabase/config.toml` for that function. The tool defaults to
-  `true`, which would lock out `octagon-mcp`, the webhook and the Slack endpoints.
+```bash
+npx supabase functions deploy octagon-mcp --project-ref kzcmssldvtjnbwwunuwm --use-api --yes
+```
+
+- Never pass `--no-verify-jwt`: `verify_jwt` comes from `supabase/config.toml`, and the flag
+  overrides it for every function in the command.
+- The Supabase MCP `deploy_edge_function` tool also works for small functions (the coach ones), but
+  it uploads file contents you pass by hand: send every file the entrypoint imports, with its real
+  content, and set `verify_jwt` from `config.toml` (the tool defaults to `true`). It is not practical
+  for `octagon-mcp` (about 920KB across four files). A placeholder string once took the connector
+  down (10/08/2026).
 - Bump `SERVER.version` in `octagon-mcp/index.ts`, then confirm the live build:
 
 ```bash
@@ -245,7 +254,7 @@ At 04/11/2026. The dated detail, including what is open, is at the top of [ROADM
 |---|---|
 | Data model, sync, semantic layer (M0–M3) | Done; contacts mirrored since 03/11/2026 |
 | Dashboard (M4) | Done; in the connector's `get_dashboard` widget since 20/10/2026 |
-| Claude query and action layers (M5, M6) | Done: 80 tools, 26 prompts, 82 commands, live audited writes since 12/08/2026 |
+| Claude query and action layers (M5, M6) | Done: 81 tools, 26 prompts, 83 commands, live audited writes since 12/08/2026 |
 | Slack layer | Briefs live; action queue live to a four-person pilot; Octagon Coach in shadow mode |
 | Hardening (M7) | Partial: audit fixes 29/10–03/11/2026 shipped; no CI; items open in the roadmap |
 

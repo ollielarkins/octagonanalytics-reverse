@@ -2,10 +2,10 @@
 
 For anyone asking "what can I ask it", and for admins debugging an answer: every tool on the Octagon connector, what it answers, and whether it changes anything.
 
-*Last reviewed 04/11/2026.*
+*Last reviewed 06/11/2026.*
 
 You don't need any of this to use the system: ask in plain English and the right tool gets called. The
-connector is `octagon-mcp` **3.99.1**, with **80 tools** and **26 prompts**. Most tools sit behind a
+connector is `octagon-mcp` **3.100.0**, with **81 tools** and **26 prompts**. Most tools sit behind a
 slash command (see [Commands](Commands)); this page is the layer underneath.
 
 **On this page:** [How writes work](#how-writes-work) · [Your day and KPIs](#your-day-and-kpis) ·
@@ -87,6 +87,7 @@ flowchart LR
 | `placements_report` | Placements and Won revenue by close date, by consultant and client | Read |
 | `placements_with_fees` | Each placement matched to at most one Won deal, with value, fee % and salary | Read |
 | `invoices_report` | Invoices raised in RecruitCRM for a window (default last 90 days), with status and totals | Read |
+| `claude_deals` | Claude's part in deals: pairs Claude sourced (added through Claude, or suggested by `match_candidates` and the CV sent within 60 days) and stage moves it only recorded, with Won and Offered value kept apart | Read |
 
 Reports that count Won deals by close date end at today by default, so deals dated in the future are
 never counted as billed.

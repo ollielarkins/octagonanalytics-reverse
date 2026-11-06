@@ -3,7 +3,7 @@
 For anyone quoting an Octagon number: what each figure counts, who gets the credit, and which
 function produces it.
 
-*Last reviewed 04/11/2026.*
+*Last reviewed 06/11/2026.*
 
 **On this page:** [Attribution](#attribution) · [The funnel](#the-funnel) · [Weekly KPIs](#weekly-kpis) ·
 [Calls](#calls) · [Money](#money) · [Weekly plan from billing](#weekly-plan-from-billing) ·
@@ -189,6 +189,22 @@ to the people in `manager_exceptions_emails`.
 | Lapsed clients | `lapsed_clients` (0139, 0146) | Companies we have placed with, with no Open or On Hold job and no new job in 6 months (default). Last touch = latest call or note on the company or any of its contacts, or a visit. Blocklisted and Do not contact companies left out |
 | Aftercare | `aftercare` (0140) | Check-ins on placements from Won deals with a start date: before start, week 1 (+7 days), month 1 (+30), month 3 (+91). Listed from 7 days before due to 14 days after. `contacted_since` marks a call or note since the window opened; nothing is marked done automatically. No rebate dates (terms not recorded) |
 | Data hygiene | `data_hygiene` (0141 to 0143) | Record gaps that make figures wrong: Won deals with no fee %, no salary, salary entered in thousands, no value, no start date or no job; placed with no Won deal; Offered with no deal; live jobs owned by a leaver; jobs with no client; untagged calls of 30s+ in 7 days. Each with the records and the fix |
+
+### Claude's part in deals
+
+`claude_deals` (0150) gives two kinds of credit and never adds them together:
+
+| Term | Definition |
+|---|---|
+| **Sourced** | The candidate was added to the job through Claude (`assign_candidate`), or `match_candidates` suggested them to that consultant and the same consultant sent their CV within 60 days (to that job, or any job when the search named none). Not sourced if the candidate was already on the job beforehand |
+| **Recorded** | A stage move made through Claude on a pair it did not source: admin time saved, not revenue Claude made |
+| Won value | The Won deal on the job of a sourced pair that reached Placed. Billing |
+| Offered value | The Offered deal of a sourced pair at Offered. Pipeline, never billing |
+
+A deal counts only when it names the candidate or is the job's only deal at that stage. `match_candidates`
+suggestions are logged from 05/11/2026 (`claude_suggestions`), so a candidate found with `/match` before then
+and added inside RecruitCRM left no trace: the figure is an undercount, never an overcount. Billing is still
+attributed to the deal owner everywhere else; this is a view of Claude's part, not a split of anyone's fee.
 
 The 60-day ceiling on aging and stalled is deliberate: beyond it a candidate is abandoned, not
 stalled, and including them gave a list of 1,517 items nobody could act on.

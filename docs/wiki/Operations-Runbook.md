@@ -2,7 +2,7 @@
 
 For admins who deploy, schedule, monitor and fix the platform: how each routine job is done and what to check afterwards.
 
-*Last reviewed 04/11/2026.*
+*Last reviewed 06/11/2026.*
 
 > [!CAUTION]
 > Admin only. Everything here acts on production. There is no staging project.
@@ -12,13 +12,17 @@ For admins who deploy, schedule, monitor and fix the platform: how each routine 
 ## Deploying
 
 > [!IMPORTANT]
-> Since 04/11/2026 the Supabase CLI returns 403 for this account on `functions deploy` and `db query`. Deploys and migrations are done through the Supabase MCP tools `deploy_edge_function` and `apply_migration` instead. Until the CLI works again, treat the steps below as the process.
+> **Check the CLI is signed in to the right account first.** `npx supabase projects list` must show `kzcmssldvtjnbwwunuwm`. If it doesn't, run `npx supabase login` with the account that owns the project. On 04-05/11/2026 every deploy and query returned 403 because the CLI was signed in to a different account; it was not a lost permission.
 
-With `deploy_edge_function`:
+Deploy with the CLI, one function per command:
 
-1. **Send every file the function imports, with its real content.** For `octagon-mcp` that is `index.ts`, `widgets.ts` and `ext_apps_bundle.ts`; for any function importing `../_shared/caller.ts` or `../_shared/graph.ts`, include those too. The files are large (`octagon-mcp/index.ts` is about 460KB). A placeholder or truncated file takes the function down: see incident 1 below.
-2. **Match `verify_jwt` to `supabase/config.toml`.** After the deploy, `list_edge_functions` shows each function's `verify_jwt`; check it against the file. `recruitcrm-sync` holds the RecruitCRM token and must never be open.
-3. **Bump `SERVER.version`** in `octagon-mcp/index.ts` on every connector deploy. It is the only way to confirm from outside which build is live.
+```bash
+npx supabase functions deploy <function> --project-ref kzcmssldvtjnbwwunuwm --use-api --yes
+```
+
+1. **`verify_jwt` comes from `supabase/config.toml`.** After the deploy, `list_edge_functions` shows each function's `verify_jwt`; check it against the file. `recruitcrm-sync` holds the RecruitCRM token and must never be open.
+2. **Bump `SERVER.version`** in `octagon-mcp/index.ts` on every connector deploy. It is the only way to confirm from outside which build is live.
+3. **The Supabase MCP `deploy_edge_function` tool** is the fallback for small functions (it was used for the coach while the CLI was signed out). It uploads the file contents you pass, so send every file the function imports with its real content (`../_shared/caller.ts`, `../_shared/graph.ts` where imported) and set `verify_jwt` from `config.toml`, since the tool defaults to `true`. Don't use it for `octagon-mcp` (about 920KB across four files). A placeholder or truncated file takes the function down: see incident 1 below.
 
 Before deploying, check the syntax locally:
 
@@ -36,11 +40,11 @@ curl -s --retry 8 --retry-delay 3 --retry-all-errors \
 
 A 502 straight after a deploy is a cold boot. Retry before assuming failure.
 
-When the CLI works, deploy one function per command and **never pass `--no-verify-jwt`**: it overrides `config.toml` for every function in the command. That is how `recruitcrm-sync` was left open on 10/08/2026.
+Deploy one function per command and **never pass `--no-verify-jwt`**: it overrides `config.toml` for every function in the command. That is how `recruitcrm-sync` was left open on 10/08/2026.
 
 ## Migrations
 
-Sequential files in `supabase/migrations/` (0000 to 0148 as of 04/11/2026). Apply with the Supabase MCP `apply_migration` tool and **write the same SQL to the next numbered file** in the same change, so a replay reproduces the database.
+Sequential files in `supabase/migrations/` (0000 to 0150 as of 06/11/2026). Apply with the Supabase MCP `apply_migration` tool and **write the same SQL to the next numbered file** in the same change, so a replay reproduces the database.
 
 **Never run `supabase db push`.** The local file names do not match the versions recorded remotely, so the CLI would try to re-apply history.
 
@@ -238,7 +242,7 @@ Each is recorded for the guard rail it led to.
 | 15/09/2026 | **Candidate pass restored without its drain**, so the walk restarted forever | The pass and drain are documented as a pair |
 | 29/10/2026 | **Platform audit.** Locked functions were reachable with the public anon key; confirms could apply with no preview; leavers kept write tokens | `CRON_SECRET` (0132), stored preview nonces (0131), leaver auto-revoke (0136) |
 | 03/11/2026 | **`dashboard-data` and `dashboard` served firm figures without a token** | Both retired to 410 stubs; see [Architecture](Architecture#retired-dashboard-and-dashboard-data) |
-| 04/11/2026 | **Supabase CLI returns 403** on deploy and query | Deploys and migrations through the Supabase MCP tools, as above |
+| 04/11/2026 | **Supabase CLI returns 403** on deploy and query | The CLI was signed in to a different Supabase account. Coach deploys and migrations went through the Supabase MCP tools meanwhile; `npx supabase login` with the project's account fixed it on 06/11/2026. Check `projects list` before deploying |
 
 The common thread in the 10/08/2026 set: nothing automated would have caught any of them. There is still no test suite or CI. A smoke test of the version endpoint and one real tool call after every deploy would catch the first two in seconds.
 
