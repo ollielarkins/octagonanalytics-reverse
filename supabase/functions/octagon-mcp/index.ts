@@ -28,7 +28,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.100.0" };
+const SERVER = { name: "octagon-analytics", version: "3.100.1" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -311,8 +311,22 @@ const wordCount = (html: string) => String(html ?? "").replace(/<[^>]+>/g, " ").
 
 // What the job will look like on octagongroup.co.uk, and what is missing. Warns, never blocks: a
 // missing category should not keep a real job off the site, but the recruiter sees it before confirming.
+// 3.100.1, 06/11/2026: the website preview showed every salary in £, so a USD role read "£200,000".
+// Currency codes come from /v1/currencies, read once per instance.
+let CURRENCY_CODES: Map<number, string> | null = null;
+async function currencyCode(id: any): Promise<string | null> {
+  if (id == null || id === "") return null;
+  if (!CURRENCY_CODES) {
+    const cur = await crm("GET", "/currencies");
+    const list = Array.isArray(cur.json) ? cur.json : (cur.json?.data ?? []);
+    if (!cur.ok || !list.length) return null;
+    CURRENCY_CODES = new Map(list.map((c: any) => [Number(c.currency_id), String(c.code ?? "").toUpperCase()]));
+  }
+  return CURRENCY_CODES.get(Number(id)) ?? null;
+}
+const CURRENCY_SYMBOL: Record<string, string> = { GBP: "£", USD: "$", EUR: "€" };
 function websiteCheck(j: { title?: string; status?: number; city?: string; country?: string; salary_min?: number; salary_max?: number;
-  pay_type?: number | null; job_type?: string | null; workplace?: string | null; categories?: string | null; description?: string }) {
+  pay_type?: number | null; job_type?: string | null; workplace?: string | null; categories?: string | null; description?: string; currency?: string | null }) {
   const gaps: string[] = [];
   const words = wordCount(j.description ?? "");
   if (!words) gaps.push("No job description: the page shows an empty description and Google for Jobs will not list it. Write one, or attach the client's JD and ask for an advert to be drafted from it.");
@@ -324,7 +338,8 @@ function websiteCheck(j: { title?: string; status?: number; city?: string; count
   if (!j.job_type) gaps.push("No job type (Full Time, Part Time or Contract): the job is missing from the Job Type filter.");
   if (!j.workplace) gaps.push("No workplace (On-site, Hybrid or Remote): the job is missing from the Workplace filter.");
   if (!j.categories) gaps.push("No job category: the job is missing from the Category filter.");
-  const money = (n?: number) => n ? `£${Number(n).toLocaleString("en-GB")}` : "";
+  const sym = j.currency ? (CURRENCY_SYMBOL[j.currency] ?? `${j.currency} `) : "£";
+  const money = (n?: number) => n ? `${sym}${Number(n).toLocaleString("en-GB")}` : "";
   const pay = hasPay ? [money(j.salary_min), money(j.salary_max)].filter(Boolean).join(" - ") + (j.pay_type ? ` ${PAY_TYPE_LABEL[j.pay_type]}` : "") : "Competitive";
   return {
     shows_as: [j.title, j.city, pay, j.workplace ? WORKPLACE_NAME[j.workplace] : null, j.job_type, j.categories?.split(",").join(", ")].filter(Boolean).join(" · "),
@@ -863,7 +878,16 @@ function errorCode(out: any): string | null {
     code = words.length ? "msg:" + words.join("_") : "message";
   }
   const st = Number.isInteger(j?.status) ? ` ${j.status}` : "";
-  return (code + st).slice(0, 60);
+  // 3.100.1: a RecruitCRM refusal also logs WHICH fields it refused (the keys of its validation
+  // errors: field names, never values), so a 422 can be diagnosed from the log. 06/11/2026's four
+  // refused jobs logged only "recruitcrm_error 422".
+  let why = "";
+  if (code === "recruitcrm_error" && typeof j?.detail === "string") {
+    let d: any = null; try { d = JSON.parse(j.detail); } catch { /* not JSON */ }
+    const errs = d?.errors ?? d?.data?.errors;
+    if (errs && typeof errs === "object" && !Array.isArray(errs)) why = ":" + Object.keys(errs).slice(0, 6).join(",");
+  }
+  return (code + st + why).slice(0, 100);
 }
 // 3.96.2: outcomes that are the tool doing its job, not failing: asking which record was meant,
 // refusing a bad value with the reason, or catching a second confirm. They keep their code in the log
@@ -1409,6 +1433,11 @@ async function callTool(name: string, args: any, req: Request) {
   const auth = await authenticate(req, args);
   if (!auth.ok) return toolText({ error: auth.reason });
   const actor = auth.actor;
+  // 3.100.1, 06/11/2026: the nonce was marked used before the write and kept when the write failed,
+  // so a retry of a refused create_job said "already applied" and Claude told the recruiter it was
+  // done. Now a confirm whose result is an error (nothing applied) releases its preview.
+  let usedNonce = "";
+  const release = async () => { if (usedNonce) { await db.from("mcp_card_confirms").delete().eq("nonce", usedNonce).then(() => {}, () => {}); usedNonce = ""; } };
   try {
     if (CARD_TOOLS.has(name) || MIXED_TOOLS.has(name)) {
       const nonce = String(args?.card_nonce ?? "").slice(0, 80);
@@ -1429,14 +1458,21 @@ async function callTool(name: string, args: any, req: Request) {
         const { error } = await db.from("mcp_card_confirms").insert({ nonce, tool: name, consultant_recruitcrm_id: actor.id });
         if (error) {
           const dup = error.code === "23505";
+          let when = "";
+          if (dup) {
+            const { data: used } = await db.from("mcp_card_confirms").select("used_at").eq("nonce", nonce).maybeSingle();
+            if (used?.used_at) when = ` at ${new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" }).format(new Date(used.used_at))}`;
+          }
           logCall(actor.id, name, dup, dup ? "already_applied" : "card_check_failed");
           return (MIXED_TOOLS.has(name) ? mixedWrap : cardWrap)(name, { ...args, confirm: true }, toolText({ error: dup ? "already_applied" : "card_check_failed",
-            message: dup ? "This change was already applied from this preview, so nothing was changed again. Ask for a fresh preview to make another change."
+            message: dup ? `This preview was already confirmed${when} and that change went through, so nothing was done this time. Check the record before saying anything is done; for another change, ask for a fresh preview.`
                          : "Could not check this confirmation, so nothing was changed. Try again in a moment." }));
         }
+        usedNonce = nonce;
       }
     }
     let out = await runTool(name, args, req, actor);
+    if (!resultOk(out)) await release();
     if (name !== "record_content_use") { const code = errorCode(out); logCall(actor.id, name, !isFailure(out, code), code); }
     if (CARD_TOOLS.has(name)) out = cardWrap(name, args, out);
     else if (REPORT_TOOLS.has(name)) out = viewWrap(name, out);
@@ -1444,6 +1480,7 @@ async function callTool(name: string, args: any, req: Request) {
     if (CARD_TOOLS.has(name) || MIXED_TOOLS.has(name)) await recordCardPreview(name, actor, out);
     return out;
   } catch (e) {
+    await release();
     logCall(actor.id, name, false, "exception");
     throw e;
   }
@@ -3547,9 +3584,10 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       city: args.city, state: args.state, country: args.country, ...web.fields,
       owner_id: actor.id, created_by: actor.id, updated_by: actor.id,
     };
+    const curCode = await currencyCode(currencyId);
     const website = websiteCheck({ title: args.name, status: fields.job_status, city: args.city, country: args.country,
       salary_min: args.salary_min, salary_max: args.salary_max, pay_type: fields.salary_type ?? null, job_type: fields.job_type ?? null,
-      workplace: fields.job_location_type ?? null, categories: cfChanges[CF_JOB_CATEGORIES] ?? null, description });
+      workplace: fields.job_location_type ?? null, categories: cfChanges[CF_JOB_CATEGORIES] ?? null, description, currency: curCode });
 
     if (!args.confirm) {
       return toolText({ mode: "preview", action: "create_job", will_create: {
@@ -3564,9 +3602,26 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       instruction: "Show this to the recruiter in full, including website.shows_as and any website.gaps (offer to fill each gap). This CREATES A REAL JOB in RecruitCRM" + (fields.job_status === 1 ? " and publishes it on octagongroup.co.uk" : "") + ". To apply, call again with confirm=true." });
     }
 
-    const r = await crmForm("/jobs", fields);
-    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300) });
+    let r = await crmForm("/jobs", fields);
+    // 3.100.1, 06/11/2026: four US jobs were refused (422) on create, and pay type, job type and
+    // workplace had never been written by create before. If RecruitCRM refuses the job and those were
+    // sent, try once without them (a 422 creates nothing), then set them on the new job separately and
+    // report any it will not take. Anything else it refuses comes back with its own words.
+    const WEB_KEYS = ["salary_type", "job_type", "job_location_type"];
+    let webRefused: string | null = null;
+    if (!r.ok && r.status === 422 && WEB_KEYS.some((k) => fields[k] != null)) {
+      const bare = { ...fields }; for (const k of WEB_KEYS) delete bare[k];
+      const r2 = await crmForm("/jobs", bare);
+      if (r2.ok) { webRefused = r.text?.slice(0, 300) ?? "422"; r = r2; }
+    }
+    if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 300),
+      message: "RecruitCRM refused the job, so NOTHING WAS CREATED. Tell the recruiter that plainly and show detail word for word; never say the job was created. The same preview can be confirmed again once the cause is fixed." });
     const created = r.json?.data ?? r.json ?? {};
+    if (webRefused && created.slug) {
+      const webOnly: Record<string, any> = { updated_by: actor.id };
+      for (const k of WEB_KEYS) if (fields[k] != null) webOnly[k] = fields[k];
+      await crmForm(`/jobs/${created.slug}`, webOnly);
+    }
     const webNotApplied = created.slug ? await verifyJobWebsiteFields(created.slug, fields) : [];
     let cfResult: any = undefined;
     if (Object.keys(cfChanges).length && created.slug) {
@@ -3579,7 +3634,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       { headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` } }).catch(() => {});
     return toolText({ mode: "applied", job_id: created.id ?? null, job_title: fields.name, client: client.company_name, status: JOB_STATUS_NAME[fields.job_status],
       categories_and_industry: cfResult, website: { publishing: website.publishing, gaps: website.gaps },
-      not_applied: webNotApplied.length ? webNotApplied : undefined,
+      not_applied: webNotApplied.length ? webNotApplied : undefined, website_fields_refused_on_create: webRefused ?? undefined,
       note: webNotApplied.length ? `Job created, but ${webNotApplied.join(", ")} did not save in RecruitCRM: say so plainly and tell the recruiter to set it on the job in RecruitCRM. Do not retry another way.`
         : cfResult && !cfResult.ok ? "Job created, but the categories/industry did not save: say so, and offer update_job to retry." : "Job created in RecruitCRM and the mirror refreshed." });
   }
@@ -4073,7 +4128,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
         city: pick("city", c.city), country: pick("country", c.country), salary_min: Number(pick("min_annual_salary", c.min_annual_salary) ?? 0),
         salary_max: Number(pick("max_annual_salary", c.max_annual_salary) ?? 0), pay_type: Number(pick("salary_type", c.salary_type?.id ?? c.salary_type)) || null,
         job_type: pick("job_type", c.job_type) || null, workplace: String(pick("job_location_type", c.job_location_type) ?? "") || null,
-        categories: jofChanges[CF_JOB_CATEGORIES] ?? cfs.get(CF_JOB_CATEGORIES) ?? null, description: pick("job_description_text", c.job_description_text ?? "") });
+        categories: jofChanges[CF_JOB_CATEGORIES] ?? cfs.get(CF_JOB_CATEGORIES) ?? null, description: pick("job_description_text", c.job_description_text ?? ""),
+        currency: await currencyCode(pick("currency_id", c.currency_id)) });
       return toolText({ mode: "preview", action: "update_job",
         job: { job_id: job.recruitcrm_id, title: job.title, current_status: job.status },
         changes: Object.fromEntries(changing.map(([k, v]) => [
