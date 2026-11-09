@@ -55,4 +55,4 @@ Open as of 04/11/2026, tracked in [ROADMAP.MD](ROADMAP.MD):
 - The webhook secret travels in the callback URL (`?key=`), so it can appear in logs.
 - 64 deals in the mirror have no RecruitCRM id.
 
-**Related:** [README](README.md#security) · [CONTRIBUTING.md](CONTRIBUTING.md#data-safety) · [Architecture](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Architecture)
+**Related:** [README](README.md#security) · [CONTRIBUTING.md](CONTRIBUTING.md#data-safety) · [Architecture](https://octagon-kb.pages.dev/run/architecture/)
