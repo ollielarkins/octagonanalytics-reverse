@@ -34,10 +34,18 @@ const nm = (a: any, b: any) => ([a, b].filter(Boolean).join(" ").trim() || null)
 // contains the same conflict key twice ("cannot affect row a second time") and fails the WHOLE
 // page, not just the duplicate. That killed the candidate backfill at page ~253 of 518 on
 // 01/09/2026. Keep the last occurrence of each key.
+//
+// 09/11/2026: rows come back sorted by key. Every caller hands the result straight to a multi-row
+// upsert, and Postgres locks rows in the order the batch lists them. The incremental walk arrives
+// newest-first, the backfill in page order, apply_off_limit in slug order: two writers holding
+// overlapping candidates in different orders deadlocked (42 since 03/08/2026). One order for
+// every writer (ascending key; apply_off_limit locks by recruitcrm_id too, 0157) removes the cycle.
 function dedupeBy(rows: any[], keyOf: (r: any) => any) {
   const m = new Map<any, any>();
   for (const r of rows) { const k = keyOf(r); if (k != null) m.set(k, r); }
-  return [...m.values()];
+  return [...m.entries()]
+    .sort(([a], [b]) => (typeof a === "number" && typeof b === "number") ? a - b : String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0)
+    .map(([, r]) => r);
 }
 const byRecruitcrmId = (r: any) => r?.recruitcrm_id;
 
