@@ -9,7 +9,7 @@ metric once in SQL, and serves it to recruiters through Claude: a remote MCP con
 (`octagon-mcp`) answers questions, renders the dashboard and report widgets, and makes audited
 write-backs to RecruitCRM, while scheduled jobs send coach nudges and admin alerts to Slack. RecruitCRM stays the system of record; nothing is written to the mirror directly.
 
-**User and operator documentation lives in the [wiki](https://github.com/ollielarkins/octagonanalytics-reverse/wiki).**
+**User and operator documentation lives in the [knowledge base](https://octagon-kb.pages.dev)** (source in `site/`).
 This README covers the repository.
 
 On this page: [How it fits together](#how-it-fits-together) ·
@@ -19,12 +19,12 @@ On this page: [How it fits together](#how-it-fits-together) ·
 
 | I want to… | Go to |
 |---|---|
-| Use the platform as a recruiter | [Onboarding](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Onboarding) |
-| Find a command or a tool | [Commands](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Commands), [Tools Reference](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Tools-Reference) |
-| Know what a number means | [Metrics and Definitions](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Metrics-and-Definitions) |
-| Know where numbers are soft | [Data Caveats](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Data-Caveats) |
-| Understand the design | [Architecture](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Architecture), [`docs/DECISIONS.md`](docs/DECISIONS.md) |
-| Deploy, backfill, mint a token | [Operations Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook), [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Use the platform as a recruiter | [Onboarding](https://octagon-kb.pages.dev/use/getting-started/) |
+| Find a command or a tool | [Commands](https://octagon-kb.pages.dev/use/commands/), [Tools Reference](https://octagon-kb.pages.dev/run/tools/) |
+| Know what a number means | [Metrics and Definitions](https://octagon-kb.pages.dev/use/metrics/) |
+| Know where numbers are soft | [Data Caveats](https://octagon-kb.pages.dev/use/data-caveats/) |
+| Understand the design | [Architecture](https://octagon-kb.pages.dev/run/architecture/), [`docs/DECISIONS.md`](docs/DECISIONS.md) |
+| Deploy, backfill, mint a token | [Operations Runbook](https://octagon-kb.pages.dev/run/runbook/), [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Set up as an admin or developer | [ONBOARDING.md](ONBOARDING.md) |
 | Report a security problem | [SECURITY.md](SECURITY.md) |
 
@@ -73,18 +73,15 @@ flowchart LR
 | `rollout/` | Org instructions for claude.ai and recruiter templates |
 | `slack/` | The Octagon Coach Slack app manifest |
 | `plugins/` | Pointer only. The 83 slash commands live in [octagon-plugins](https://github.com/ollielarkins/octagon-plugins) |
-| `docs/wiki/` | Source of the GitHub wiki (a separate git repo; see below) |
+| `site/` | The knowledge base (Astro Starlight), deployed to [octagon-kb.pages.dev](https://octagon-kb.pages.dev) by `.github/workflows/docs.yml` |
 | `docs/DECISIONS.md` | Append-only design decision log |
 | `ROADMAP.MD`, `PROJBRIEF.MD` | Roadmap with current status; the original brief, kept as history |
 
 > [!IMPORTANT]
-> `docs/wiki/` is the source for the GitHub wiki, which is a **separate git repository**. Editing a
-> page in the GitHub UI does not update this repo, and pushing here does not update the wiki. Edit
-> here, then sync deliberately:
-> ```bash
-> git clone https://github.com/ollielarkins/octagonanalytics-reverse.wiki.git /tmp/wiki
-> cp docs/wiki/*.md /tmp/wiki/ && cd /tmp/wiki && git add -A && git commit && git push
-> ```
+> The knowledge base in `site/` replaces the GitHub wiki (retired 09/11/2026). Edit pages in
+> `site/src/content/docs/`; merging to `main` redeploys it. The Commands and Tools pages are
+> generated from source, so never edit them by hand. See
+> [Writing these docs](https://octagon-kb.pages.dev/run/writing-docs/).
 
 ---
 
@@ -193,7 +190,7 @@ Set in Supabase function secrets, never in the repo. `.gitignore` excludes `.env
 ## Operating it
 
 Full detail in the
-[Operations Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook).
+[Operations Runbook](https://octagon-kb.pages.dev/run/runbook/).
 Admins can check most of this from Claude with `/health`, `/tokens` and `/usage`.
 
 ```sql
@@ -219,7 +216,7 @@ bot). The coach DMs use the Octagon Coach app's bot token.
 ## Key findings
 
 Why the numbers are what they are. Fuller treatment in
-[Data Caveats](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Data-Caveats).
+[Data Caveats](https://octagon-kb.pages.dev/use/data-caveats/).
 
 1. **Funnel parity with RecruitCRM's own report is capped at about 0.4%, and the cause is theirs.**
    The residual is events the API returns and their report omits. The platform matches the API,
@@ -251,4 +248,4 @@ At 04/11/2026. The dated detail, including what is open, is at the top of [ROADM
 | Slack layer | Octagon Coach in shadow mode. Team Briefs app (briefs, queue DMs) removed 09/11/2026; `/queue` and `/exceptions` remain in Claude |
 | Hardening (M7) | Partial: audit fixes 29/10–03/11/2026 shipped; no CI; items open in the roadmap |
 
-**Related:** [Architecture](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Architecture) · [Operations Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook) · [CONTRIBUTING.md](CONTRIBUTING.md) · [ROADMAP.MD](ROADMAP.MD)
+**Related:** [Architecture](https://octagon-kb.pages.dev/run/architecture/) · [Operations Runbook](https://octagon-kb.pages.dev/run/runbook/) · [CONTRIBUTING.md](CONTRIBUTING.md) · [ROADMAP.MD](ROADMAP.MD)

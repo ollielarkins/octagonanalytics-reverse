@@ -162,7 +162,7 @@ content goes to Anthropic only when the recruiter asks for a draft, under the sa
 of their chat. Before more recruiters connect, a short DPIA entry should record the processing.
 
 **Status:** **Decided & built 13/10/2026** (octagon-mcp 3.46.0). Not live until the Microsoft 365 app
-registration and secrets are in place; see docs/wiki/Inbox.md.
+registration and secrets are in place; see [Your inbox](https://octagon-kb.pages.dev/use/inbox/).
 
 ---
 
@@ -219,7 +219,7 @@ gives `placed_value`.
 ## The daily action queue: ranked calls in Slack, drafting in your own Claude
 
 **Decision.** An 08:30 Slack DM per consultant lists up to 10 ranked calls (`action_queue()`, migration
-0115; thresholds in [Metrics](wiki/Metrics-and-Definitions.md#daily-action-queue)). The DM carries no
+0115; thresholds in [Metrics](https://octagon-kb.pages.dev/use/metrics/)). The DM carries no
 drafts: "prep my queue" in the consultant's own Claude writes the prep notes, chase and booking emails,
 Booleans and InMails. Each call has a Done button (`slack-actions`, 0118) that previews the note it
 will log in RecruitCRM, writes it as the consultant only on Confirm, and hides the item for a set

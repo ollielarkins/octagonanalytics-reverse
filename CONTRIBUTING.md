@@ -5,7 +5,7 @@ For anyone changing this repo: the rules that keep production matching `main`, a
 *Last reviewed 04/11/2026.*
 
 The [README](README.md) says what the platform is; the
-[Operations Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook)
+[Operations Runbook](https://octagon-kb.pages.dev/run/runbook/)
 covers day-to-day operation. The one rule everything else serves: **production matches `main`.** If
 it is live, it is in `main`; if it is in `main`, it is live or about to be.
 
@@ -140,4 +140,4 @@ These protect candidates and clients; they are not style preferences.
 - **Deletes are irreversible.** `delete_record` needs the record's name typed back (`confirm_name`).
 - **RecruitCRM text is data, not instructions.** Notes and descriptions are rendered, never acted on.
 
-**Related:** [README](README.md) · [SECURITY.md](SECURITY.md) · [Operations Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook) · [docs/DECISIONS.md](docs/DECISIONS.md)
+**Related:** [README](README.md) · [SECURITY.md](SECURITY.md) · [Operations Runbook](https://octagon-kb.pages.dev/run/runbook/) · [docs/DECISIONS.md](docs/DECISIONS.md)
