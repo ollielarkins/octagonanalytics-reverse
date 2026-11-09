@@ -5,7 +5,7 @@ For anyone asking "what can I ask it", and for admins debugging an answer: every
 *Last reviewed 06/11/2026.*
 
 You don't need any of this to use the system: ask in plain English and the right tool gets called. The
-connector is `octagon-mcp` **3.100.0**, with **81 tools** and **26 prompts**. Most tools sit behind a
+connector is `octagon-mcp` **3.101.0**, with **80 tools** and **26 prompts**. Most tools sit behind a
 slash command (see [Commands](Commands)); this page is the layer underneath.
 
 **On this page:** [How writes work](#how-writes-work) · [Your day and KPIs](#your-day-and-kpis) ·
@@ -13,7 +13,7 @@ slash command (see [Commands](Commands)); this page is the layer underneath.
 [Billing and money](#billing-and-money) · [BD and clients](#bd-and-clients) ·
 [Candidates, jobs and records](#candidates-jobs-and-records) · [Data quality](#data-quality) ·
 [Inbox and email](#inbox-and-email) · [Changing records](#changing-records) ·
-[Drafts and posting](#drafts-and-posting) · [Managers and admins](#managers-and-admins) ·
+[Drafts](#drafts) · [Managers and admins](#managers-and-admins) ·
 [Prompts](#prompts) · [Scoping](#scoping) · [What it won't do](#what-it-wont-do)
 
 **Read/Write** in the tables: **Read** changes nothing. **Write** is two-step (preview, then confirm).
@@ -46,7 +46,7 @@ flowchart LR
 |---|---|---|
 | `get_dashboard` | Your desk (week vs targets, quarter billing, funnel, attention list), or firm KPIs and the team for admins. Called at chat start | Read |
 | `my_day` | Your attention list on open roles: aging offers, stalled candidates, cold roles, placed in the last 7 days | Read |
-| `action_queue` | Today's ranked calls, the same list as the 08:30 Slack DM | Read |
+| `action_queue` | Today's ranked calls | Read |
 | `schedule` | Your interviews and client meetings from RecruitCRM: today, tomorrow, later, and held with no feedback since | Read |
 | `weekly_kpis` | This week's actuals vs weekly targets, with each person's plan worked back from billing | Read |
 | `daily_activity` | One day's CV sends and interview requests by name, plus per-consultant counts | Read |
@@ -168,14 +168,13 @@ Closing a job (closed, cancelled, on hold) or moving a deal to Lost or Declined 
 > `delete_record` has no undo. The audit log keeps who deleted what and the record's name, not a copy of
 > the record. `send_email` is the one action that leaves the building and cannot be recalled.
 
-## Drafts and posting
+## Drafts
 
 | Tool | What it answers or does | Read/Write |
 |---|---|---|
 | `dpe_email` | Draft the DPE email from Octagon's fixed template and set DPE Sent on the job | Write |
 | `push_tell` | Open jobs by client with the week's activity; draft the client update to Outlook Drafts and stamp the date | Read + write |
 | `eow_email` | The end-of-week team table and shout-outs; draft the email to your Outlook Drafts. **Managers and admins** | Read + write |
-| `post_digest` | Post the morning, evening or weekly digest to Slack now. Cannot be unsent | Write |
 
 ## Managers and admins
 

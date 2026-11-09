@@ -350,3 +350,20 @@ that is intended is for the business to confirm.
 
 **Status:** **Live 29/10/2026** (0133). Q4 billing dropped by the one deleted Won deal, and the
 dashboard's open pipeline fell to billing's figure.
+
+---
+
+## Team Briefs app removed
+
+**Decision.** The "(Claude) - Team Briefs" Slack app is gone, with everything only it used: the
+`daily-queue` function (08:30 queue DMs and the Monday manager exceptions DM), `slack-actions` (the
+queue's Done buttons), `post_digest()` and the `/digest` command, the #briefs posts, and the
+`digest_webhook_url`, `action_queue_pilot`, `action_queue_shadow`, `action_queue_shadow_email` and
+`manager_exceptions_emails` settings. `SLACK_BOT_TOKEN` and `SLACK_BRIEFS_SIGNING_SECRET` are no longer
+used. `/queue` and `/exceptions` stay in Claude, `action_queue_done` is kept, and `digest-email` still
+renders the digests as email.
+
+**Why.** Its scheduled sends stopped on 05/11/2026 (0150) when the Octagon Coach took over, and the
+owner deleted the app on 09/11/2026.
+
+**Status:** **Done 09/11/2026** (0158, octagon-mcp 3.101.0).

@@ -44,7 +44,7 @@ Deploy one function per command and **never pass `--no-verify-jwt`**: it overrid
 
 ## Migrations
 
-Sequential files in `supabase/migrations/` (0000 to 0150 as of 06/11/2026). Apply with the Supabase MCP `apply_migration` tool and **write the same SQL to the next numbered file** in the same change, so a replay reproduces the database.
+Sequential files in `supabase/migrations/` (0000 to 0158 as of 09/11/2026). Apply with the Supabase MCP `apply_migration` tool and **write the same SQL to the next numbered file** in the same change, so a replay reproduces the database.
 
 **Never run `supabase db push`.** The local file names do not match the versions recorded remotely, so the CLI would try to re-apply history.
 
@@ -58,14 +58,10 @@ All jobs are `pg_cron`, and `pg_cron` runs in UTC. Jobs that must land at a UK c
 
 | Job | UTC schedule | Lands at (UK) | What |
 |---|---|---|---|
-| `digest-slack-morning` | `30 6,7 * * 1-5` | 07:30 weekdays | Morning brief, via `post_digest_if_due('morning', 7)` |
-| `daily-action-queue` | `30 7,8 * * 1-5` | 08:30 weekdays | Action queue DMs (Mondays add the manager exceptions DM), via `action_queue_if_due(8)` |
-| `digest-slack-weekly` | `0 7,8 * * 1` | 08:00 Mondays | Weekly digest |
 | `coach-monday` | `45 7,8 * * 1` | 08:45 Mondays | Coach: the week's plan |
 | `coach-midday` | `30 11,12 * * 1-5` | 12:30 weekdays | Coach: today so far |
 | `coach-wrap` | `45 15,16 * * 1-5` | 16:45 weekdays | Coach: admin before home time, call tagging |
 | `weekly-usage-slack` | `0 15,16 * * 5` | 16:00 Fridays | Usage table, via `weekly_usage_post_if_due()` |
-| `digest-slack-evening` | `30 16,17 * * 1-5` | 17:30 weekdays | Day End digest |
 
 ### Sync and housekeeping (UTC)
 
@@ -92,7 +88,7 @@ All jobs are `pg_cron`, and `pg_cron` runs in UTC. Jobs that must land at a UK c
 | `meetings-quarter-refresh` | 06:10 | Meetings, this quarter and last |
 | `sync-health-digest` | 07:30 | Daily health summary. One UTC hour only, so 07:30 UK in winter, 08:30 in summer |
 
-`cron.job_run_details` is purged after 3 days, so a weekly job's last run is usually not in it. Check `sync_state` instead where the job records itself (`coach`, `action_queue`).
+`cron.job_run_details` is purged after 3 days, so a weekly job's last run is usually not in it. Check `sync_state` instead where the job records itself (`coach`).
 
 ## Sync health and alerts
 
@@ -120,7 +116,7 @@ Two failed or degraded runs in a row go critical whatever the age. "Degraded" (0
 select public.check_cron_manifest();
 ```
 
-`sync_health` shows whether feeds *ran*; this shows whether the jobs that run them *exist*, are active and are on the declared schedule. `cron_manifest` declares 26 jobs. On 04/11/2026 two live jobs are undeclared, `weekly-usage-slack` and `recruitcrm-assignment-sweep`, so their disappearance would not alert.
+`sync_health` shows whether feeds *ran*; this shows whether the jobs that run them *exist*, are active and are on the declared schedule. `cron_manifest` declares 25 jobs (09/11/2026). On 04/11/2026 two live jobs are undeclared, `weekly-usage-slack` and `recruitcrm-assignment-sweep`, so their disappearance would not alert.
 
 When an alert needs a fix, log it in #troubleshooting (see [The issue log](#the-issue-log)).
 
@@ -168,21 +164,11 @@ OAuth session rows (label `oauth-session`) are created when claude.ai exchanges 
 | App | Used for | Secrets and settings |
 |---|---|---|
 | analytics-admin bot | Sync and cron alerts only, into Oliver's DM | `alert_webhook_url` |
-| (Claude) - Team Briefs | Digests to #briefs by webhook; action queue DMs; queue Done buttons (`slack-actions`) | `digest_webhook_url`, `SLACK_BOT_TOKEN` (plain `xoxb-`), `SLACK_BRIEFS_SIGNING_SECRET` |
 | Octagon Coach | Coach DMs and buttons (`coach-dm`, `coach-actions`). DMs only, never channels | `COACH_BOT_TOKEN`, `COACH_SIGNING_SECRET`; manifest in `slack/octagon-coach-manifest.yml` |
 
-Both bot apps need scopes `chat:write`, `im:write`, `users:read`, `users:read.email`, Interactivity pointed at their function, and Socket Mode **off** (or Slack never calls the URL). Each consultant is found in Slack by their RecruitCRM email.
+The bot app (Octagon Coach) needs scopes `chat:write`, `im:write`, `users:read`, `users:read.email`, Interactivity pointed at `coach-actions`, and Socket Mode **off** (or Slack never calls the URL). Each consultant is found in Slack by their RecruitCRM email.
 
-**Action queue settings** (`app_settings`):
-
-| Key | Meaning |
-|---|---|
-| `action_queue_pilot` | RecruitCRM ids that get the DM. 04/11/2026: Adam Barnett, Bhavesh Patel, Keelan Riley, Will Drake |
-| `action_queue_shadow` | `true` sends every DM to `action_queue_shadow_email`, labelled. `false` since 26/10/2026 |
-| `manager_exceptions_emails` | Who gets the Monday exceptions DM. Team figures: never point it at a channel |
-| `exceptions_exclude_ids` | RecruitCRM ids left out of `team_exceptions` |
-
-Last run: `select last_run_at, last_status from sync_state where entity = 'action_queue'`.
+The "(Claude) - Team Briefs" app (digests to #briefs, the 08:30 queue DMs and the Monday exceptions DM) was deleted on 09/11/2026 (0158). `/queue` and `/exceptions` remain in Claude. `exceptions_exclude_ids` in `app_settings` lists the RecruitCRM ids left out of `team_exceptions`.
 
 **Friday usage table.** `weekly_usage_post()` posts only if `usage_webhook_url` is set in `app_settings`. As of 04/11/2026 it is not set, so the Friday table does not post.
 
@@ -193,7 +179,7 @@ The Octagon Coach (0129, extended in 0147 and 0148) is rule-based: `coach_nudges
 | Key or object | Meaning |
 |---|---|
 | `coach_pilot` | RecruitCRM ids that get the coach. 04/11/2026: Adam Barnett, Bhavesh Patel, Keelan Riley, Will Drake |
-| `coach_shadow` | `true` sends every coach DM to `coach_shadow_email` instead, labelled with whose it is. **On** as of 04/11/2026 |
+| `coach_shadow` | `true` sends every coach DM to `coach_shadow_email` instead, labelled with whose it is. **Off** since 05/11/2026 (0150) |
 | `coach_shadow_email` | Where shadow DMs go (Oliver) |
 | `coach_log` | Every DM sent and the suggestions in it |
 | `coach_feedback`, `coach_snooze`, `coach_pause` | Done and Snooze presses; Pause, Mute and Away dates |

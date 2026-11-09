@@ -4,7 +4,7 @@ For recruiters and managers: every slash command, grouped by what you are trying
 
 *Last reviewed 06/11/2026.*
 
-83 commands in four plugins. Type `/` in Cowork or a chat to see them, or ask in plain English: every
+82 commands in four plugins. Type `/` in Cowork or a chat to see them, or ask in plain English: every
 command is a shortcut for something you can phrase yourself. Add context after a command to narrow it,
 for example `/find a candidate that hasn't been contacted this week` or `/funnel Q2`.
 
@@ -16,7 +16,7 @@ for example `/find a candidate that hasn't been contacted this week` or `/funnel
 [Where they live](#where-they-live)
 
 > [!IMPORTANT]
-> **Writes?** **Yes** means the command changes RecruitCRM (or Outlook Drafts, or Slack). Every one
+> **Writes?** **Yes** means the command changes RecruitCRM (or Outlook Drafts). Every one
 > shows a preview first and applies only when you press Confirm on the card or say yes. **Optional**
 > means it reads by default and offers a previewed change at the end. **No** means read-only.
 
@@ -34,13 +34,12 @@ flowchart LR
 | `/dashboard` | The live dashboard inline: your desk, or firm KPIs and the team for admins. Scoped views in quotes, e.g. `/dashboard "cold jobs"` | No |
 | `/kpi` | Headline KPIs only: placements, open jobs, pipeline value, firm totals | No |
 | `/myday` | Your standup: interviews to prep for, feedback due, aging offers, stalled candidates, cold roles | Optional |
-| `/queue` | Your ranked calls for today (the same list as the 08:30 Slack DM), with the admin for each one drafted for you to check | Optional |
+| `/queue` | Your ranked calls for today, with the admin for each one drafted for you to check | Optional |
 | `/dayplan` | Your day on Octagon's standard structure, with your real priorities slotted in | No |
 | `/week` | This week's actuals against the weekly targets for every KPI, with the gap named | No |
 | `/eod` | Today's activity on all five weekly KPIs in one table, against where the week needs to be | No |
 | `/yesterday` | Yesterday's CV sends, interview requests, interviews, BD calls, client calls and placements, per consultant | No |
 | `/dailystats` | Yesterday's CVs sent and interview requests by name: candidate, company, job, current stage, who did it | No |
-| `/digest` | Post the morning brief, day end or weekly digest to Slack now, e.g. before a meeting. Cannot be unsent | Yes |
 
 ## Candidates
 
@@ -175,17 +174,15 @@ else's. An admin login with no desk of its own gets the whole team's attention l
 your own in a minute; read [Data Caveats](Data-Caveats#call-categorisation) before drawing anything from
 `/week`, `/eod` or `/bd`.
 
-**The 08:30 Slack DM and `/queue` are the same list.** Each item in the DM has a Done button that
-previews the note it will log and writes it only when you confirm. The drafts (prep notes, chase and
-booking emails, Booleans, InMails) come from `/queue` in your own Claude.
+**`/queue` drafts the admin for each call** (prep notes, chase and booking emails, Booleans,
+InMails) in your own Claude, for you to check.
 
 **Closing a role or losing a deal asks why.** `/editjob` and `/won` offer a reason list when a job
 goes to closed, cancelled or on hold, or a deal to Lost or Declined. Optional, but it is the only way
 "why do we lose" becomes answerable.
 
-**Outward-facing commands.** `/digest` posts into a Slack channel other people read. `/email` cannot be
-recalled and never goes to someone who has opted out. `/pushtell`, `/eow` and `/visitplan` only ever
-save drafts.
+**Outward-facing commands.** `/email` cannot be recalled and never goes to someone who has opted out.
+`/pushtell`, `/eow` and `/visitplan` only ever save drafts.
 
 > [!CAUTION]
 > `/delete` is permanent. There is no undo and no restore.
@@ -197,8 +194,8 @@ not in this one. Each is `plugins/<plugin>/skills/<command>/SKILL.md`.
 
 | Plugin | Version | Commands |
 |---|---|---|
-| `octagon-reporting` | 0.2.17 | 47: numbers, pipeline, candidates, content, your day |
-| `octagon-actions` | 0.2.14 | 24: everything that changes RecruitCRM, plus `/digest` and `/formattedcv` |
+| `octagon-reporting` | 0.2.18 | 47: numbers, pipeline, candidates, content, your day |
+| `octagon-actions` | 0.2.15 | 23: everything that changes RecruitCRM, plus `/formattedcv` |
 | `octagon-admin` | 0.2.2 | 10: managers and admins |
 | `octagon-dashboard` | 0.5.0 | 2: `/dashboard`, `/kpi` |
 

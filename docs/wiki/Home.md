@@ -15,7 +15,7 @@ flowchart LR
   RC[RecruitCRM] -- "sync every 15 min,<br/>stage history every minute,<br/>webhooks" --> DB[(Supabase mirror<br/>+ metrics layer)]
   DB --> MCP[octagon-mcp connector]
   MCP --> CL[Claude: chat and Cowork]
-  DB --> SL[Slack: digests, 08:30 queue, coach]
+  DB --> SL[Slack: coach DMs]
   CL -- "writes: preview, then confirm" --> MCP
   MCP -- "RecruitCRM API" --> RC
 ```
@@ -41,7 +41,7 @@ flowchart LR
 | Page | For |
 |---|---|
 | **[Onboarding](Onboarding)** | Getting connected and through your first week. Start here if you're a recruiter. |
-| **[Commands](Commands)** | All 83 slash commands, grouped by what you are trying to do. |
+| **[Commands](Commands)** | All 82 slash commands, grouped by what you are trying to do. |
 | **[Tools Reference](Tools-Reference)** | Every question the system can answer, and how to ask it. |
 | **[Inbox](Inbox)** | Reading your Outlook inbox from Claude and drafting replies. |
 | **[Metrics and Definitions](Metrics-and-Definitions)** | What each number actually means. Read before quoting anything. |
@@ -58,8 +58,8 @@ flowchart LR
   suggestions, Done and Snooze buttons, one-press call tagging at 16:45 and an Away date. Monday names
   your biggest offers; Friday compares the week with the last. Still in shadow mode: previews go to
   Oliver only.
-- **The 08:30 action queue**: a ranked Slack DM of today's calls with Done buttons (pilot of four).
-  `/queue` or "prep my queue" drafts the admin for each one.
+- **The action queue**: `/queue` or "prep my queue" ranks today's calls and drafts the admin for
+  each one.
 - **"Your day"** now suggests one command picked from your own data.
 
 **Finding work**
@@ -98,10 +98,10 @@ and the commit log.
 
 | | |
 |---|---|
-| Connector | octagon-mcp 3.100.0, 81 tools and 26 prompts |
-| Commands | 82, in four plugins: octagon-reporting 0.2.15, octagon-actions 0.2.14, octagon-dashboard 0.5.0, octagon-admin 0.2.2 |
-| Database | Supabase Postgres 17, 148 migrations, 26 scheduled jobs watched by a cron manifest |
-| Slack | Morning brief 07:30, Day End 17:30, weekly Monday 08:00; 08:30 queue DM; coach DMs (shadow) |
+| Connector | octagon-mcp 3.101.0, 80 tools and 26 prompts |
+| Commands | 82, in four plugins: octagon-reporting 0.2.18, octagon-actions 0.2.15, octagon-dashboard 0.5.0, octagon-admin 0.2.2 |
+| Database | Supabase Postgres 17, 158 migrations, 25 scheduled jobs watched by a cron manifest |
+| Slack | Coach DMs 12:30 and 16:45 weekdays, Monday 08:45 (shadow) |
 | Access | 19 active tokens held by 10 people |
 
 | Mirrored from RecruitCRM | Records |

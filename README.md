@@ -7,8 +7,7 @@ For a developer or admin working on the platform: what it is, how the repo is la
 Octagon Analytics keeps a live mirror of the firm's RecruitCRM data in Supabase, defines every
 metric once in SQL, and serves it to recruiters through Claude: a remote MCP connector
 (`octagon-mcp`) answers questions, renders the dashboard and report widgets, and makes audited
-write-backs to RecruitCRM, while scheduled jobs post briefs, the action queue and coach nudges to
-Slack. RecruitCRM stays the system of record; nothing is written to the mirror directly.
+write-backs to RecruitCRM, while scheduled jobs send coach nudges and admin alerts to Slack. RecruitCRM stays the system of record; nothing is written to the mirror directly.
 
 **User and operator documentation lives in the [wiki](https://github.com/ollielarkins/octagonanalytics-reverse/wiki).**
 This README covers the repository.
@@ -38,7 +37,7 @@ flowchart LR
   RC[RecruitCRM<br/>system of record] -- "sync every 1-15 min,<br/>webhooks, hourly reconcile" --> DB[(Supabase Postgres<br/>mirror)]
   DB --> SL[Semantic layer<br/>SQL views + RPCs]
   SL --> MCP[octagon-mcp<br/>connector + widgets]
-  SL --> SLK[Slack jobs<br/>briefs, queue, coach]
+  SL --> SLK[Slack jobs<br/>coach, admin alerts]
   MCP <--> C[Claude<br/>recruiters]
   MCP -- "preview, confirm, audit" --> RC
 ```
@@ -56,15 +55,13 @@ flowchart LR
 
 | Path | What is there |
 |---|---|
-| `supabase/migrations/` | Schema, semantic layer, RPCs, RLS and cron, numbered `0001`–`0150`. Next is `0151` |
-| `supabase/functions/octagon-mcp/` | The MCP connector: 81 tools and 26 prompts, the OAuth bridge, MCP Apps widgets (`widgets.ts`, `ext_apps_bundle.ts`). Version 3.100.0 |
+| `supabase/migrations/` | Schema, semantic layer, RPCs, RLS and cron, numbered `0001`–`0158`. Next is `0159` |
+| `supabase/functions/octagon-mcp/` | The MCP connector: 80 tools and 26 prompts, the OAuth bridge, MCP Apps widgets (`widgets.ts`, `ext_apps_bundle.ts`). Version 3.101.0 |
 | `supabase/functions/recruitcrm-sync/` | The mirror: backfill, incremental, reconcile, history, notes, off-limit, meetings, assignment sweep |
 | `supabase/functions/recruitcrm-webhook/` | Near-live change trigger from RecruitCRM; tombstones on `*.deleted` events |
-| `supabase/functions/daily-queue/` | 08:30 action queue DMs and the Monday manager exceptions DM |
-| `supabase/functions/slack-actions/` | Slack buttons on the queue DMs (Team Briefs app); writes back on Confirm |
 | `supabase/functions/coach-dm/`, `coach-actions/` | The Octagon Coach DMs and their buttons (separate Slack app) |
 | `supabase/functions/inbox-sync/` | Polls connected Outlook inboxes through Microsoft Graph |
-| `supabase/functions/digest-email/` | Builds the scheduled Slack briefs |
+| `supabase/functions/digest-email/` | Renders the morning, evening and weekly digests as email. Not scheduled by any cron job |
 | `supabase/functions/slack-command/` | Slack `/dashboard` and `/kpis` |
 | `supabase/functions/feedback/` | Issue and feature capture from the connect page |
 | `supabase/functions/_shared/` | `caller.ts` (who may call a locked function), `graph.ts` (Microsoft Graph) |
@@ -141,8 +138,8 @@ the EU), Postgres 17.
 | `octagon-mcp` | false | Per-user tokens in `mcp_tokens` (OAuth or bearer). The connector |
 | `recruitcrm-sync` | true | Locked: service role or `CRON_SECRET`. The mirror |
 | `recruitcrm-webhook` | false | Shared `?key=` secret. Near-live change trigger |
-| `daily-queue`, `coach-dm`, `digest-email`, `inbox-sync` | true | Locked: service role or `CRON_SECRET`. Driven by `pg_cron` |
-| `slack-actions`, `coach-actions`, `slack-command` | false | Slack request signature, each with its own app's signing secret |
+| `coach-dm`, `digest-email`, `inbox-sync` | true | Locked: service role or `CRON_SECRET`. Driven by `pg_cron` |
+| `coach-actions`, `slack-command` | false | Slack request signature, each with its own app's signing secret |
 | `feedback` | false | Public form: field validation, length cap, honeypot, per-IP rate limit. Stores submissions, serves no data |
 | `dashboard`, `dashboard-data` | false | Retired 03/11/2026. Return 410 Gone and no data |
 | `recruitcrm-probe`, `recruitcrm-discover` | true | Throwaway probes |
@@ -161,11 +158,8 @@ they survive the clock change.
 | Every 15 min | Incremental sync of all entities; notes re-walk |
 | Hourly | Reconcile clients :05, jobs :12, deals :18; off-limit refresh :25; assignment sweep :40 |
 | Daily | Reconcile consultants 03:00 and contacts 03:20; inbox 30-day purge 03:20; meetings refresh 06:10; housekeeping purges |
-| 07:30 weekdays | Morning brief to Slack; sync health digest to the admin bot |
-| 08:00 Mondays | Week Ahead brief |
-| 08:30 weekdays | Action queue DMs (pilot); Mondays also the manager exceptions DM |
+| 07:30 daily | Sync health digest to the admin bot |
 | 12:30, 16:45 weekdays; 08:45 Mondays | Octagon Coach DMs (shadow mode) |
-| 17:30 weekdays | Day End brief |
 | Fridays | Weekly usage table |
 
 Add every new permanent job to `cron_manifest` in the same migration. As of 04/11/2026
@@ -186,11 +180,10 @@ Set in Supabase function secrets, never in the repo. `.gitignore` excludes `.env
 
 | Secret | Used by |
 |---|---|
-| `RECRUIT_CRM_API_TOKEN` | `recruitcrm-sync`, `octagon-mcp`, `slack-actions`, `coach-actions` |
+| `RECRUIT_CRM_API_TOKEN` | `recruitcrm-sync`, `octagon-mcp`, `coach-actions` |
 | `CRON_SECRET` | Locked functions, via `_shared/caller.ts`; `pg_cron` sends it from Vault (0132) |
 | `WEBHOOK_SECRET` | `recruitcrm-webhook`; `octagon-mcp` when it creates subscriptions |
 | `SLACK_SIGNING_SECRET` | `slack-command` |
-| `SLACK_BOT_TOKEN`, `SLACK_BRIEFS_SIGNING_SECRET` | `daily-queue`, `slack-actions` (Team Briefs app) |
 | `COACH_BOT_TOKEN`, `COACH_SIGNING_SECRET` | `coach-dm`, `coach-actions` (Octagon Coach app) |
 | `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` | `inbox-sync`, `octagon-mcp` (Microsoft Graph) |
 | `RESEND_API_KEY`, `DIGEST_FROM`, `FEEDBACK_FROM`, `FEEDBACK_TO` | `digest-email`, `feedback` |
@@ -218,8 +211,8 @@ values (encode(digest('<plaintext>','sha256'),'hex'), <recruitcrm_id>, 'Name (Re
 Revoke with `/tokens` (preview, then confirm). Leavers are revoked automatically when RecruitCRM
 marks them inactive (0136).
 
-Slack webhooks live in `app_settings`: `alert_webhook_url` (sync alerts only, the admin bot) and
-`digest_webhook_url` (the briefs, #briefs). The queue and coach DMs use their apps' bot tokens.
+The Slack alert webhook lives in `app_settings`: `alert_webhook_url` (sync alerts only, the admin
+bot). The coach DMs use the Octagon Coach app's bot token.
 
 ---
 
@@ -254,8 +247,8 @@ At 04/11/2026. The dated detail, including what is open, is at the top of [ROADM
 |---|---|
 | Data model, sync, semantic layer (M0–M3) | Done; contacts mirrored since 03/11/2026 |
 | Dashboard (M4) | Done; in the connector's `get_dashboard` widget since 20/10/2026 |
-| Claude query and action layers (M5, M6) | Done: 81 tools, 26 prompts, 83 commands, live audited writes since 12/08/2026 |
-| Slack layer | Briefs live; action queue live to a four-person pilot; Octagon Coach in shadow mode |
+| Claude query and action layers (M5, M6) | Done: 80 tools, 26 prompts, 82 commands, live audited writes since 12/08/2026 |
+| Slack layer | Octagon Coach in shadow mode. Team Briefs app (briefs, queue DMs) removed 09/11/2026; `/queue` and `/exceptions` remain in Claude |
 | Hardening (M7) | Partial: audit fixes 29/10–03/11/2026 shipped; no CI; items open in the roadmap |
 
 **Related:** [Architecture](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Architecture) · [Operations Runbook](https://github.com/ollielarkins/octagonanalytics-reverse/wiki/Operations-Runbook) · [CONTRIBUTING.md](CONTRIBUTING.md) · [ROADMAP.MD](ROADMAP.MD)

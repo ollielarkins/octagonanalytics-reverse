@@ -22,10 +22,8 @@ flowchart LR
   FN --> MCP[octagon-mcp connector]
   MCP --> CL[Claude]
   MCP -->|confirmed writes| RC
-  FN -->|digests, SQL webhook| SL[Slack]
-  FN --> DQ[daily-queue] --> SL
-  FN --> CD[coach-dm] --> SL
-  SL -->|button presses| SA[slack-actions / coach-actions]
+  FN --> CD[coach-dm] --> SL[Slack]
+  SL -->|button presses| SA[coach-actions]
   SA -->|confirmed writes| RC
 ```
 
@@ -41,17 +39,15 @@ There is no AI on the server. Every piece of drafting happens in the person's ow
 
 | Function | What it does | How it is protected |
 |---|---|---|
-| `octagon-mcp` | The connector: a remote MCP server (streamable HTTP), version 3.100.0, 81 tools and 26 prompts. Reads the metrics layer, writes to RecruitCRM on confirmation, serves the inline widgets | Open (`verify_jwt = false`). Every tool call authenticates a per-user Octagon token or OAuth session token against `mcp_tokens` |
+| `octagon-mcp` | The connector: a remote MCP server (streamable HTTP), version 3.101.0, 80 tools and 26 prompts. Reads the metrics layer, writes to RecruitCRM on confirmation, serves the inline widgets | Open (`verify_jwt = false`). Every tool call authenticates a per-user Octagon token or OAuth session token against `mcp_tokens` |
 | `recruitcrm-sync` | The mirror. Modes: `incremental`, `history_recent`, `notes_recent`, `reconcile`, `offlimit`, `assignment_sweep`, `meetings_quarter`, and per-entity backfill | Locked: JWT plus `trustedCaller()`. Holds the RecruitCRM API token |
 | `recruitcrm-webhook` | Receives RecruitCRM's change notifications, logs them, tombstones deletions and fires an incremental sync for the entity | Open. Requires the shared `?key=` secret (`WEBHOOK_SECRET`) |
 | `inbox-sync` | Polls connected Outlook inboxes through Microsoft Graph every 5 minutes. Stores envelopes only (sender, subject, time, thread, category), never bodies | Locked: JWT plus `trustedCaller()`. Holds the Graph app secret |
-| `daily-queue` | The 08:30 action queue DMs and the Monday manager exceptions DM, from the Team Briefs bot | Locked: JWT plus `trustedCaller()`. Holds `SLACK_BOT_TOKEN` |
 | `coach-dm` | The Octagon Coach DMs at 12:30, 16:45 and Monday 08:45 | Locked: JWT plus `trustedCaller()`. Holds `COACH_BOT_TOKEN` |
 | `coach-actions` | The coach's buttons: Done, Snooze, Pause, Mute, Away date, and one-press call tagging (the only one that writes to RecruitCRM) | Open. Every request must carry a valid Slack signature (`COACH_SIGNING_SECRET`) |
-| `slack-actions` | The action queue's Done buttons: opens a preview, writes the note to RecruitCRM as the consultant on Confirm | Open. Every request must carry a valid Slack signature (`SLACK_BRIEFS_SIGNING_SECRET`) |
 | `slack-command` | Slack slash commands `/dashboard` and `/kpis` | Open. Verifies Slack's signature (`SLACK_SIGNING_SECRET`) before anything else |
 | `feedback` | The issue and feedback box on the connect page | Open, by necessity. Field validation, a length cap, a honeypot and a per-IP rate limit |
-| `digest-email` | Renders the digests as email. Deployed, but its schedules were unscheduled in 0073 when the digests moved to Slack | Locked: JWT plus `trustedCaller()` |
+| `digest-email` | Renders the morning, evening and weekly digests as email. Deployed, but not scheduled by any cron job | Locked: JWT plus `trustedCaller()` |
 | `recruitcrm-probe` | Read-only API shape probe. Temporary | Locked: JWT plus `trustedCaller()` |
 
 ### Retired
@@ -62,6 +58,7 @@ There is no AI on the server. Every piece of drafting happens in the person's ow
 | `dashboard-data` | 410 Gone, no data, since 03/11/2026. Same |
 | `storage-upload` | Retired. No source in the repo; `verify_jwt = true` |
 | `recruitcrm-discover` | 410 Gone stub, locked. Unused |
+| `daily-queue`, `slack-actions` | Removed 09/11/2026 with the "(Claude) - Team Briefs" Slack app (0158) |
 
 ## What is mirrored
 
@@ -154,7 +151,7 @@ The Slack buttons follow the same rule: the message is the preview and the press
 | OAuth bridge | claude.ai needs OAuth, so the connect page exchanges a pasted Octagon token for an OAuth session token with the same rights (PKCE S256 required). Redirects are allowed only to claude.ai and claude.com's callback URLs |
 | Leaver auto-revoke | When a consultant is marked inactive or deleted, a trigger (0136) switches off all their tokens, including OAuth sessions, and stops their inbox being polled, with an `audit_log` row. Admin tokens are never touched |
 | `CRON_SECRET` | Locked functions accept only the service-role key or `x-octagon-cron` = `CRON_SECRET`. `pg_cron` sends it through `public.cron_headers()`, which reads it from Vault. Fails closed if unset |
-| Slack signatures | `coach-actions`, `slack-actions` and `slack-command` reject any request without a valid Slack signature for their own app |
+| Slack signatures | `coach-actions` and `slack-command` reject any request without a valid Slack signature for their own app |
 | Webhook secret | `recruitcrm-webhook` requires its `?key=` secret |
 | Row-level security | Internal tables such as `mcp_card_previews` and `mcp_card_confirms` deny `anon` and `authenticated` outright |
 | No PII in the mirror where avoidable | No contact emails or phones, no call notes, no email bodies |

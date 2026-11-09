@@ -309,7 +309,7 @@ var T={update_hiring_stage:['Move stage','Move stage'],assign_candidate:['Assign
 add_note:['Add note','Add note'],create_candidate:['New candidate','Create candidate'],update_candidate:['Edit candidate','Save changes'],
 create_job:['New job','Create job'],update_job:['Edit job','Save changes'],handover:['Hand over desk','Move jobs'],create_deal:['New deal','Create deal'],update_deal:['Edit deal','Save changes'],
 log_activity:['Log activity','Log it'],manage_client:['Client record','Save'],pitch_candidate:['Record pitch','Record pitch'],
-job_dpe:['Record DPE','Record DPE'],post_digest:['Post digest','Post to Slack'],delete_record:['Delete record',''],
+job_dpe:['Record DPE','Record DPE'],delete_record:['Delete record',''],
 send_email:['Email','Save draft'],push_tell:['Push & Tell email','Save to Outlook Drafts'],eow_email:['End-of-week email','Save to Outlook Drafts'],off_limit:['Off-limit status','Apply'],hotlist:['Hotlist','Apply'],inbox:['Inbox','Apply'],manage_tokens:['Revoke access','Revoke'],webhook_subscriptions:['Webhook','Apply'],client_status:['Change status','Apply changes'],draft_reply:['Reply draft','Save to Outlook Drafts'],dpe_email:['DPE email','Save to Outlook Drafts']};
 var HIDE=/^(mode|action|instruction|acting_as|preview|_card|card_note|carried_forward|untouched|what_happens|reason_prompt|note|opted_out_check|changing|identifier|deal_id|job_id|target_type)$|(_slug|^slug|status_id|stage_id)$/;
 var MONEY=/(^|_)(value|fee|salary|amount|salary_min|salary_max)$/;
@@ -348,7 +348,6 @@ if(t==='send_email'){if(d.action==='send_email'){label='Save as draft instead';h
 if(t==='update_deal'&&d.after&&String(d.after.stage||'').toLowerCase()==='won')label='Mark as Won';
 if(t==='draft_reply'||t==='dpe_email'||t==='push_tell'||t==='eow_email')hint='Saved as a draft. Nothing is sent';
 if(t==='manage_tokens')hint='Switches their connector access off';
-if(t==='post_digest')hint='Posts to Slack and cannot be unsent';
 return '<div class="foot"><span class="hint">'+hint+'</span><button class="btn btn-g" data-act="cancel">Cancel</button><button class="btn btn-p" data-act="'+(t==='send_email'?'draft':'confirm')+'">'+esc(label)+'</button></div>'}
 window.OCT={name:'octagon-confirm',title:'Octagon',full:false,
 accept:function(d){return !!(d&&d._card)},
@@ -368,7 +367,7 @@ api.app.callServerTool({name:c.tool,arguments:args}).then(function(r){var sc=r&&
 if(!res&&txt){try{res=JSON.parse(txt)}catch(e){res={message:txt}}}
 var err=r&&r.isError||(res&&res.error);
 if(err){c.state='fail';c.fail_msg=(res&&(res.message||res.error))||'That did not go through.';api.set(d);tell('The recruiter pressed confirm on the '+c.tool+' preview card, but it failed: '+JSON.stringify(res||txt).slice(0,1200)+'. Nothing was applied.');return}
-c.state='done';c.done_msg=name==='draft'?'Draft saved. Nothing was sent.':(c.tool==='post_digest'?'Posted to Slack.':(['draft_reply','dpe_email','push_tell','eow_email'].indexOf(c.tool)>=0)?'Saved to your Outlook Drafts.':'Done. Applied in RecruitCRM.');api.set(d);
+c.state='done';c.done_msg=name==='draft'?'Draft saved. Nothing was sent.':((['draft_reply','dpe_email','push_tell','eow_email'].indexOf(c.tool)>=0)?'Saved to your Outlook Drafts.':'Done. Applied in RecruitCRM.');api.set(d);
 tell('The recruiter confirmed the '+c.tool+' change with the preview card button and it has ALREADY BEEN APPLIED'+(name==='draft'?' (saved as a draft, not sent)':'')+'. Result: '+JSON.stringify(res).slice(0,1500)+'. Do not call '+c.tool+' with confirm=true again for this change.')})
 .catch(function(e){c.state='fail';c.fail_msg='Could not reach the connector. Nothing was changed.';api.set(d)})}};
 // DPE scoring screen (job_dpe): the consultant picks each score; the card shows the live total and
