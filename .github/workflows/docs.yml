@@ -1,0 +1,62 @@
+# Builds the knowledge base in site/ and deploys it to Cloudflare Pages (octagon-kb).
+# Public, no login, kept out of search engines (noindex + robots.txt): https://octagon-kb.pages.dev
+#
+# Secrets:
+#   CLOUDFLARE_API_TOKEN   token with Account > Cloudflare Pages > Edit
+#   PLUGINS_REPO_TOKEN     read-only token for ollielarkins/octagon-plugins (private),
+#                          which the Commands page is generated from
+# Variables:
+#   CLOUDFLARE_ACCOUNT_ID
+
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'supabase/functions/octagon-mcp/index.ts'
+      - 'supabase/migrations/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: docs
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out octagon-plugins
+        uses: actions/checkout@v4
+        with:
+          repository: ollielarkins/octagon-plugins
+          token: ${{ secrets.PLUGINS_REPO_TOKEN }}
+          path: octagon-plugins
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Build
+        working-directory: site
+        env:
+          OCTAGON_PLUGINS_DIR: ${{ github.workspace }}/octagon-plugins/plugins
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site/dist --project-name=octagon-kb --branch=main --commit-dirty=true

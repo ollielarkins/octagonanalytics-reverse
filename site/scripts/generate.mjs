@@ -73,6 +73,8 @@ const commands = [];
 const pluginVersions = {};
 
 if (!existsSync(pluginsDir)) {
+  // In CI an empty Commands page would ship silently, so fail the build instead.
+  if (process.env.CI) throw new Error(`octagon-plugins not found at ${pluginsDir}`);
   warn(`octagon-plugins not found at ${pluginsDir}; Commands will be empty. Set OCTAGON_PLUGINS_DIR.`);
 } else {
   for (const plugin of readdirSync(pluginsDir)) {
