@@ -7,6 +7,7 @@ import mermaid from 'astro-mermaid';
 //   use/  for recruiters and managers: how to use it and how far to trust the numbers
 //   run/  for admins and developers: how it is built, secured and operated
 export default defineConfig({
+	site: 'https://docs.octagongroup.co.uk',
 	integrations: [
 		// Must come before starlight so ```mermaid blocks are claimed first.
 		mermaid({ theme: 'base', autoTheme: true }),

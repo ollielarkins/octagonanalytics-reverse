@@ -14,7 +14,7 @@ every `dev` and `build`. It expects `octagon-plugins` checked out next to this r
 
 How the site is organised and the house style: `src/content/docs/run/writing-docs.mdx`.
 
-Hosted on Cloudflare Pages at https://octagon-kb.pages.dev, deployed by
+Hosted on Cloudflare Pages at https://docs.octagongroup.co.uk, deployed by
 `.github/workflows/docs.yml` on every push to `main` that touches it. There is no login (the repo
 is public too), but every page is `noindex` and `robots.txt` disallows crawling, so it stays out
 of search results. Never put candidate names, secrets or keys in a page.

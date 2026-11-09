@@ -6,7 +6,7 @@ For an admin rolling Octagon Analytics out, or a developer about to change it: w
 
 > [!NOTE]
 > **Recruiters:** your guide is the knowledge base's
-> [Onboarding](https://octagon-kb.pages.dev/use/getting-started/) page
+> [Onboarding](https://docs.octagongroup.co.uk/use/getting-started/) page
 > (getting connected, what to trust, your first week). This file does not repeat it.
 
 ## What you are setting up
@@ -43,7 +43,7 @@ Do these once, in the claude.ai Team admin console.
    The connector also enforces this: write tools need `can_write` on the token, and admin tools
    refuse anyone without admin (or, for the usage views, usage-viewer) rights.
 4. **Tokens.** Mint one per person (SQL in the [README](README.md#operating-it) and the
-   [Runbook](https://octagon-kb.pages.dev/run/runbook/)).
+   [Runbook](https://docs.octagongroup.co.uk/run/runbook/)).
    The token maps to the person's RecruitCRM user, so their desk is scoped to them and their changes
    are attributed to them in RecruitCRM. Set `can_write`, `is_admin` and `can_view_usage` (team usage
    views without full admin) deliberately. Hand the plaintext over once; only its hash is stored.
@@ -92,10 +92,10 @@ RecruitCRM marks them inactive.
 | Need | Go to |
 |---|---|
 | Repo layout, deploy steps, secrets | [README](README.md) |
-| Day-to-day operation, backfills, incidents | [Operations Runbook](https://octagon-kb.pages.dev/run/runbook/) |
-| How the parts connect | [Architecture](https://octagon-kb.pages.dev/run/architecture/) |
-| Every tool and command | [Tools Reference](https://octagon-kb.pages.dev/run/tools/), [Commands](https://octagon-kb.pages.dev/use/commands/) |
-| What each number means | [Metrics and Definitions](https://octagon-kb.pages.dev/use/metrics/) |
+| Day-to-day operation, backfills, incidents | [Operations Runbook](https://docs.octagongroup.co.uk/run/runbook/) |
+| How the parts connect | [Architecture](https://docs.octagongroup.co.uk/run/architecture/) |
+| Every tool and command | [Tools Reference](https://docs.octagongroup.co.uk/run/tools/), [Commands](https://docs.octagongroup.co.uk/use/commands/) |
+| What each number means | [Metrics and Definitions](https://docs.octagongroup.co.uk/use/metrics/) |
 | What is done and open | [ROADMAP.MD](ROADMAP.MD) |
 
-**Related:** [README](README.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [Getting started](https://octagon-kb.pages.dev/use/getting-started/) · [Operations Runbook](https://octagon-kb.pages.dev/run/runbook/)
+**Related:** [README](README.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [Getting started](https://docs.octagongroup.co.uk/use/getting-started/) · [Operations Runbook](https://docs.octagongroup.co.uk/run/runbook/)
