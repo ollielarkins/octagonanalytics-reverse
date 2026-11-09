@@ -1,5 +1,5 @@
 # Builds the knowledge base in site/ and deploys it to Cloudflare Pages (octagon-kb).
-# The site sits behind Cloudflare Access: only @octagongroup.co.uk sign-ins get in.
+# Public, no login, kept out of search engines (noindex + robots.txt): https://octagon-kb.pages.dev
 #
 # Secrets:
 #   CLOUDFLARE_API_TOKEN   token with Account > Cloudflare Pages > Edit

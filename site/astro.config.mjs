@@ -15,6 +15,8 @@ export default defineConfig({
 			description: 'How the Octagon recruitment analytics platform works, how to use it, and how far to trust its numbers.',
 			logo: { src: './src/assets/octagon-mark.svg', alt: 'Octagon' },
 			favicon: '/favicon.svg',
+			// Public but internal: keep it out of search engines.
+			head: [{ tag: 'meta', attrs: { name: 'robots', content: 'noindex, nofollow' } }],
 			customCss: [
 				'@fontsource-variable/inter',
 				'@fontsource/poppins/600.css',
