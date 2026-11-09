@@ -1,0 +1,54 @@
+---
+// Text filter plus group chips for a reference grid. Items carry data-search; sections data-group.
+interface Props {
+	scope: string;
+	placeholder: string;
+	chips: string[];
+	total: number;
+	noun: string;
+}
+const { scope, placeholder, chips, total, noun } = Astro.props;
+---
+
+<div class="oc-filter not-content" data-scope={scope}>
+	<input type="search" placeholder={placeholder} aria-label={`Filter ${noun}`} />
+	<button type="button" class="oc-chip" data-chip="" aria-pressed="true">All</button>
+	{chips.map((c) => <button type="button" class="oc-chip" data-chip={c} aria-pressed="false">{c}</button>)}
+	<span class="oc-count" aria-live="polite">{total} {noun}</span>
+</div>
+
+<script>
+	for (const bar of document.querySelectorAll<HTMLElement>('.oc-filter')) {
+		const root = document.getElementById(bar.dataset.scope!);
+		if (!root) continue;
+		const input = bar.querySelector('input')!;
+		const chips = [...bar.querySelectorAll<HTMLButtonElement>('.oc-chip')];
+		const count = bar.querySelector('.oc-count')!;
+		const noun = count.textContent!.replace(/^\d+\s*/, '');
+		let group = '';
+		const apply = () => {
+			const words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+			let shown = 0;
+			for (const section of root.querySelectorAll<HTMLElement>('[data-group]')) {
+				const inGroup = !group || section.dataset.group === group;
+				let visible = 0;
+				for (const item of section.querySelectorAll<HTMLElement>('[data-search]')) {
+					const hit = inGroup && words.every((w) => item.dataset.search!.includes(w));
+					item.hidden = !hit;
+					if (hit) visible++;
+				}
+				section.hidden = visible === 0;
+				shown += visible;
+			}
+			count.textContent = `${shown} ${noun}`;
+		};
+		input.addEventListener('input', apply);
+		for (const chip of chips) {
+			chip.addEventListener('click', () => {
+				group = chip.dataset.chip ?? '';
+				chips.forEach((c) => c.setAttribute('aria-pressed', String(c === chip)));
+				apply();
+			});
+		}
+	}
+</script>

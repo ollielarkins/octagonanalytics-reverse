@@ -1,0 +1,97 @@
+---
+title: Writing these docs
+description: How this knowledge base is built, where each page comes from, and how to keep it current.
+---
+
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import Example from '../../../components/Example.astro';
+
+For anyone editing these pages. The site is [Astro Starlight](https://starlight.astro.build) in
+`site/` of the platform repo. It replaces the GitHub wiki in `docs/wiki/`.
+
+## What is generated and what is written
+
+Pages that list things the code defines are **generated on every build**, so they can't drift:
+
+| Page | Built from |
+| --- | --- |
+| [Commands](/use/commands/) | `octagon-plugins/plugins/*/skills/*/SKILL.md` (name, description, `Usage:` line, tools named in backticks) |
+| [Tools reference](/run/tools/) | `TOOLS` and `PROMPTS` in `supabase/functions/octagon-mcp/index.ts` |
+| Live counts on any page, and the footer | Connector version, tool, prompt, command and migration counts |
+
+Everything else is written by hand. When a feature changes, update the hand-written page in the
+same branch as the code.
+
+<FileTree>
+- site/
+  - astro.config.mjs sidebar and integrations
+  - scripts/
+    - generate.mjs builds src/data/*.json from source
+  - src/
+    - components/ Example, CommandBrowser, ToolBrowser, Filter, Footer
+    - content/docs/
+      - index.mdx the landing page
+      - use/ recruiters and managers
+      - run/ admins and developers
+    - data/ generated, git-ignored
+    - styles/octagon.css the Octagon theme
+</FileTree>
+
+## Run it locally
+
+<Steps>
+1. Check out `octagon-plugins` next to this repo (or set `OCTAGON_PLUGINS_DIR` to its `plugins`
+   folder). Without it the Commands page is empty and the build warns.
+
+2. Install and start:
+
+   ```bash
+   cd site && npm install && npm run dev
+   ```
+
+3. Open `http://localhost:4321`. Search only works in a built site:
+
+   ```bash
+   npm run build && npm run preview
+   ```
+</Steps>
+
+## House style
+
+- UK English, plain and direct, no emoji. Answer first, then detail.
+- £ with separators (£45,000), rates to 1 dp naming the ratio (CV→placed 2.4%), dates DD/MM/YYYY.
+- **Never invent a number.** A snapshot figure carries "as of DD/MM/YYYY". A count the code knows
+  comes from `platform.json`, not typed in.
+- **No candidate names, ever.** Use [Candidate], [Client], [Job]. Example answers show the shape of a
+  response, with illustrative figures marked as such.
+- No secret values, keys or project refs, even on admin pages.
+- Link with absolute paths and a trailing slash: `/use/metrics/#billing`.
+
+## Worked examples
+
+Task pages use the `Example` component to show what to type and what comes back:
+
+```mdx
+import Example from '../../../components/Example.astro';
+
+<Example ask="/coldjobs" who="Recruiter">
+Your open roles with no candidate activity in 7 days, oldest first.
+</Example>
+```
+
+which renders as:
+
+<Example ask="/coldjobs" who="Recruiter">
+Your open roles with no candidate activity in 7 days, oldest first.
+</Example>
+
+## Diagrams
+
+Fence a block as `mermaid` and it renders as a diagram that follows the light or dark theme:
+
+````md
+```mermaid
+flowchart LR
+  RC[RecruitCRM] --> DB[(Supabase)] --> MCP[octagon-mcp] --> CL[Claude]
+```
+````

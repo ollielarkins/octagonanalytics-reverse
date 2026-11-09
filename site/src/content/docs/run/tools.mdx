@@ -1,0 +1,33 @@
+---
+title: Tools reference
+description: Every tool and prompt the octagon-mcp connector exposes, generated from its source.
+tableOfContents: false
+---
+
+import ToolBrowser from '../../../components/ToolBrowser.astro';
+import platform from '../../../data/platform.json';
+import prompts from '../../../data/prompts.json';
+
+The tools Claude can call through the connector: octagon-mcp {platform.connectorVersion},
+{platform.toolCount} tools ({platform.readTools} read-only, {platform.writeTools} that can write) and
+{platform.promptCount} prompts. Arguments marked `*` are required. The tags link to the
+[commands](/use/commands/) that use each tool.
+
+:::note[Generated from source]
+Built from the `TOOLS` and `PROMPTS` arrays in
+[`supabase/functions/octagon-mcp/index.ts`](https://github.com/ollielarkins/octagonanalytics-reverse/blob/main/supabase/functions/octagon-mcp/index.ts)
+on every build. Descriptions are the ones Claude reads, lightly trimmed. "Can write" is inferred
+from the description, so a tool that both reads and writes (such as `off_limit`) shows as "Can
+write". Every tool also accepts `auth_token`, omitted here.
+:::
+
+<ToolBrowser />
+
+## Prompts
+
+Prompts are ready-made starting points a Claude client can offer from its prompt menu.
+
+<table>
+	<thead><tr><th>Prompt</th><th>What it does</th></tr></thead>
+	<tbody>{prompts.map((p) => <tr><td><code>{p.name}</code></td><td>{p.description}</td></tr>)}</tbody>
+</table>

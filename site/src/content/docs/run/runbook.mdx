@@ -1,0 +1,213 @@
+---
+title: Operations runbook
+description: How to deploy, apply migrations, backfill, mint and revoke tokens, read sync health and recover from the failures seen so far.
+---
+
+import { Aside, Steps, Tabs, TabItem, LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+For admins who deploy, monitor and fix the platform. Every procedure here acts on production: there is no staging project.
+
+<Aside type="caution" title="Admin only">
+Commands below use `<project-ref>` for the Supabase project reference. Take it from `supabase/config.toml` or `npx supabase projects list`; it is deliberately not printed here.
+</Aside>
+
+## Daily checks
+
+Most of this is one command in Claude for an admin: `/health` (feeds, cron drift, inboxes, tool errors), `/tokens` and `/usage`. From SQL:
+
+```sql
+select public.sync_health();          -- is any feed stale or failing?
+select public.check_cron_manifest();  -- do the scheduled jobs still exist?
+```
+
+A healthy `sync_health()` looks like this, abridged:
+
+```json
+{
+  "overall": "ok",
+  "entities": [
+    { "entity": "candidates", "category": "live", "minutes_stale": 4,
+      "last_status": "ok", "error_count": 0, "status": "ok", "reason": "fresh" }
+  ]
+}
+```
+
+Thresholds and alerting are on [Sync](/run/sync/#sync-health).
+
+## Deploying
+
+<Steps>
+
+1. **Check the CLI is signed in to the right account.** `npx supabase projects list` must show the project. If not, run `npx supabase login` with the account that owns it. On 04-05/11/2026 every deploy and query returned 403 because the CLI was signed in to another account; it was not a lost permission.
+
+2. **Apply any migration first** (see [Migrations](#migrations)), then deploy the function that calls it.
+
+3. **Type-check the function:**
+
+   ```bash
+   node --experimental-strip-types --check supabase/functions/octagon-mcp/index.ts
+   ```
+
+4. **For the connector, bump `SERVER.version`** in `octagon-mcp/index.ts`, and run `node scripts/check-widgets.js` if `widgets.ts` changed.
+
+5. **Diff live against `main`** before overwriting. Live code has drifted from the repo before (`slack-command`, found 03/11/2026). The Supabase MCP `get_edge_function` shows what is deployed.
+
+6. **Deploy one function per command:**
+
+   ```bash
+   npx supabase functions deploy octagon-mcp --project-ref <project-ref> --use-api --yes
+   ```
+
+7. **Confirm the live build:**
+
+   ```bash
+   curl -s --retry 8 --retry-delay 3 --retry-all-errors \
+     https://<project-ref>.supabase.co/functions/v1/octagon-mcp
+   # {"name":"octagon-analytics","version":"3.x.y","transport":"streamable-http"}
+   ```
+
+   A 502 straight after a deploy is a cold boot. Retry before assuming failure.
+
+8. **Check `verify_jwt`** for the function in `list_edge_functions` against `config.toml`. `recruitcrm-sync` must never be open.
+
+9. **Make one real tool call** from Claude.
+
+</Steps>
+
+<Aside type="danger" title="Never pass --no-verify-jwt">
+It overrides `config.toml` for every function in the command. That is how `recruitcrm-sync` was left open on 10/08/2026.
+</Aside>
+
+### The MCP deploy tool as a fallback
+
+The Supabase MCP `deploy_edge_function` tool can deploy small functions (the Coach ones) when the CLI is unavailable. It uploads only the file contents you pass, so:
+
+- send every file the entrypoint imports, with its real content (`../_shared/caller.ts`, `../_shared/graph.ts` where imported);
+- set `verify_jwt` from `config.toml`, because the tool defaults to `true`;
+- never use it for `octagon-mcp` (about 920 KB across its files). A placeholder string sent as file content took the connector down on 10/08/2026.
+
+## Migrations
+
+<Steps>
+
+1. **Pick the next number.** Check `supabase/migrations/` and any open branches first. Numbers are sequential and never reused.
+
+2. **Test risky SQL with a `pg_temp` copy** in a single `execute_sql` call, comparing old and new output. Temporary objects vanish with the session, so the create and the comparison must run together.
+
+3. **Apply with the Supabase MCP `apply_migration` tool**, named after the file (`0159_short_name`), with the file's full contents.
+
+4. **Commit the same file** in the same change.
+
+5. **Run `get_advisors` (security)** and check nothing new appears.
+
+</Steps>
+
+<Aside type="danger" title="Never run supabase db push">
+The local file names do not match the versions recorded remotely, so the CLI would try to re-apply the whole history.
+</Aside>
+
+Anything changed in production directly (chat or SQL editor) is committed the same day as a migration marked `-- ALREADY LIVE ... applied DD/MM/YYYY` and made idempotent. The `0053`-`0057` gap is what happens otherwise.
+
+## Backfills and reconciles
+
+A backfill re-upserts every record for one entity. It is needed when a column is added, because the incremental sync only touches changed records. It is read-only against RecruitCRM.
+
+The anon key no longer opens `recruitcrm-sync` (since 29/10/2026). Call it from SQL with the cron headers:
+
+```sql
+select net.http_post(
+  url := 'https://<project-ref>.supabase.co/functions/v1/recruitcrm-sync?entity=deals&start_page=1&max_pages=20',
+  headers := public.cron_headers(),
+  body := '{}'::jsonb,
+  timeout_milliseconds := 60000);
+-- the response lands in net._http_response under the returned id
+select status_code, content from net._http_response where id = <returned id>;
+```
+
+| Parameter | Values |
+|---|---|
+| `entity` (backfill) | `consultants`, `clients`, `contacts`, `candidates`, `jobs`, `calls`, `deals`, `notes` |
+| `mode` | Omit for a backfill, or one of the [sync modes](/run/sync/#sync-modes); `reconcile` takes `entity` = clients, contacts, candidates, jobs, deals or consultants |
+
+If a backfill stops early it returns `resume_next_page`: call again with that as `start_page`.
+
+- **Run a small entity first and check the result.** A backfill applies the current mapping code to every row at once, so a mapping bug spreads to the whole table in one go.
+- **A backfill does not touch the health clock**, so it cannot hide a dead incremental feed.
+- **The candidate reconcile is a pair.** `backfill-candidates-pass` starts the walk, `backfill-candidates-drain` finishes it. Restore both or neither.
+
+## Tokens and access
+
+| Task | How |
+|---|---|
+| See who has access | `/tokens` in Claude: holders, rights, last used, leavers still holding a token. Token values are never shown |
+| Mint a token | SQL editor: `select public.mint_mcp_token(<recruitcrm_user_id>, '<label>', <can_write>);`. The plaintext is shown once |
+| Revoke someone | `/tokens` revoke, preview then confirm. Switches off all their tokens, including OAuth sessions |
+| Revoke an admin token | SQL editor only; chat refuses it |
+| Make someone an admin or manager | Set `is_admin` or `can_view_usage` on their `mcp_tokens` rows |
+
+`consultant_recruitcrm_id = 0` is the admin sentinel: no consultant record, so no personal desk. Leavers are revoked automatically when RecruitCRM marks them inactive (0136). See [Security](/run/security/#tokens-and-revocation).
+
+## Coach operations
+
+Pausing, adding pilots, measuring with `coach_effect()` and stopping the Coach are on [Slack and the Coach](/run/slack/#pausing-stopping-adding-people).
+
+## Common failures
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Every CLI deploy or query returns 403 | CLI signed in to another Supabase account | `npx supabase login` with the project's account; check `projects list` |
+| 502 right after a deploy | Cold boot | Retry with `curl --retry` before investigating |
+| Connector returns `Invalid or revoked token` | Token inactive, or the person is a leaver | `/tokens`; mint a new token if they should have access |
+| A live feed goes `critical` with `error status:` | A step of the incremental sync threw | Read `last_status` in `sync_state` for the entity; the other entities keep running |
+| A feed shows `degraded: stopped:429` | RecruitCRM rate limit hit after three retries | Usually clears on the next run; the walk resumes from `sync_state.cursor` |
+| `canceling statement due to statement timeout` (57014) from sync | Large candidate batch waiting on locks | `service_role` has 60 s since 0157; check for overlapping writers |
+| Deadlocks on `candidates` | Writers locking rows in different orders | Fixed in 0157 by sorting every upsert by key; reappearance means a new writer is unsorted |
+| `check_cron_manifest()` reports drift | A job was removed, paused or rescheduled outside a migration | Restore it from its migration, or update `cron_manifest` in the same migration |
+| Candidate reconcile never completes | Pass restored without the drain, or the reverse | Restore the pair |
+| Inbox line shows `error graph_auth_failed` | The Microsoft Graph client secret expired | Create a new secret in Entra, `npx supabase secrets set MS_CLIENT_SECRET=…`, delete the old one |
+| `inbox` feed `not_configured` | Graph secrets not set | Set `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` |
+| A confirm returns `preview_mismatch` | Claude altered the arguments or invented a nonce | Ask for a fresh preview and confirm that one |
+| A widget shows nothing | Syntax error in the emitted page | `node scripts/check-widgets.js` |
+| Connect page sign-in broken | WordPress added `<p>` tags inside `<script>` | `node scripts/check-connect-page.js`; remove blank lines |
+
+## The issue log
+
+Problems and requests go to Slack **#troubleshooting** (formerly #claude-int):
+
+1. Post a new top-level message starting `Issue:` or `Feature:`, with what happened, who it affects and how to reproduce it. One item per message.
+2. When it ships, reply **in that message's thread** with what changed and where (version, migration or commit).
+3. Add a check-mark reaction to the original, so open items are the ones without it. If it is closed without a fix, say why in the thread and add the reaction.
+
+Commit messages and migration comments often quote these posts, so keep names and firm figures out of them.
+
+## Incidents
+
+Each is recorded for the guard rail it led to.
+
+| Date | What happened | Guard now in place |
+|---|---|---|
+| 10/08/2026 | **Connector down for nine minutes.** An MCP deploy sent `"PLACEHOLDER"` as file content | Send real contents; confirm the live version after every deploy |
+| 10/08/2026 | **JWT verification off on `recruitcrm-sync`** for about two minutes, from `--no-verify-jwt` on a two-function deploy | `config.toml`; never pass the flag; `trustedCaller()` since 29/10/2026 |
+| 10/08/2026 | **Orphaned jobs rose from 2,410 to 4,092.** A backfill applied a client lookup silently capped at 1,000 rows | The `allRows` helper; test a backfill on a small entity first |
+| 10/08/2026 | **Dashboard widget a syntax error for hours**, from an escaped apostrophe in a template literal | `scripts/check-widgets.js` |
+| 10/08/2026 | **Connect page script broken by WordPress** paragraph tags | `scripts/check-connect-page.js`; no blank lines in that file |
+| 10/08/2026 | **Funnel frozen for six days** while a manual backfill kept the feed looking healthy | Backfills do not touch the health clock |
+| 21/08/2026 | **Jobs and calls stopped syncing for eleven days** after one candidate threw inside the incremental run | Each entity isolated; failures recorded against their own feed |
+| 10/09/2026 | **Cron jobs vanished** and nothing noticed for five days: the watchdog had gone too | `cron_manifest` and `cron-manifest-watchdog` |
+| 15/09/2026 | **Candidate pass restored without its drain**, so the walk restarted forever | Pass and drain documented as a pair |
+| 29/10/2026 | **Platform audit:** locked functions reachable with the anon key; confirms applied with no preview; leavers kept write tokens | `CRON_SECRET` (0132), stored preview nonces (0131), leaver auto-revoke (0136) |
+| 03/11/2026 | **`dashboard-data` and `dashboard` served firm figures without a token** | Both retired to 410 stubs |
+| 04/11/2026 | **Supabase CLI returned 403** on every deploy and query | Signed in to the wrong account; fixed 06/11/2026. Check `projects list` before deploying |
+| 05/11/2026 | **Free-plan limits:** database at 449 of 500 MB, log ingestion over 1 GB | `webhook_events` kept 3 days (0151); `history-recent` every 5 minutes and a weekly `vacuum full` of `net._http_response` (0152) |
+| 09/11/2026 | **Statement timeout and deadlocks** on candidate upserts | 60 s `service_role` timeout; one lock order for every writer (0157) |
+
+The common thread in the 10/08/2026 set: nothing automated would have caught any of them. There is still no test suite or CI. A smoke test of the version endpoint and one real tool call after every deploy would catch the first two in seconds.
+
+<Aside type="caution" title="Point-in-time recovery">
+Unconfirmed whether it is enabled. `daily_activity` was dropped on 10/08/2026 and is unrecoverable without it. Check before dropping anything else.
+</Aside>
+
+<CardGrid>
+	<LinkCard title="Contributing" href="/run/contributing/" description="Branching, migration rules and the pre-merge checklist." />
+	<LinkCard title="Sync and webhooks" href="/run/sync/" description="The schedule and health thresholds in full." />
+</CardGrid>

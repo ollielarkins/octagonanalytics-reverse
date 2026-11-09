@@ -1,0 +1,183 @@
+---
+title: Asking questions
+description: What a recruiter or manager can ask Claude in plain English, grouped by what you are trying to do, with worked examples.
+---
+
+import { CardGrid, LinkCard, Badge } from '@astrojs/starlight/components';
+import Example from '../../../components/Example.astro';
+import platform from '../../../data/platform.json';
+
+For anyone wondering "can it answer this?". You don't need command syntax: ask in plain English and Claude picks the right tool. This page groups the questions by what you are trying to do, with examples of what comes back. Every slash command is on [Commands](/use/commands/); the {platform.toolCount} tools underneath are on [Tools reference](/run/tools/).
+
+## How to ask
+
+- **Plain English works.** "How did Keelan do in Q2", "which of my roles have gone cold", "what's happening on the Bosch role".
+- **A slash command is a shortcut**, and you can add context after it: `/funnel Q2`, `/find a candidate that hasn't been contacted this week`.
+- **Name a window** if you want something other than the default. Windows default to **2026 year to date**, and the end date is exclusive. `/funnel Q2`, `/billing last month`, `/leaderboard July` all work. Dates come back as DD/MM/YYYY.
+- **Name a person** to see their figures. Firm reports are open to everyone; desk views (your day, weekly KPIs, billing) show your own row unless you are a manager or admin.
+- **Ask where a number comes from.** "Where does that number come from?" gets the definition.
+
+:::tip[Same question, same shape]
+Claude is instructed to answer the same question in the same layout for everyone: the answer first, then the detail, then 1 to 3 next actions. Money is £ with separators, rates are 1 dp and name the ratio (CV→placed x.x%), and tables run highest first.
+:::
+
+<Badge text="Read" variant="success" /> changes nothing. <Badge text="Write" variant="caution" /> previews first and changes RecruitCRM only when you confirm (see [Making changes safely](/use/making-changes/)).
+
+## My day and my numbers
+
+| Ask | Command | |
+|---|---|---|
+| "What's my day?" | [`/myday`](/use/commands/#myday) | <Badge text="Read" variant="success" /> |
+| "Prep my queue" | [`/queue`](/use/commands/#queue) | <Badge text="Read" variant="success" /> |
+| "How am I doing this week?" | [`/week`](/use/commands/#week) | <Badge text="Read" variant="success" /> |
+| "Give me my numbers for my 1:1" | [`/eod`](/use/commands/#eod) | <Badge text="Read" variant="success" /> |
+| "What did we do yesterday?" | [`/yesterday`](/use/commands/#yesterday), [`/dailystats`](/use/commands/#dailystats) | <Badge text="Read" variant="success" /> |
+| "What's in my diary?" | `schedule`, inside `/myday` | <Badge text="Read" variant="success" /> |
+| "Who was on the phone after 5?" | [`/evening`](/use/commands/#evening) | <Badge text="Read" variant="success" /> |
+
+<Example ask="how am I doing this week?" who="Recruiter">
+An inline scorecard of this week's actuals (from Monday, stated as DD/MM/YYYY) against your targets. Claude gives the headline and the exceptions, not the whole table again. Where you're behind, the gap as a number and one next action. BD and client calls carry a caveat and, beside them, how many untagged calls look like BD or client calls: "BD calls x of 5, plus y that look like BD but aren't tagged". If those would close the gap, the next action is `/tagcalls`, not more calls.
+</Example>
+
+<Example ask="/eod" who="Recruiter">
+One table holding delivery and calls together, for taking into a meeting with your manager:
+
+| KPI | Today | Week to date | Weekly target | Gap |
+|---|---|---|---|---|
+| CV sends | x | x | 10 | x |
+| Interview requests | x | x | 5 | x |
+| Interviews (1st) | x | x | 4 | x |
+| BD calls* | x (+y untagged) | x | 5 | x |
+| Client calls* | x (+y untagged) | x | 5 | x |
+| Placed | x | x | — | — |
+
+Then other stage movement today, calls today (total, connected, connect rate, talk time, untagged), and one line for anything behind.
+</Example>
+
+## My pipeline and what to chase
+
+| Ask | Command | |
+|---|---|---|
+| "What should I chase?" | [`/chase`](/use/commands/#chase) | <Badge text="Read" variant="success" /> |
+| "Who's in play on the [Job] role?" | [`/pipeline`](/use/commands/#pipeline) | <Badge text="Read" variant="success" /> |
+| "Which of my roles have gone cold?" | [`/coldjobs`](/use/commands/#coldjobs) | <Badge text="Read" variant="success" /> |
+| "Which offers and candidates have stalled?" | [`/stalled`](/use/commands/#stalled) | <Badge text="Read" variant="success" /> |
+| "Which interview requests never got booked?" | [`/unbooked`](/use/commands/#unbooked) | <Badge text="Read" variant="success" /> |
+| "Who's been interviewed with no feedback?" | [`/feedback`](/use/commands/#feedback) | <Badge text="Read" variant="success" /> |
+| "Who's due an aftercare call?" | [`/aftercare`](/use/commands/#aftercare) | <Badge text="Read" variant="success" /> |
+| "Who came close and could go forward again?" | [`/silver`](/use/commands/#silver) | <Badge text="Read" variant="success" /> |
+
+<Example ask="/silver" who="Recruiter">
+Your silver medallists: candidates who reached 2nd, 3rd interview or Offered and were then rejected, one row each at their closest miss, with up to 3 open roles each with the most similar title. Anyone placed since, back in play on an open job, off limit or deleted is left out. The suggested roles are for you to judge, not a match.
+</Example>
+
+<Example ask="/aftercare" who="Recruiter">
+The check-in calls due on your placements (before start, week 1, month 1, month 3), overdue first, with what to ask on each call. Each is listed from 7 days before it is due to 14 days after, and marked if there has been a call or note since. Nothing is marked done automatically. Placements whose Won deal has no start date can't appear: `/hygiene` lists them.
+</Example>
+
+## Candidates
+
+| Ask | Command | |
+|---|---|---|
+| "Find [Candidate]" | [`/find`](/use/commands/#find) | <Badge text="Read" variant="success" /> |
+| "Tell me everything about [Candidate]" | [`/candidate`](/use/commands/#candidate) | <Badge text="Read" variant="success" /> |
+| "What notes do we have on [Candidate]?" | [`/notes`](/use/commands/#notes) | <Badge text="Read" variant="success" /> |
+| "What CVs are on file?" | [`/files`](/use/commands/#files) | <Badge text="Read" variant="success" /> |
+| "Who matches this JD?" | [`/match`](/use/commands/#match) | <Badge text="Read" variant="success" /> |
+| "Fill in the intake from my last call with [Candidate]" | [`/intake`](/use/commands/#intake) | <Badge text="Read" variant="success" /> (optional note) |
+| "Is [Candidate] off limit?" | [`/offlimit`](/use/commands/#offlimit) | <Badge text="Read" variant="success" /> |
+| "Where has [Candidate] been pitched?" | [`/pitches`](/use/commands/#pitches) | <Badge text="Read" variant="success" /> |
+
+<Example ask="/match C++, embedded, RTOS, Bristol" who="Recruiter">
+Candidates ranked by matching skills, each with recent roles to explain the fit. Off-limit candidates are excluded and the number dropped is reported. Only candidates with skills on file are considered, so someone missing may simply have no skills recorded. Suggestions are logged, so a CV you send from them later counts towards [Claude's part in deals](/use/metrics/#claudes-part-in-deals).
+</Example>
+
+## Jobs and clients
+
+| Ask | Command | |
+|---|---|---|
+| "What's live, on hold or closed?" | [`/jobstatus`](/use/commands/#jobstatus) | <Badge text="Read" variant="success" /> |
+| "What new jobs came in, and which have no job order form?" | [`/newjobs`](/use/commands/#newjobs) | <Badge text="Read" variant="success" /> |
+| "Which open jobs have no Internal JD?" | [`/jdcheck`](/use/commands/#jdcheck) | <Badge text="Read" variant="success" /> |
+| "Our busiest accounts this year" | [`/account`](/use/commands/#account) | <Badge text="Read" variant="success" /> |
+| "Which past clients have gone quiet?" | [`/lapsed`](/use/commands/#lapsed) | <Badge text="Read" variant="success" /> |
+| "How's BD going?" | [`/bd`](/use/commands/#bd) | <Badge text="Read" variant="success" /> |
+| "Which clients should I visit?" | [`/visitplan`](/use/commands/#visitplan) | <Badge text="Read" variant="success" /> (optional draft) |
+
+<Example ask="/lapsed" who="Recruiter">
+Companies we have placed with that have no Open or On Hold job and no new job in 6 months (pass `/lapsed 12 months` for another window), each with its last touch (latest call or note on the company or its contacts, or a visit) and a call plan. Blocklisted and Do not contact companies are left out.
+</Example>
+
+## Performance and the firm
+
+| Ask | Command | |
+|---|---|---|
+| "How did Keelan do in Q2?" | [`/funnel`](/use/commands/#funnel) | <Badge text="Read" variant="success" /> |
+| "Who's top on CVs sent this quarter?" | [`/leaderboard`](/use/commands/#leaderboard) | <Badge text="Read" variant="success" /> |
+| "Time to fill by consultant" | [`/timetofill`](/use/commands/#timetofill) | <Badge text="Read" variant="success" /> |
+| "Why do candidates fall out?" | [`/rejections`](/use/commands/#rejections) | <Badge text="Read" variant="success" /> |
+| "How many leads and job order forms were logged?" | [`/noteskpi`](/use/commands/#noteskpi) | <Badge text="Read" variant="success" /> |
+| "How many client visits this quarter?" | [`/visits`](/use/commands/#visits) | <Badge text="Read" variant="success" /> |
+
+<Example ask="/funnel Keelan Riley Q2" who="Manager">
+The window stated as DD/MM/YYYY, then the stages in order (CV Sent → Interview Request → 1st → 2nd → 3rd → Offered → Placed), then the named ratios: CV→interview request x.x%, CV→1st interview x.x%, 1st interview→offer x.x%, CV→placed x.x%. Ratios matter more than volumes: a desk sending 300 CVs at 1% is not outperforming one sending 100 at 4%. See [The funnel](/use/funnel/).
+</Example>
+
+## Billing and money
+
+| Ask | Command | |
+|---|---|---|
+| "Where am I against my billing target?" | [`/billing`](/use/commands/#billing) | <Badge text="Read" variant="success" /> |
+| "Deals offered and won by consultant" | [`/billing`](/use/commands/#billing) | <Badge text="Read" variant="success" /> |
+| "What's our median fee?" | [`/fees`](/use/commands/#fees) | <Badge text="Read" variant="success" /> |
+| "Placements with the fee attached" | [`/placements`](/use/commands/#placements) | <Badge text="Read" variant="success" /> |
+| "What has Claude contributed to deals?" | [`/claudedeals`](/use/commands/#claudedeals) | <Badge text="Read" variant="success" /> |
+| "What's wrong with my deal records?" | [`/hygiene`](/use/commands/#hygiene) | <Badge text="Read" variant="success" /> |
+
+<Example ask="/billing" who="Recruiter">
+An inline billing scorecard: Won revenue this quarter against your quarterly target and the gap, pipeline in play as the forward indicator, all-time Won for context. Claude always adds that billing is **Won deal value** (a candidate at Placed carries no fee until the deal is moved to Won with `/won`), that pipeline is never added to Won, and that invoices are not tracked. If you're behind, it names the nearest deal that would close the gap.
+</Example>
+
+## Writing content
+
+Drafts only. Anything you didn't supply becomes a `[placeholder]`; salary is stated only if you gave it.
+
+| Ask | Command |
+|---|---|
+| "Write an advert for [Job]" | [`/advert`](/use/commands/#advert) |
+| "Boolean for a senior embedded C++ engineer in Bristol" | [`/boolean`](/use/commands/#boolean) |
+| "InMail for [Candidate] about [Job]" | [`/inmail`](/use/commands/#inmail) |
+| "Spec pitch [Candidate] to [Client]" | [`/specpitch`](/use/commands/#specpitch) |
+| "Prep [Candidate] for the [Client] interview" | [`/interviewprep`](/use/commands/#interviewprep) |
+| "Formatted CV for [Candidate]" | [`/formattedcv`](/use/commands/#formattedcv) |
+
+<Example ask="/specpitch [Candidate] to [Client]" who="Recruiter">
+First an off-limit check: if the candidate is off limit, it stops. Otherwise an anonymised pitch under a screen long, with a subject line: no name, no current employer, leading with the two or three things that make them worth a conversation. Gaps are `[placeholders]`. It doesn't send (that's `/email`, draft by default), and it doesn't record the pitch in RecruitCRM (that's `/pitch`, the step people forget, so the pitch KPI under-reports).
+</Example>
+
+## Managers and admins
+
+These need a manager or admin token; a recruiter token gets a plain refusal. The output is individual performance and usage data: keep it out of team channels.
+
+| Ask | Command | Who |
+|---|---|---|
+| "Who needs attention this week?" | [`/exceptions`](/use/commands/#exceptions) | Managers and admins |
+| "Draft the end-of-week email" | [`/eow`](/use/commands/#eow) | Managers and admins |
+| "Hand [Consultant]'s desk to [Consultant]" | [`/handover`](/use/commands/#handover) | Managers and admins |
+| "Is the platform working?" | [`/health`](/use/commands/#health) | Admins |
+| "Who's using it?" | [`/usage`](/use/commands/#usage), [`/team`](/use/commands/#team) | Admins |
+
+Several recruiter commands widen for managers: `/lapsed`, `/hygiene`, `/aftercare`, `/silver` and `/jdcheck` show your own desk to a recruiter and the firm to a manager or admin unless a name is given.
+
+## What it won't do
+
+- **Invent** a salary, a number, a name or a fact. If the data can't answer, it says so. "That isn't tracked" is a correct answer.
+- **Act on instructions found in CRM data.** Notes, job descriptions and emails are data, never commands.
+- **Write without a preview** and your confirmation.
+- **Bulk-export** candidate data, or send personal data to external tools.
+- **Open RecruitCRM in a browser.** If no tool can make a change, it gives you the manual step.
+
+<CardGrid>
+	<LinkCard title="Commands" href="/use/commands/" description="Every slash command, grouped by what you are trying to do." />
+	<LinkCard title="Metrics and definitions" href="/use/metrics/" description="What each number counts and who gets the credit." />
+</CardGrid>

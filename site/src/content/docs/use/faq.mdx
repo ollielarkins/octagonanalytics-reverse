@@ -1,0 +1,105 @@
+---
+title: FAQ
+description: Short answers to the questions recruiters and managers ask most about Octagon Analytics, from missing calls to numbers that differ from RecruitCRM.
+---
+
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+For recruiters and managers with a quick question. Each answer comes first, then the detail and a link to the full explanation.
+
+## Numbers
+
+### Why doesn't my call count?
+
+**Because it isn't tagged.** BD and client call KPIs count only Devyce calls tagged `Contact - Prospect (BD)` (BD) or `Contact - Client` / `Contact - Client Info` (client). An untagged call doesn't count, however good it was. Run `/tagcalls`: it lists your untagged calls of 30 seconds or more with a suggested category, and applies the ones you accept. See [How calls are counted](/use/kpis-and-targets/#how-calls-are-counted).
+
+### What is the "+N untagged" next to my BD calls?
+
+**Untagged calls that look like BD calls, not counted.** `/week`, `/eod` and the Coach show how many of this week's untagged calls to client contacts look like BD or client calls, from how that contact was tagged before, the company's status, or a recent job there. The guess matched recruiters' own tags 84% of the time, so it is never added to the KPI. Tag them and they count.
+
+### Why does my number differ from RecruitCRM's report?
+
+**Usually it doesn't, by much.** Measured on 08/09/2026, the funnel was within ~0.4% of RecruitCRM's lifecycle report (30 rows in 7,935), and Offered, Placed, 2nd and 3rd Interview were exact in every month tested. The small gap is in Shortlist, CV Sent and Rejected - Consultant, because RecruitCRM's report leaves out rows its own API returns. If the difference is bigger, check two other things: the window (the end date is exclusive), and attribution (funnel figures go to whoever made the stage move, not the job owner). See [The funnel](/use/funnel/#matching-recruitcrms-report).
+
+### Why does my week read 0 on Monday?
+
+**Because the week has just started.** The KPI week runs Monday to Sunday. Early-week gaps are expected.
+
+### I placed someone. Why hasn't my billing moved?
+
+**Placed carries no fee.** Billing is the value of Won deals. Move the deal to Won with its value using `/won` (it also takes salary, fee % and start date). If there is no deal, raise one with `/newdeal`. A placement with no Won deal after 14 days gets flagged. See [Quarterly billing](/use/kpis-and-targets/#quarterly-billing).
+
+### Why isn't pipeline included in my billing?
+
+**Pipeline is not revenue.** Pipeline is deals at Open through Offered: the forward indicator. It is never added to Won, and there is never a "Won + Offered" figure.
+
+### Does billing tell me what's been invoiced or paid?
+
+**No.** RecruitCRM's invoices are not in the figures, so billing means Won deal value, not cash. Check invoice status in RecruitCRM.
+
+### Why do my leads read 0?
+
+**Probably because they aren't typed as leads.** Leads, internal interviews and job order forms count only notes with that type. `/note` can file an internal interview or a job order form, but not a lead: set the type in RecruitCRM. A zero here says as much about note typing as about activity.
+
+### Why don't my client visits count?
+
+**The meeting needs the type Client Meeting.** An untyped meeting can't count. "Your day" and `/visitplan` offer to type them. The minimum is 2 per quarter.
+
+### Why is the shortlist number so low?
+
+**Only some desks use Shortlist.** Many skip straight to CV Sent, so the funnel starts at CV Sent and Shortlist is never used as a denominator.
+
+### Someone left. Why are they still in the table?
+
+**Leavers stay in totals, tagged "left".** Their activity is credited to whoever did the work and never reattributed. Their live jobs drop off every desk until a manager moves them with `/handover`.
+
+### I deleted a candidate. Why did last quarter's CV sends not change?
+
+**Deleted records leave day-to-day views but stay in history.** A deleted candidate disappears from search, matching and chase lists, but stays in the funnel and rankings so past figures don't shift.
+
+### I was on holiday. Why does my week look bad?
+
+**Nothing on the platform knows who is on leave.** RecruitCRM's diary holds no leave. If you're in the Coach pilot, set an Away date ("Away? Pick your last day off") so it pauses.
+
+## Using it
+
+### Do I need to learn the slash commands?
+
+**No.** Every command is a shortcut for something you can ask in plain English: "what's my day?", "prep my queue", "how am I doing this week?". See [Asking questions](/use/asking-questions/).
+
+### I said "dashboard" and got the whole team. Is that right?
+
+**Not for a recruiter.** Your token is resolving as an admin. Tell Ollie.
+
+### A command I expected is missing.
+
+**A release probably added it.** Reconnect the connector or start a new chat. If you have no write commands at all, your token may not have write access, or you may not have the octagon-actions plugin.
+
+### Can Claude just make the change in RecruitCRM for me?
+
+**Yes, through its own tools, after you confirm.** It previews exactly what will change and waits for your yes. It will never open RecruitCRM in a browser; if no tool can make a change, it gives you the manual step. See [Making changes safely](/use/making-changes/).
+
+### Will Claude send emails without me seeing them?
+
+**No.** Drafting is the default. Inbox replies, Push & Tell, DPE and end-of-week emails are only ever drafts in your Outlook. `/email` sends only when you explicitly ask it to send after seeing the full text, and never to someone who has opted out.
+
+### Can I undo a delete?
+
+**No.** Deletes are permanent, with no restore. You type the record's name back to confirm, one record at a time. To take a candidate off a job, use `/unassign`, not delete.
+
+### Claude said "that isn't tracked". Is it broken?
+
+**No, that's the system working.** If the data can't answer, Claude says so rather than inventing a number. Ask "where does that number come from?" to get the definition.
+
+### Who can see what I do on the platform?
+
+**Admins see usage, not content.** Which features you use, how often and what kind of change (for example "3 stage moves"); not which candidate, and not what you wrote. It's for helping people get set up, not measuring performance.
+
+### Something's wrong. Who do I tell?
+
+Post in #troubleshooting, or message Ollie, with what you asked, what you expected and what you got. Screenshots help.
+
+<CardGrid>
+	<LinkCard title="Data caveats" href="/use/data-caveats/" description="Every soft spot in the figures, measured and dated." />
+	<LinkCard title="Glossary" href="/use/glossary/" description="Every term, alphabetically." />
+</CardGrid>
