@@ -249,7 +249,7 @@ complete inventory of the other **174**, so that "can we do X?" stops being a re
 
 **The single most important finding: three of the four metrics we have been telling people are
 "not tracked anywhere" have first-class RecruitCRM APIs.** The
-[Data Caveats](https://octagon-kb.pages.dev/use/data-caveats/) page, the org instructions and several months of
+[Data Caveats](https://docs.octagongroup.co.uk/use/data-caveats/) page, the org instructions and several months of
 reporting all say leads, pitched candidates, internal interviews and client visits cannot be
 reported. That was wrong for at least two of them, and probably three.
 
