@@ -1,9 +1,9 @@
-// Who may call a locked function (recruitcrm-sync, recruitcrm-probe, inbox-sync, daily-queue,
-// digest-email, coach-dm).
+// Who may call a locked function (recruitcrm-sync, recruitcrm-probe, inbox-sync, digest-email,
+// coach-dm).
 //
 // verify_jwt = true only proves the caller holds SOME project JWT, and the anon key is public: it
 // is in the cron migrations of this public repo. Until 29/10/2026 anyone with it could render the
-// morning digest (candidate names), re-send the queue and coach DMs, or restart the sync backfill.
+// morning digest (candidate names), re-send the coach DMs, or restart the sync backfill.
 // Now a caller must present either:
 //   - the service-role key as its bearer: other functions calling in (octagon-mcp's write-through,
 //     recruitcrm-webhook), which already send it; or

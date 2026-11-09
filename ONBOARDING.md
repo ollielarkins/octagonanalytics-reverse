@@ -14,8 +14,8 @@ For an admin rolling Octagon Analytics out, or a developer about to change it: w
 Octagon Analytics is a Claude connector (`octagon-mcp`, a Supabase edge function) that reads a live
 mirror of RecruitCRM and writes back to RecruitCRM with a preview and confirm on every change.
 Recruiters reach it from claude.ai (chat or Cowork); the slash commands come from four plugins in the
-[octagon-plugins](https://github.com/ollielarkins/octagon-plugins) marketplace. Briefs, the action
-queue and the Octagon Coach arrive in Slack. See the [README](README.md) for the picture.
+[octagon-plugins](https://github.com/ollielarkins/octagon-plugins) marketplace. The Octagon Coach
+arrives in Slack. See the [README](README.md) for the picture.
 
 ---
 
@@ -47,8 +47,7 @@ Do these once, in the claude.ai Team admin console.
    The token maps to the person's RecruitCRM user, so their desk is scoped to them and their changes
    are attributed to them in RecruitCRM. Set `can_write`, `is_admin` and `can_view_usage` (team usage
    views without full admin) deliberately. Hand the plaintext over once; only its hash is stored.
-5. **Slack.** Briefs post to #briefs. The action queue DMs and the Coach DMs go only to the people in
-   `app_settings.action_queue_pilot` and `coach_pilot`; the Coach stays in shadow mode (previews to
+5. **Slack.** The Coach DMs go only to the people in `app_settings.coach_pilot`; the Coach stays in shadow mode (previews to
    the admin) while `coach_shadow` is true. Details in the Runbook's Slack section.
 
 After that, `/usage` shows who has connected and who never started, `/tokens` who holds access, and

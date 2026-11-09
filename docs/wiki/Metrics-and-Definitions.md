@@ -119,11 +119,11 @@ There is no invoice data: RecruitCRM's invoices are not mirrored. See
 - **Never below the flat minimums** (10 CVs, 5 interview requests, 4 interviews).
 - **No billing target, no plan from billing:** just the minimums, and the DM says so.
 
-Monday: a plan line in the 08:30 DM. Friday: actuals against plan in the end-of-week email.
+Monday: the week's plan in the coach's 08:45 DM. Friday: actuals against plan in the end-of-week email.
 
 ## Daily action queue
 
-`action_queue()` ranks each person's calls for the 08:30 DM and `/queue`. At most 10 items; the
+`action_queue()` ranks each person's calls for `/queue`. At most 10 items; the
 totals give the count before the caps.
 
 | Rank | Trigger | Cap |
@@ -139,8 +139,9 @@ totals give the count before the caps.
 
 Closing lines that are not calls: one "clean up these stages" line for older offers and requests,
 untyped meetings (Mondays and Thursdays), client visits (Mondays, while under 2 this quarter), the
-Monday plan, and Push & Tell on Fridays. Client rejections are not prompted (0126). Done in Slack
-logs a note in RecruitCRM and hides the item for a set number of days by kind.
+Monday plan, and Push & Tell on Fridays. Client rejections are not prompted (0126). Past Done presses
+(`action_queue_done`) hide an item for a set number of days by kind; the Slack Done button went with
+the Team Briefs app on 09/11/2026.
 
 ## Coach
 
@@ -168,8 +169,8 @@ to visit, ranked by live A and B grade jobs, Won fees in the last 12 months, and
 
 ## Manager exceptions
 
-`team_exceptions()` lists only people with something to act on. Managers only; the Monday DM goes
-to the people in `manager_exceptions_emails`.
+`team_exceptions()` lists only people with something to act on. Managers only, through `/exceptions`
+in Claude.
 
 | Exception | Rule |
 |---|---|

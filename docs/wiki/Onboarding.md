@@ -103,7 +103,7 @@ calls. Full list of soft spots on [Data Caveats](Data-Caveats).
 | Command | When | What you get |
 |---|---|---|
 | `/myday` | First thing | Interviews to prep, feedback due, aging offers, stalled candidates, cold roles, plus one command worth trying today |
-| `/queue` | After the 08:30 DM | Today's ranked calls, with the admin for each drafted for you to check |
+| `/queue` | Morning | Today's ranked calls, with the admin for each drafted for you to check |
 | `/chase` | Mid-morning | What to chase across your whole pipeline, in priority order |
 | `/week` | Any time | This week against every KPI target, with the gap named |
 | `/eod` | End of day | Today on all five KPIs in one table, against where the week needs to be |
@@ -116,7 +116,7 @@ just as well. Type `/` to see the rest, or read [Commands](Commands).
 | Day | Do this |
 |---|---|
 | Monday | Connect. Say **dashboard**, then `/myday`. Run `/tagcalls` on last week's calls so your BD and client numbers are real |
-| Tuesday | Start from the 08:30 DM and `/queue`. Work the list; press **Done** in Slack as you go |
+| Tuesday | Start from `/queue` and work the list |
 | Wednesday | Pick a live role: `/pipeline` for who's in play, `/coldjobs` for roles with no activity in 7 days, `/silver` for interview-tested candidates to put forward |
 | Thursday | Content on a real role: `/advert`, `/boolean`, `/match`. Missing details come back as `[placeholders]`, never invented |
 | Friday | `/week` to see the gap, `/eod` before you finish. If you have write access, `/pushtell` drafts your client updates |
@@ -127,11 +127,7 @@ just as well. Type `/` to see the rest, or read [Commands](Commands).
 
 | Message | When | Who gets it | What to do |
 |---|---|---|---|
-| Morning brief | 07:30 | #briefs | Read it: yesterday's numbers and each consultant's diary |
-| Action queue DM | 08:30 weekdays | The pilot group | Your ranked calls. `/queue` drafts the admin; **Done** logs the call in RecruitCRM after a preview |
 | Coach DMs | 12:30, 16:45, Monday 08:45 | Shadow mode: Oliver only for now | Named suggestions with Done and Snooze; at 16:45, one-press tagging of today's calls |
-| Day End | 17:30 | #briefs | The day's activity, including untagged calls |
-| Weekly | Monday 08:00 | #briefs | The week ahead |
 
 ---
 

@@ -1,7 +1,7 @@
 # The commands moved
 
 The slash commands that used to live in `plugins/octagon-analytics/commands/` are now in the
-**octagon-plugins** repo, as skills in four plugins (83 commands as of 06/11/2026):
+**octagon-plugins** repo, as skills in four plugins (82 commands as of 09/11/2026):
 
     github.com/ollielarkins/octagon-plugins
     plugins/<octagon-dashboard | octagon-reporting | octagon-actions | octagon-admin>/skills/<command>/SKILL.md
