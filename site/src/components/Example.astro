@@ -1,0 +1,34 @@
+---
+// A worked example, drawn as a short chat: what someone types, and the shape of what comes back.
+// Usage in MDX:
+//   <Example ask="/funnel Q3" who="Recruiter">
+//   Markdown describing the answer...
+//   </Example>
+import mark from '../assets/octagon-mark.svg';
+
+interface Props {
+	ask: string;
+	who?: string;
+	label?: string;
+}
+const { ask, who = 'You', label = 'Example' } = Astro.props;
+---
+
+<figure class="oc-example not-content">
+	<div class="oc-example__bar"><i></i>{label}</div>
+	<div class="oc-example__thread">
+		<div class="oc-example__ask">
+			<div>
+				<span class="oc-example__who">{who}</span>
+				<code>{ask}</code>
+			</div>
+		</div>
+		<div class="oc-example__reply">
+			<span class="oc-example__avatar"><img src={mark.src} alt="" /></span>
+			<div>
+				<span class="oc-example__who">Claude</span>
+				<div class="oc-example__body"><slot /></div>
+			</div>
+		</div>
+	</div>
+</figure>

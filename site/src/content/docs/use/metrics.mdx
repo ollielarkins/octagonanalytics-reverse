@@ -1,0 +1,162 @@
+---
+title: Metrics and definitions
+description: What each Octagon figure counts, who gets the credit for it, and the conventions every answer follows.
+---
+
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+import Example from '../../../components/Example.astro';
+
+For anyone quoting an Octagon number: what each figure counts and who it is credited to. Read it before putting a number in front of the business; read [Data caveats](/use/data-caveats/) second.
+
+Every figure comes from one definition. If a number appears in two places (the dashboard, a slash command, the Coach), both read the same definition: there is no second version to disagree with. How that is built is on [The metrics layer](/run/metrics-layer/).
+
+## Attribution
+
+Who gets the credit depends on the kind of figure.
+
+| Metric family | Credited to | Why |
+|---|---|---|
+| Funnel activity (CV Sent to Placed) | The **person who made the stage move** | Checked against RecruitCRM's January report, this matched 20 of 27 per-consultant figures; crediting the job owner gave people credit for work on jobs they inherited later |
+| Desk views (cold jobs, stalled, time to fill, rejections, silver medallists) | The **job owner** | The desk is whoever owns the role now |
+| Calls | The **caller** | |
+| Billing, fees, aftercare | The **deal owner** | |
+
+:::note[Leavers]
+Leavers keep their activity and stay in totals, tagged "left". Nothing is reattributed. In billing a leaver appears while they own Won revenue this quarter or open pipeline. Their live jobs drop off every desk until moved with [`/handover`](/use/commands/#handover); [`/hygiene`](/use/commands/#hygiene) lists them.
+:::
+
+## The funnel
+
+**CV Sent → Interview Request → 1st Interview → 2nd Interview → 3rd Interview → Offered → Placed**
+
+| Term | Definition |
+|---|---|
+| Stage count | Candidate-job pairs reaching the stage, counted **once, at the last time they entered it**, credited to whoever made that move |
+| Conversion rate | A share of CVs sent, to 1 dp, naming the ratio: CV→interview request, CV→placed |
+| Placement | A move to the Placed stage. Not a deal, and it carries no fee |
+| Rejected by client | The client turned the candidate down |
+| Rejected by consultant | We screened them out ourselves (includes declined offers) |
+| Client rejection rate | Rejected by client ÷ CVs sent |
+
+The funnel comes from RecruitCRM's hiring-stage history and nothing else: deal stages and other activity are never blended in. Shortlist exists as a stage but is only partly used, so it is never a denominator. The full explanation, with a diagram, is on [The funnel](/use/funnel/).
+
+A high client rejection rate is a prompt, not a verdict: wrong candidates, a poor brief or a hard client. Look at the client breakdown before the consultant breakdown.
+
+## Weekly KPIs
+
+Per recruiter, Monday to Sunday.
+
+| Metric | Weekly target | Counts |
+|---|---|---|
+| CV sends | 10 | Moves to CV Sent this week, by the mover |
+| Interview requests | 5 | Moves to Interview Request |
+| Interviews | 4 | Moves to 1st Interview |
+| BD calls | 5 | Calls tagged `Contact - Prospect (BD)`, by the caller |
+| Client calls | 5 | Calls tagged `Contact - Client` or `Contact - Client Info` |
+
+Placements have no weekly target: billing is quarterly. Quarterly billing targets are set per recruiter; anyone without one shows as TBC. More on [KPIs and targets](/use/kpis-and-targets/).
+
+## Calls
+
+All calls are Devyce call logs mirrored from RecruitCRM.
+
+| Term | Definition |
+|---|---|
+| Call | One call log, credited to the caller. Connected = duration above 0 |
+| Tagged call | A call with a category. Only tagged calls count toward BD and client targets |
+| Tagging rate | Share of calls of 30 seconds or more that are tagged, per consultant, for a week against the week before |
+| Looks like BD / client | Untagged calls this week of 30 seconds or more, to a client contact, that were probably BD or client calls. Shown **beside** the tagged count, never added to it |
+
+:::caution
+BD and client call figures undercount until calls are tagged. Quote them with the person's tagging rate or the "looks like" count beside them. See [Data caveats](/use/data-caveats/#call-categorisation).
+:::
+
+## Money
+
+**The fee is the Won deal value.** There is no separate fee record. The Placed stage carries no fee: billing happens when a deal is moved to Won and the value entered.
+
+| Term | Definition |
+|---|---|
+| **Billing** | Total value of Won deals by **close date**, credited to the deal owner. The quarter runs start inclusive to end exclusive, UK time, so a close date later in the quarter counts. Split into **Won to date** (closed on or before today) and **Won later this quarter**. Deleted deals excluded |
+| **Pipeline** | Total value of deals at Open, CV Sent, Interview Request, 1st, 2nd, 3rd Interview or Offered, not deleted. The forward indicator. Declined and Placed are not pipeline. Same figure on the dashboard and in billing |
+| **Forecast** | The forecast fee across open roles |
+| **Fee components** | Annual salary × fee % ÷ 100 on the deal |
+| **Fee percentage** | Always quote the **median** (18.0% on Won deals). A couple of mistyped values above 100 drag the mean up, so they are left out of percentage stats and counted |
+| **Placement fee** | Each placement is paired with **at most one** Won deal on the same job: the candidate's name in the deal name first, then the deal created nearest the placement date. Other Won deals on the job are separate fees, listed as unmatched, never summed in |
+| **Unbilled placement** | A placement with no Won deal on its job. The Coach flags one after 14 days |
+
+:::danger[Never combine Won and pipeline]
+Pipeline is not revenue. Never add it to Won, and never present a "Won + Offered" figure. Deals at Offered are a snapshot of now, whenever they were created.
+:::
+
+There is no invoice data in the figures: billing means Won deal value, not cash. Check invoice status in RecruitCRM. See [Data caveats](/use/data-caveats/#no-invoices).
+
+<Example ask="deals offered and won by consultant" who="Manager">
+One row per consultant, highest Won first, with a firm total: Won (£, count), at Offered now (£, count), earlier stages now (£), candidate offers, offers with no deal. Won deals dated after the window get their own line and are never added to billing for the window. Anyone with an offer but no deal is named, because `/newdeal` fixes it. Leavers stay in, tagged (left).
+</Example>
+
+## Desk and client lists
+
+| List | Definition |
+|---|---|
+| Aging offer | Open role, offer out 5 to 60 days with no movement |
+| Stalled | Open role, at CV Sent to Offered, no movement for 10 to 60 days |
+| Cold role | Open role with no candidate activity for 14 days (7 days in `/coldjobs` and `/chase`) |
+| Silver medallists | Reached 2nd, 3rd interview or Offered, then rejected (by client or consultant). One row per candidate at their closest miss. Leaves out anyone placed since, back in play on an Open job, off limit, or deleted. Suggested roles are Open jobs with the most similar title, for you to judge |
+| Lapsed clients | Companies we have placed with, with no Open or On Hold job and no new job in 6 months (default). Last touch = latest call or note on the company or any of its contacts, or a visit. Blocklisted and Do not contact companies left out |
+| Aftercare | Check-ins on placements from Won deals with a start date: before start, week 1 (+7 days), month 1 (+30), month 3 (+91). Listed from 7 days before due to 14 days after. A call or note since the window opened is marked; nothing is marked done automatically. No rebate dates (terms not recorded) |
+| Data hygiene | Record gaps that make figures wrong: Won deals with no fee %, no salary, salary entered in thousands, no value, no start date or no job; placed with no Won deal; Offered with no deal; live jobs owned by a leaver; jobs with no client; untagged calls of 30s+ in 7 days. Each with the records and the fix |
+
+The 60-day ceiling on aging and stalled is deliberate: beyond it a candidate is abandoned, not stalled, and including them gave a list of 1,517 items nobody could act on.
+
+## Client visits
+
+A client visit is a RecruitCRM meeting typed **Client Meeting**. The minimum is 2 per consultant per quarter. `/visitplan` counts visits done and booked this quarter, lists untyped meetings separately (they cannot count until typed), and suggests up to five clients to visit, ranked by live A and B grade jobs, Won fees in the last 12 months, and no visit in 90 days.
+
+## Logged activity
+
+These count **what was logged**, not what happened.
+
+| Metric | Where it lives | Read by |
+|---|---|---|
+| Leads | `Lead` note type | `/noteskpi` |
+| Internal interviews | `Candidate - Internal Interview` note type | `/noteskpi` |
+| Job order forms | `Job Order Form Complete` note type | `/noteskpi` |
+| Pitches | RecruitCRM's pitch feature | `/pitches` |
+| Client visits | Meetings typed Client Meeting | `/visits` |
+
+Notes are credited to the note author. **Closure reasons** count only reasons recorded through Claude when a job is closed or a deal moved to Lost or Declined. They are optional, so an absent reason means "nobody said": never take a percentage over closures with no reason.
+
+**Deleted records** are hidden from day-to-day views and kept in historical counts. Deleting a candidate does not change last quarter's CV sends.
+
+## Claude's part in deals
+
+`/claudedeals` gives two kinds of credit and never adds them together.
+
+| Term | Definition |
+|---|---|
+| **Sourced** | The candidate was added to the job through Claude, or `/match` suggested them to that consultant and the same consultant sent their CV within 60 days. Not sourced if the candidate was already on the job beforehand |
+| **Recorded** | A stage move made through Claude on a pair it did not source: admin time saved, not revenue Claude made |
+| Won value | The Won deal on the job of a sourced pair that reached Placed. Billing |
+| Offered value | The Offered deal of a sourced pair at Offered. Pipeline, never billing |
+
+`/match` suggestions are logged from 05/11/2026, so a candidate found with `/match` before then and added inside RecruitCRM left no trace: the figure is an undercount, never an overcount. Billing is still credited to the deal owner everywhere else; this is a view of Claude's part, not a split of anyone's fee.
+
+## Conventions
+
+Every answer follows these, so the same question gives the same layout for everyone.
+
+| | |
+|---|---|
+| Money | £ with separators: £45,000. Pence only when exact |
+| Rates | 1 dp, naming the ratio: CV→placed x.x% |
+| Dates | DD/MM/YYYY |
+| Default window | 2026 year to date, end exclusive |
+| Tables | Highest first |
+| Funnel order | CV Sent → Interview Request → 1st → 2nd → 3rd → Offered → Placed |
+| IDs | Internal IDs and slugs are never shown unless you need one |
+
+<CardGrid>
+	<LinkCard title="The funnel" href="/use/funnel/" description="How stages are counted, the named ratios and the parity limit." />
+	<LinkCard title="The metrics layer (admin)" href="/run/metrics-layer/" description="The functions and views behind each figure." />
+</CardGrid>

@@ -1,0 +1,19 @@
+---
+title: Commands
+description: Every slash command you can type to Claude, what it does, and how to call it.
+tableOfContents: false
+---
+
+import CommandBrowser from '../../../components/CommandBrowser.astro';
+import platform from '../../../data/platform.json';
+
+Type any of these to Claude, with or without the details after it. You don't have to use commands at
+all: asking in plain English works too, and [Asking questions](/use/asking-questions/) shows how.
+
+:::tip[This page writes itself]
+The list is built from the commands that actually ship, so it is always current: {platform.commandCount}
+commands across {platform.plugins.filter((p) => p.commands).length} plugins. The grey tags under each
+command are the connector tools it uses; click one to see what it does.
+:::
+
+<CommandBrowser />

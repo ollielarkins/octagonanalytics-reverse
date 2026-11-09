@@ -1,0 +1,50 @@
+---
+// Every connector tool, generated from supabase/functions/octagon-mcp/index.ts.
+import tools from '../data/tools.json';
+import Filter from './Filter.astro';
+
+const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
+const groups = [
+	{ title: 'Reads', blurb: 'Answer questions from the mirror. Never change anything.', items: sorted.filter((t) => t.kind === 'read') },
+	{
+		title: 'Can write',
+		blurb: 'Can change RecruitCRM, send or draft email, or change platform state. Every write previews first and applies only on an explicit confirm.',
+		items: sorted.filter((t) => t.kind === 'write'),
+	},
+];
+// Descriptions are written for Claude; trim the routing hints people don't need.
+const tidy = (d: string) => d.replace(/\s*Use (?:for|when) '[^]*?(?=\. [A-Z]|$)\.?/, '').trim();
+---
+
+<Filter scope="oc-tools" placeholder="Filter tools, e.g. funnel, deal, inbox" chips={groups.map((g) => g.title)} total={tools.length} noun="tools" />
+
+<div id="oc-tools">
+	{
+		groups.map((g) => (
+			<section data-group={g.title}>
+				<h2 class="oc-group-title">
+					{g.title} <small>{g.items.length} tools</small>
+				</h2>
+				<p>{g.blurb}</p>
+				<div class="oc-grid">
+					{g.items.map((t) => (
+						<article class="oc-item" id={t.name} data-search={`${t.name} ${t.description} ${t.usedBy.join(' ')}`.toLowerCase()}>
+							<h3><a href={`#${t.name}`}>{t.name}</a></h3>
+							<p>{tidy(t.description)}</p>
+							{t.args.length > 0 && (
+								<div class="oc-examples">
+									{t.args.map((a) => <code title={t.required.includes(a) ? 'required' : 'optional'}>{a}{t.required.includes(a) ? '*' : ''}</code>)}
+								</div>
+							)}
+							<div class="oc-meta">
+								<span class={`oc-tag oc-tag--${t.kind}`}>{t.kind === 'write' ? 'Can write' : 'Read-only'}</span>
+								{t.widget && <span class="oc-tag oc-tag--who">Widget</span>}
+								{t.usedBy.map((c) => <a class="oc-tag" href={`/use/commands/#${c}`} title="Command that uses this tool">/{c}</a>)}
+							</div>
+						</article>
+					))}
+				</div>
+			</section>
+		))
+	}
+</div>

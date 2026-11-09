@@ -1,0 +1,38 @@
+---
+// Every slash command, generated from octagon-plugins, grouped by plugin with a live filter.
+import commands from '../data/commands.json';
+import platform from '../data/platform.json';
+import Filter from './Filter.astro';
+
+const groups = platform.plugins
+	.map((p) => ({ ...p, items: commands.filter((c) => c.plugin === p.id) }))
+	.filter((g) => g.items.length);
+---
+
+<Filter scope="oc-commands" placeholder="Filter commands, e.g. billing, calls, offer" chips={groups.map((g) => g.title)} total={commands.length} noun="commands" />
+
+<div id="oc-commands">
+	{
+		groups.map((g) => (
+			<section data-group={g.title}>
+				<h2 id={`plugin-${g.id}`} class="oc-group-title">
+					{g.title} <small>{g.items.length} commands{g.version ? ` · ${g.id} ${g.version}` : ''}</small>
+				</h2>
+				<p>{g.blurb}</p>
+				<div class="oc-grid">
+					{g.items.map((c) => (
+						<article class="oc-item" id={c.name} data-search={`${c.name} ${c.summary} ${c.calls.join(' ')} ${c.audience ?? ''}`.toLowerCase()}>
+							<h3><a href={`#${c.name}`}><span class="oc-slash">/</span>{c.name}</a></h3>
+							<p>{c.summary}</p>
+							<div class="oc-examples">{c.examples.slice(0, 3).map((e) => <code>{e}</code>)}</div>
+							<div class="oc-meta">
+								{c.audience && <span class="oc-tag oc-tag--who">{c.audience}</span>}
+								{c.calls.map((t) => <a class="oc-tag" href={`/run/tools/#${t}`} title="Connector tool this command uses">{t}</a>)}
+							</div>
+						</article>
+					))}
+				</div>
+			</section>
+		))
+	}
+</div>

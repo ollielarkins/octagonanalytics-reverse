@@ -1,0 +1,13 @@
+---
+// Starlight's footer plus a line saying which build of the platform these pages describe.
+import Default from '@astrojs/starlight/components/Footer.astro';
+import platform from '../data/platform.json';
+
+const built = new Date(platform.generatedAt).toLocaleDateString('en-GB', { timeZone: 'Europe/London' });
+---
+
+<Default><slot /></Default>
+<p class="oc-footer-meta">
+	Describes octagon-mcp {platform.connectorVersion} · {platform.commandCount} commands · {platform.toolCount} tools ·
+	{platform.migrationCount} migrations. Reference pages regenerated from source on {built}. Internal: candidate names are PII.
+</p>

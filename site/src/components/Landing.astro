@@ -1,0 +1,125 @@
+---
+// The home page: a full-width navy band with search, then three columns of links
+// (Use it, Trust the numbers, Run it) and one row of live figures.
+import { Icon } from '@astrojs/starlight/components';
+import platform from '../data/platform.json';
+
+const plugins = platform.plugins.filter((p) => p.commands).length;
+
+const columns = [
+	{
+		title: 'Use it',
+		who: 'Recruiters and managers',
+		icon: 'rocket',
+		tone: 'pink',
+		links: [
+			['/use/getting-started/', 'Getting started', 'Connect Claude and get through your first week'],
+			['/use/your-day/', 'Your day', 'What to do first, the queue and the Coach'],
+			['/use/commands/', 'Commands', `All ${platform.commandCount}, searchable, with examples`],
+			['/use/asking-questions/', 'Asking questions', 'What to ask in plain English'],
+			['/use/inbox/', 'Your inbox', 'Reading mail and drafting replies from Claude'],
+			['/use/making-changes/', 'Making changes safely', 'Preview, confirm, and what can’t be undone'],
+		],
+	},
+	{
+		title: 'Trust the numbers',
+		who: 'Before you quote a figure',
+		icon: 'approve-check',
+		tone: 'pink',
+		links: [
+			['/use/kpis-and-targets/', 'KPIs and targets', 'Weekly minimums, billing, how calls count'],
+			['/use/metrics/', 'Metrics and definitions', 'What each number counts, and who gets credit'],
+			['/use/funnel/', 'The funnel', 'CV Sent to Placed, and the ratios that matter'],
+			['/use/data-caveats/', 'Data caveats', 'Where the numbers are soft, and why'],
+			['/use/glossary/', 'Glossary', 'DPE, JOF, Push & Tell and the rest'],
+			['/use/faq/', 'FAQ', 'Why doesn’t my call count? And more'],
+		],
+	},
+	{
+		title: 'Run it',
+		who: 'Admins and developers',
+		icon: 'setting',
+		tone: 'teal',
+		links: [
+			['/run/architecture/', 'Architecture', 'How data gets from RecruitCRM to Claude'],
+			['/run/sync/', 'Sync and webhooks', 'What is mirrored, and how often'],
+			['/run/metrics-layer/', 'The metrics layer', 'Where every figure is defined'],
+			['/run/connector/', 'The connector', 'octagon-mcp, auth, widgets and the write path'],
+			['/run/security/', 'Security model', 'Tokens, RLS, PII and delete guards'],
+			['/run/runbook/', 'Operations runbook', 'Deploys, backfills, tokens and incidents'],
+		],
+	},
+] as const;
+---
+
+<div class="oc-home not-content">
+	<section class="oc-band">
+		<svg class="oc-band__art" viewBox="0 0 600 600" aria-hidden="true">
+			<g fill="none" stroke-width="2">
+				{[260, 210, 160, 110].map((r, i) => {
+					const pts = Array.from({ length: 8 }, (_, k) => {
+						const a = (Math.PI / 4) * k + Math.PI / 8;
+						return `${300 + r * Math.cos(a)},${300 + r * Math.sin(a)}`;
+					}).join(' ');
+					return <polygon points={pts} stroke={['#df255e', '#75cbcf', 'rgba(255,255,255,0.22)', '#df255e'][i]} stroke-opacity={[0.55, 0.5, 1, 0.3][i]} />;
+				})}
+			</g>
+		</svg>
+		<div class="oc-wrap oc-band__inner">
+			<span class="oc-band__eyebrow">Octagon Analytics · Knowledge base</span>
+			<h1 id="_top">How it works, how to use it, and how far to trust the numbers.</h1>
+			<p>
+				Live recruitment analytics on RecruitCRM, with Claude as the way in. Guides for recruiters and
+				managers, and reference for the people who run it.
+			</p>
+			<button class="oc-band__search" type="button" data-oc-search>
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+				<span>Search the knowledge base</span>
+				<kbd>Ctrl K</kbd>
+			</button>
+		</div>
+	</section>
+
+	<div class="oc-wrap">
+		<div class="oc-cols">
+			{
+				columns.map((c) => (
+					<section class="oc-col" data-tone={c.tone}>
+						<header>
+							<span class="oc-col__icon"><Icon name={c.icon} size="1.15rem" /></span>
+							<div>
+								<h2>{c.title}</h2>
+								<span>{c.who}</span>
+							</div>
+						</header>
+						<ul>
+							{c.links.map(([href, title, text]) => (
+								<li>
+									<a href={href}>
+										<b>{title}</b>
+										<span>{text}</span>
+									</a>
+								</li>
+							))}
+						</ul>
+					</section>
+				))
+			}
+		</div>
+
+		<div class="oc-figures">
+			<span><b>{platform.commandCount}</b> commands in {plugins} plugins</span>
+			<span><b>{platform.toolCount}</b> connector tools</span>
+			<span><b>{platform.promptCount}</b> prompts</span>
+			<span><b>{platform.migrationCount}</b> migrations</span>
+			<span>octagon-mcp <b>{platform.connectorVersion}</b></span>
+			<a href="/run/architecture/">How it fits together →</a>
+		</div>
+	</div>
+</div>
+
+<script>
+	document.querySelector('[data-oc-search]')?.addEventListener('click', () => {
+		document.querySelector<HTMLButtonElement>('site-search button[data-open-modal]')?.click();
+	});
+</script>

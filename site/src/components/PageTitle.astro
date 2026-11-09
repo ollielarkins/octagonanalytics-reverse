@@ -1,0 +1,31 @@
+---
+// Page title with a section kicker: pink for the recruiter areas, teal for the admin areas.
+// The landing page draws its own hero, so it gets no title here.
+// Starlight's skip link and "Overview" TOC entry target this id.
+const PAGE_TITLE_ID = '_top';
+
+const { entry } = Astro.locals.starlightRoute;
+const id = entry.id.replace(/\.mdx?$/, '');
+
+const TRUST = ['use/kpis-and-targets', 'use/metrics', 'use/funnel', 'use/data-caveats', 'use/glossary', 'use/faq'];
+const OPERATE = ['run/runbook', 'run/contributing', 'run/writing-docs'];
+
+const section = id.startsWith('use/')
+	? { label: TRUST.includes(id) ? 'Trust the numbers' : 'Use it', tone: 'pink' }
+	: id.startsWith('run/')
+		? { label: OPERATE.includes(id) ? 'Operate it' : 'Run it', tone: 'teal' }
+		: null;
+const isHome = id === 'index' || id === '';
+---
+
+{
+	isHome ? (
+		<span class="oc-home-marker" hidden />
+
+	) : (
+		<div class="oc-pagehead">
+			{section && <span class="oc-kicker" data-tone={section.tone}>{section.label}</span>}
+			<h1 id={PAGE_TITLE_ID}>{entry.data.title}</h1>
+		</div>
+	)
+}

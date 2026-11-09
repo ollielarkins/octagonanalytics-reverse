@@ -1,0 +1,188 @@
+---
+title: Your day
+description: How "your day", /myday, /dayplan, /queue, /chase and the Octagon Coach help a recruiter decide what to do next.
+---
+
+import { CardGrid, LinkCard, Tabs, TabItem } from '@astrojs/starlight/components';
+import Example from '../../../components/Example.astro';
+
+For recruiters. It answers "what should I do today?": which command gives which view of your desk, how the day plan is built, and what the Octagon Coach sends you in Slack.
+
+## The short version
+
+| When | Ask | You get |
+|---|---|---|
+| Start of any chat | "dashboard" | Your desk, then a brief **your day** |
+| First thing | [`/myday`](/use/commands/#myday) | A standup: what needs a decision today |
+| Morning | [`/queue`](/use/commands/#queue) | Up to 10 ranked calls, with the admin for each drafted |
+| Planning | [`/dayplan`](/use/commands/#dayplan) | Octagon's standard day with your real items slotted in |
+| Mid-morning | [`/chase`](/use/commands/#chase) | One merged chase list across your whole pipeline |
+| End of day | [`/eod`](/use/commands/#eod) | Today on all five KPIs, against where the week needs to be |
+
+All of these scope to your own desk from your token. Pass a name (`/myday Keelan Riley`) to see someone else's. An admin login with no desk of its own gets the whole team's attention list.
+
+## Your day at the start of a chat
+
+When you open a chat and say **dashboard**, Claude shows your desk and then a brief **your day** from `my_day`: your most urgent items and any weekly KPI you are behind on. If your inbox is connected, a line such as *Inbox: 4 new since you last looked (2 routine, 1 to handle yourself, 1 other)* appears too (see [Your inbox](/use/inbox/)).
+
+"Your day" can also suggest **one command to try**, picked from your own data and only if you haven't used that command in 28 days. It says it once and doesn't push it again in the same chat.
+
+## /myday: the standup
+
+<Example ask="/myday" who="Recruiter">
+A short standup, most urgent first, naming the candidate or role and one next action for each:
+
+- **Interviews today, and tomorrow's to prep for** (from your RecruitCRM diary), with an offer of `/interviewprep`.
+- **Feedback due**: interviews held with nothing logged since. Silence in the system, not proof feedback wasn't given.
+- **Aging offers**: offer out with no response.
+- **Stalled candidates**: active stage, no movement.
+- **Cold open roles**: nothing happening on a live job.
+- **Client meetings** coming up, and how many have no type (so can't count as visits).
+- Any weekly KPI you're behind on, with the gap as a number.
+</Example>
+
+What the lists mean:
+
+| List | Rule |
+|---|---|
+| Aging offer | Open role, offer out 5 to 60 days with no movement |
+| Stalled | Open role, at CV Sent to Offered, no movement for 10 to 60 days |
+| Cold role | Open role with no candidate activity for 14 days |
+
+The 60-day ceiling is deliberate: beyond it a candidate is abandoned, not stalled. Full definitions are on [Metrics](/use/metrics/#desk-and-client-lists).
+
+## /queue: today's calls
+
+`/queue` (or "prep my queue") ranks your calls for today. At most 10 items, highest priority first, with the total before the caps.
+
+| Rank | Trigger | Cap |
+|---|---|---|
+| 1 | Offer out with no answer, 3 to 21 days | all |
+| 2 | Interview on the next working day: prep call | all |
+| 3 | Interview held, nothing logged: feedback call | all |
+| 3 | New job in the last 3 days: kick it off | all |
+| 4 | Interview request unbooked, 2 to 14 days | 3 |
+| 5 | CV sent, no response, 5+ working days | 3 |
+| 6 | Cold job, 7+ days without activity | 2 |
+| 7 | Behind on BD calls this week (Tuesday to Friday, tagged BD calls only) | 1 |
+
+There are also closing lines that are not calls: one "clean up these stages" line for older offers (over 21 days) and requests (over 14 days), untyped meetings (Mondays and Thursdays), client visits (Mondays, while under 2 this quarter), the Monday plan, and Push & Tell on Fridays.
+
+<Example ask="prep my queue" who="Recruiter">
+The numbered list first: the action, who, the job and the client. Then each item prepped in order, kept short:
+
+- **Offer**: what to ask the candidate (concerns, competing offers, start date) and what to tell the client.
+- **Prep**: likely questions, gaps to prepare for, questions to ask, as `/interviewprep`.
+- **Unbooked**: the booking call plus an email offering slots, with `[placeholders]` for times.
+- **Cold job**: a Boolean search and the top matches.
+
+If the queue is long, the first three are prepped in full and the rest offered one at a time.
+</Example>
+
+:::note[Everything from the queue is a draft]
+`/queue` never sends an email, moves a stage or changes RecruitCRM. If you want an email saved, it goes to your Outlook Drafts after a preview. Any candidate is checked against off-limit before being put forward.
+:::
+
+## /dayplan: Octagon's standard day
+
+`/dayplan` lays your day out on Octagon's standard structure and puts your **real** items into each block. A plan that says "make BD calls" is the timetable, not a plan.
+
+| Time | Block | Your items go here |
+|---|---|---|
+| 08:00–09:00 | Call shortlists and start candidate search | Feedback calls for interviews already held (feedback goes stale fastest) |
+| 09:00–10:00 | Review day plan, watchdogs, meetings; call new candidates; set up searches for focus jobs | |
+| 10:00–11:00 | Candidate time: call shortlists, prep or arrange interviews, LinkedIn | Aging offers, stalled candidates, prep calls for tomorrow's interviews |
+| 11:00–12:00 | Business development: call job and client lists; follow up pitched candidates | Prospects |
+| 12:00–13:00 | Lunch | |
+| 13:00–14:00 | Candidate time (shortlists and new candidates); watchdogs | |
+| 14:00–16:00 | Search and call candidates for the focus job | |
+| 16:00–16:30 | Admin: adverts, pitch candidates, leads, update deals | |
+| 16:30 onwards | Chase the strong candidates on your shortlists | |
+
+Today's interviews and client meetings go in at their actual times. Where you're behind a weekly KPI, the plan adds **one** nudge with the number in it, for example "at 3 of 10 CV sends: two out today would keep the week alive".
+
+<Example ask="plan my day" who="Recruiter">
+The nine blocks above, each naming specific roles and candidates from your desk ([Candidate] on [Job] at [Client]), interviews at their real times, and one KPI nudge at the end. If Claude can't tell whose desk you are, it says so and stops rather than planning a generic day.
+</Example>
+
+### The vacancy checklist
+
+For a new job, the same source sets Octagon's per-vacancy steps, which the queue's "new job" item and `/newjob` follow:
+
+1. Create pitch / research the job
+2. Shortlist using CRM
+3. Write and publish advert
+4. Mailshot CRM candidates
+5. Check similar vacancies and candidates
+6. Create job board watchdogs
+7. Local and relocate searches on job boards
+8. LinkedIn project and InMail
+
+Additional strategies: competitor searches, LinkedIn Recruiter similar profiles, an outsourced resourcing company, and sharing of old projects.
+
+### Chasing a shortlist
+
+The escalation order when a candidate goes quiet: call, voicemail, text message, email follow-up, call on a different number (landline or mobile), then connect and message on LinkedIn.
+
+## /chase: one list across your pipeline
+
+`/chase` merges four reports into **one** ordered list, capped at the ten that matter:
+
+1. **Aging offers**: an unanswered offer is the most expensive thing on any desk.
+2. **Candidates interviewed with nothing logged**: the duty-of-care risk, and the client is usually waiting too.
+3. **Interview requests never booked**: momentum lost between request and diary.
+4. **Stalled candidates** on open roles.
+5. **Cold open roles** with nothing happening (7 days for this list).
+
+<Example ask="/chase" who="Recruiter">
+Up to ten lines, in that priority order: who or what, how many days, and the single next action. Items 2 and 3 are framed as "worth a check", because they measure what was **recorded**: some will already have been handled and not logged.
+</Example>
+
+## The Octagon Coach in Slack
+
+The Octagon Coach is a separate Slack app that DMs you named suggestions from your own numbers. Each suggestion names the command to use in your own Claude. It is rule-based: no AI runs on the server, and your candidate and client data stays in your own Claude.
+
+:::note[Who gets it]
+The Coach goes to a pilot group only (four consultants as of 04/11/2026). It ran in shadow mode, with previews going to Oliver only; the operations runbook records shadow mode switched off on 05/11/2026. If you are not in the pilot, you get nothing in Slack: `/myday` and `/queue` cover the same ground in Claude.
+:::
+
+<Tabs>
+	<TabItem label="Monday 08:45">
+		The week ahead: your week's plan worked back from your billing target, billing pace, and your biggest offers.
+	</TabItem>
+	<TabItem label="12:30 weekdays">
+		The main check: today so far, the afternoon's top 3, and one command to try.
+	</TabItem>
+	<TabItem label="16:45 weekdays">
+		Admin before home time, with one-press tagging of today's untagged client-contact calls. Fridays add the week, compared with the last.
+	</TabItem>
+</Tabs>
+
+### How it behaves
+
+- **At most 3 suggestions** per message, skipping anything already done today. Gentle on Mondays and Tuesdays.
+- **No repeats**: a kind of suggestion made on your last coached day is skipped today. Offers, interview prep and call tagging are exempt.
+- **Quiet days are skipped**: midday and wrap are not sent on a day with nothing logged at all (no call, stage move, queue item done or Octagon use).
+- **Ahead of pace with nothing urgent** gets one line, no stats.
+
+### The buttons
+
+| Button | Does |
+|---|---|
+| Done | Marks a suggestion done |
+| Snooze | Puts a suggestion off |
+| Pause | Pauses the coach for today |
+| Mute | Mutes it |
+| Away | "Away? Pick your last day off" pauses the coach until that date. RecruitCRM's diary holds no leave, so this is the only way it knows |
+| Tag as shown (16:45) | Tags only the calls listed in that message, checks each is yours and still untagged, reads each back, and stops at the first problem. The only Coach button that writes to RecruitCRM |
+
+The day's "share" in the Coach is your weekly plan ÷ 5, rounded up. "Pace" is plan × days so far ÷ 5 (half of today at midday). See [KPIs and targets](/use/kpis-and-targets/#your-weekly-plan).
+
+:::caution[What the Coach does not know]
+Nothing on the platform knows who is on leave. If you are off and haven't set an Away date, your KPI and queue figures will look like a bad week.
+:::
+
+<CardGrid>
+	<LinkCard title="KPIs and targets" href="/use/kpis-and-targets/" description="The weekly minimums, your plan from billing, and how calls count." />
+	<LinkCard title="Slack and the Coach (admin)" href="/run/slack/" description="How the Coach is configured, piloted and measured." />
+</CardGrid>
