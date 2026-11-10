@@ -6,6 +6,8 @@
 //                           what someone does today
 //   evening  17:30 Mon-Fri  backward-looking, sent once activity is 99.6% done for the day
 //   weekly   08:00 Mon      the slow movers: cold roles, job order forms, last week closed out
+//   eow      16:30 Fri      the end-of-week team email, to Dale only (see sendEow below)
+//   eod      15:30 Mon-Fri  end-of-day KPI stats, to Dale only (see sendEod; off until 0160)
 //
 // A midday digest was deliberately NOT built. It would capture ~68% of the day (incomplete),
 // arrive after the morning it might have influenced, and repeat itself at 17:30.
@@ -20,6 +22,7 @@
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { forbidden, trustedCaller } from "../_shared/caller.ts";
+import { dmy, eowSubject, loadEow, renderEowHtml } from "../_shared/eow.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -310,12 +313,223 @@ function renderWeekly(d: any) {
   };
 }
 
+// ---------- the Friday end-of-week email to Dale ----------
+// Same content as the eow_email tool's Outlook draft (shared renderer), sent via Resend every
+// Friday at 16:30 London to the one address in app_settings.eow_to_email. Dale reviews it, adds
+// his comments and forwards it to the team. Window: Monday of this London week to tomorrow,
+// end-exclusive, so a Friday send covers Monday to Friday. public.eow_sends allows one send per
+// week: the row is claimed before sending and released if Resend refuses, so a retry can go out.
+const CRM_TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
+
+async function crmGet(path: string) {
+  if (!CRM_TOKEN) return null;
+  const res = await fetch(`https://api.recruitcrm.io/v1${path}`, { headers: { Authorization: `Bearer ${CRM_TOKEN}`, Accept: "application/json" } });
+  if (!res.ok) return null;
+  const j = await res.json().catch(() => null);
+  return j?.data ?? j;
+}
+
+async function contactName(jobSlug: string) {
+  const job = await crmGet(`/jobs/${jobSlug}`);
+  if (!job?.contact_slug) return null;
+  const c = await crmGet(`/contacts/${job.contact_slug}`);
+  return [c?.first_name, c?.last_name].filter(Boolean).join(" ") || null;
+}
+
+// London calendar date as YYYY-MM-DD, shifted by `days`.
+function londonIso(days = 0) {
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const d = new Date(`${today}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+async function sendEow(dry: boolean) {
+  const todayIso = londonIso(0);
+  const dow = new Date(`${todayIso}T00:00:00Z`).getUTCDay();
+  const from = londonIso(-((dow + 6) % 7));
+  const to = londonIso(1);
+  const eow = await loadEow(db, { p_from: from, p_to: to }, contactName);
+  if ("error" in eow) return Response.json({ kind: "eow", error: eow.error }, { status: 500 });
+
+  const { data: health } = await db.rpc("sync_health");
+  const healthy = (health as any)?.overall === "ok";
+  const lastDay = dmy(londonIso(0));
+  const preface = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;background:#f3f4f6;border:1px solid #d9d9d9;"><tr><td style="padding:10px 12px;font-family:Calibri,Arial,sans-serif;font-size:13px;color:#374151;">`
+    + `<b>For Dale, remove before forwarding.</b> Automated end-of-week figures for ${dmy(from)} to ${lastDay}, from RecruitCRM via the Octagon metrics layer. `
+    + `Add your comments to the shout-outs, then share with the team. Candidate names are internal: team only, never clients. `
+    + `BD calls count only tagged Devyce calls, so they can under-report.`
+    + (healthy ? "" : ` <span style="color:#b45309;"><b>Sync is not healthy, so some figures may be stale.</b></span>`)
+    + `</td></tr></table>`;
+  const html = renderEowHtml(eow, { preface });
+  const subject = eowSubject(from);
+
+  if (dry) return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+
+  const { data: row } = await db.from("app_settings").select("value").eq("key", "eow_to_email").maybeSingle();
+  const recipient = (row?.value ?? "").trim();
+  if (!recipient) return Response.json({ kind: "eow", sent: false, reason: "eow_to_email not set in app_settings" });
+  if (!RESEND_KEY) return Response.json({ kind: "eow", sent: false, reason: "RESEND_API_KEY not set", subject });
+
+  const { data: claim, error: claimErr } = await db.from("eow_sends")
+    .upsert({ week_start: from, status: "sending" }, { onConflict: "week_start", ignoreDuplicates: true }).select("week_start");
+  if (claimErr) return Response.json({ kind: "eow", sent: false, error: claimErr.message }, { status: 500 });
+  if (!claim?.length) return Response.json({ kind: "eow", sent: false, reason: `already sent for week starting ${dmy(from)}` });
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: MAIL_FROM, to: [recipient], subject, html }),
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    await db.from("eow_sends").delete().eq("week_start", from);
+    return Response.json({ kind: "eow", sent: false, status: res.status, detail: body.slice(0, 300) });
+  }
+  let id: string | null = null; try { id = JSON.parse(body)?.id ?? null; } catch { /* keep null */ }
+  await db.from("eow_sends").update({ status: "sent", sent_at: new Date().toISOString(), resend_id: id, window_to: to }).eq("week_start", from);
+  return Response.json({ kind: "eow", sent: true, subject, window: { from, to_exclusive: to } });
+}
+
+// ---------- the weekday 15:30 end-of-day stats email to Dale ----------
+// The /eod report as an email: today's activity on the five weekly KPIs, firm and per consultant,
+// against where the week stands. Same plain Calibri tables as the EOW email so Dale can forward it.
+// Sent to app_settings.eod_to_email; public.eod_sends allows one send per day. Neither the table
+// nor the schedule exists until migration 0160 is applied, which waits on the org rule allowing
+// this send, so until then a non-dry call fails before Resend is ever reached.
+const BD_CATS = ["Contact - Prospect (BD)"];
+const CLIENT_CATS = ["Contact - Client", "Contact - Client Info"];
+const KPI_KEYS = ["cv_sent", "interview_request", "first_interview", "bd_calls", "client_calls", "placed"];
+
+function catCount(byCat: any[], cats: string[]) {
+  return (byCat ?? []).filter((c: any) => cats.includes(c.category)).reduce((n: number, c: any) => n + Number(c.calls ?? 0), 0);
+}
+
+async function sendEod(dry: boolean) {
+  const today = londonIso(0), tomorrow = londonIso(1);
+  const [{ data: kpis, error: kErr }, { data: funnel, error: fErr }, { data: calls, error: cErr }, { data: health }] = await Promise.all([
+    db.rpc("kpis_report"),
+    db.rpc("funnel_report", { p_from: today, p_to: tomorrow, p_consultant: null, p_team: null }),
+    db.rpc("call_activity_report", { p_from: today, p_to: tomorrow, p_consultant: null, p_team: null }),
+    db.rpc("sync_health"),
+  ]);
+  const err = kErr ?? fErr ?? cErr;
+  if (err) return Response.json({ kind: "eod", error: err.message }, { status: 500 });
+
+  const people: any[] = (kpis as any)?.consultants ?? [];
+  const fByName = new Map(((funnel as any)?.consultants ?? []).map((c: any) => [c.name, c]));
+  const cByName = new Map(((calls as any)?.by_consultant ?? []).map((c: any) => [c.name, c]));
+  // by_category is window-wide, so today's BD and client calls per person need one call each.
+  const perCalls = await Promise.all(people.map(async (p) => {
+    const { data } = await db.rpc("call_activity_report", { p_from: today, p_to: tomorrow, p_consultant: p.name, p_team: null });
+    return (data as any)?.by_category ?? [];
+  }));
+
+  const rows = people.map((p, i) => {
+    const f: any = fByName.get(p.name) ?? {}, c: any = cByName.get(p.name) ?? {};
+    return {
+      name: p.name,
+      today: { cv_sent: f.cv_sent ?? 0, interview_request: f.interview_request ?? 0, first_interview: f.first_interview ?? 0,
+        bd_calls: catCount(perCalls[i], BD_CATS), client_calls: catCount(perCalls[i], CLIENT_CATS), placed: f.placed ?? 0 },
+      untagged: { bd: c.untagged_likely_bd ?? 0, client: c.untagged_likely_client ?? 0 },
+      week: p,
+    };
+  })
+    // Someone with no weekly targets and nothing logged this week (not a fee-earning desk) is noise.
+    .filter((r) => KPI_KEYS.some((k) => r.week[k]?.target != null || Number(r.week[k]?.actual ?? 0) > 0 || Number((r.today as any)[k] ?? 0) > 0))
+    .sort((a, b) => b.today.cv_sent - a.today.cv_sent || a.name.localeCompare(b.name));
+
+  const KPIS: [string, string][] = [["cv_sent", "CV sends"], ["interview_request", "Interview requests"], ["first_interview", "Interviews (1st)"],
+    ["bd_calls", "BD calls*"], ["client_calls", "Client calls*"], ["placed", "Placed"]];
+  const ft = (funnel as any)?.totals ?? {}, ct = (calls as any)?.totals ?? {};
+  const byCat = (calls as any)?.by_category ?? [];
+  const firmToday: Record<string, number> = {
+    cv_sent: ft.cv_sent ?? 0, interview_request: ft.interview_request ?? 0, first_interview: ft.first_interview ?? 0,
+    bd_calls: catCount(byCat, BD_CATS), client_calls: catCount(byCat, CLIENT_CATS), placed: ft.placed ?? 0,
+  };
+  const sum = (k: string, f: "actual" | "target") => people.reduce((n, p) => n + Number(p[k]?.[f] ?? 0), 0);
+
+  const h = (s: any) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+  const TH = 'style="background:#0b4479;color:#fff;padding:6px 10px;border:1px solid #d9d9d9;text-align:left"';
+  const TD = (i: number) => `style="padding:6px 10px;border:1px solid #d9d9d9;${i % 2 ? "background:#f1eee8;" : ""}"`;
+  const tbl = (head: string[], body: any[][]) => `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:14px;margin:8px 0 18px">`
+    + `<tr>${head.map((x) => `<th ${TH}>${h(x)}</th>`).join("")}</tr>`
+    + body.map((r, i) => `<tr>${r.map((x) => `<td ${TD(i)}>${h(x)}</td>`).join("")}</tr>`).join("") + `</table>`;
+  const gapTxt = (a: number, t: number) => a >= t ? "on track" : `${a - t}`;
+  const plusUntagged = (n: number) => n ? ` (+${n} untagged)` : "";
+
+  const firm = tbl(["KPI", "Today", "Week to date", "Weekly target", "Gap"], KPIS.map(([k, label]) => {
+    const wtd = sum(k, "actual");
+    const extra = k === "bd_calls" ? plusUntagged(ct.untagged_likely_bd ?? 0) : k === "client_calls" ? plusUntagged(ct.untagged_likely_client ?? 0) : "";
+    if (k === "placed") return [label, firmToday[k], wtd, "—", "—"];
+    const t = sum(k, "target");
+    return [label, `${firmToday[k]}${extra}`, wtd, t, gapTxt(wtd, t)];
+  }));
+  const cell = (r: any, k: string) => {
+    const wtd = r.week[k]?.actual ?? 0, t = r.week[k]?.target;
+    const extra = k === "bd_calls" ? plusUntagged(r.untagged.bd) : k === "client_calls" ? plusUntagged(r.untagged.client) : "";
+    return `${r.today[k]}${extra} / ${wtd}${t == null ? "" : ` of ${t}`}`;
+  };
+  const perTbl = tbl(["Team member", ...KPIS.map(([, l]) => l)], rows.map((r) => [r.name, ...KPIS.map(([k]) => cell(r, k))]));
+
+  const moves = [["2nd interview", ft.second_interview], ["3rd interview", ft.third_interview], ["offer", ft.offered]]
+    .filter(([, n]) => Number(n) > 0).map(([l, n]) => `${n} ${l}${Number(n) === 1 ? "" : "s"}`);
+  const untaggedCalls = catCount(byCat, ["(uncategorised)"]);
+  const rate = ct.connect_rate == null ? "—" : `${(Number(ct.connect_rate) * 100).toFixed(1)}%`;
+  const healthy = (health as any)?.overall === "ok";
+  const nowLondon = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" }).format(new Date());
+
+  const html = `<div style="font-family:Calibri,Arial,sans-serif;font-size:15px">`
+    + `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;background:#f3f4f6;border:1px solid #d9d9d9;"><tr><td style="padding:10px 12px;font-family:Calibri,Arial,sans-serif;font-size:13px;color:#374151;">`
+    + `<b>For Dale, remove before forwarding.</b> Automated end-of-day stats for ${dmy(today)}, as at ${h(nowLondon)}, from RecruitCRM via the Octagon metrics layer. `
+    + `Anything logged after this time lands in tomorrow's week-to-date.`
+    + (healthy ? "" : ` <span style="color:#b45309;"><b>Sync is not healthy, so some figures may be stale.</b></span>`)
+    + `</td></tr></table>`
+    + `<p><b>Daily KPIs, firm</b></p>${firm}`
+    + `<p><b>By team member</b> (today / week to date of weekly target, highest CV sends today first)</p>${perTbl}`
+    + (moves.length ? `<p><b>Other stage movement today:</b> ${h(moves.join(", "))}.</p>` : "")
+    + `<p><b>Calls today:</b> ${ct.calls ?? 0} total, ${ct.connected ?? 0} connected (${rate}), ${Math.round(Number(ct.talk_minutes ?? 0))} minutes talk time, ${untaggedCalls} with no category.`
+    + ((ct.untagged_likely_bd ?? 0) + (ct.untagged_likely_client ?? 0) ? ` ${ct.untagged_likely_bd ?? 0} untagged calls look like BD and ${ct.untagged_likely_client ?? 0} look like client calls; tagging them with /tagcalls puts them in the count.` : "")
+    + `</p>`
+    + `<p style="font-size:13px;color:#5b6472">* BD and client calls count only categorised Devyce calls, so they under-report. "+N untagged" is a guess from the contact's history (it matches recruiters' own tags 84% of the time) and is never added to the figure. Funnel counts are candidate-job pairs credited to whoever moved the stage. Early-week gaps are expected.</p>`
+    + `</div>`;
+  const subject = `End of day: ${dmy(today)}`;
+
+  if (dry) return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
+
+  const { data: row } = await db.from("app_settings").select("value").eq("key", "eod_to_email").maybeSingle();
+  const recipient = (row?.value ?? "").trim();
+  if (!recipient) return Response.json({ kind: "eod", sent: false, reason: "eod_to_email not set in app_settings" });
+  if (!RESEND_KEY) return Response.json({ kind: "eod", sent: false, reason: "RESEND_API_KEY not set", subject });
+
+  const { data: claim, error: claimErr } = await db.from("eod_sends")
+    .upsert({ day: today, status: "sending" }, { onConflict: "day", ignoreDuplicates: true }).select("day");
+  if (claimErr) return Response.json({ kind: "eod", sent: false, error: claimErr.message }, { status: 500 });
+  if (!claim?.length) return Response.json({ kind: "eod", sent: false, reason: `already sent for ${dmy(today)}` });
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${RESEND_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ from: MAIL_FROM, to: [recipient], subject, html }),
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    await db.from("eod_sends").delete().eq("day", today);
+    return Response.json({ kind: "eod", sent: false, status: res.status, detail: body.slice(0, 300) });
+  }
+  let id: string | null = null; try { id = JSON.parse(body)?.id ?? null; } catch { /* keep null */ }
+  await db.from("eod_sends").update({ status: "sent", sent_at: new Date().toISOString(), resend_id: id }).eq("day", today);
+  return Response.json({ kind: "eod", sent: true, subject });
+}
+
 // ---------- entry ----------
 Deno.serve(async (req) => {
   if (!trustedCaller(req)) return forbidden();
   const url = new URL(req.url);
   const kind = (url.searchParams.get("kind") ?? "morning").toLowerCase();
   const dry = url.searchParams.get("dry") === "1";
+  if (kind === "eow") return sendEow(dry);
+  if (kind === "eod") return sendEod(dry);
 
   const fn = { morning: "digest_morning", evening: "digest_evening", weekly: "digest_weekly" }[kind];
   if (!fn) return Response.json({ error: `unknown kind '${kind}'` }, { status: 400 });
