@@ -24,11 +24,12 @@
 // Connector URL: https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/octagon-mcp
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { graph, graphConfigured, mbx } from "../_shared/graph.ts";
+import { loadEow, renderEowHtml, eowSubject, EOW_THRESHOLDS } from "../_shared/eow.ts";
 import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHBOARD_WIDGET_HTML, SCORECARD_WIDGET_HTML, CONFIRM_WIDGET_HTML, REPORT_WIDGET_HTML, MIXED_WIDGET_HTML, WIDGET_RESOURCE_META, DASHBOARD_WIDGET_LINKED } from "./widgets.ts";
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.101.0" };
+const SERVER = { name: "octagon-analytics", version: "3.101.1" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -3703,26 +3704,16 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (!actor.sees_team) return toolText({ error: "The end-of-week team email is for managers and admins." });
     const action = String(args?.action ?? "report").toLowerCase();
     const p = { p_from: args?.from ?? isoMonday(), p_to: args?.until ?? isoDaysAgo(-1) };
-    const { data: rep, error } = await db.rpc("eow_report", p);
-    if (error) return toolText({ error: error.message });
-    // Contact names are not in the mirror; fetch them live for the week's new jobs (a handful).
-    for (const j of rep.jobs ?? []) {
-      const r = await crm("GET", `/jobs/${j.slug}`); const cs = (r.json?.data ?? r.json)?.contact_slug;
-      if (cs) { const c = await crm("GET", `/contacts/${cs}`); const d = c.json?.data ?? c.json ?? {}; j.contact = [d.first_name, d.last_name].filter(Boolean).join(" ") || null; }
-      delete j.slug;
-    }
-    const first = (n: string) => String(n ?? "").split(" ")[0];
-    const people = (rep.consultants ?? []).filter((c: any) => !c.left);
-    const named = (rows: any[], k: string) => rows.sort((a, b) => b[k] - a[k]).map((c) => `${first(c.name)} (${c[k]})`);
-    const shout = {
-      cv_sent: named(people.filter((c: any) => c.cv_sent >= 10), "cv_sent"),
-      interview_requests: named(people.filter((c: any) => c.interview_requests >= 4), "interview_requests"),
-      bd_calls: named(people.filter((c: any) => c.bd_calls >= 10), "bd_calls"),
-      offers: people.filter((c: any) => c.offers > 0).sort((a: any, b: any) => b.offers - a.offers).map((c: any) => c.offers > 1 ? `${first(c.name)} (${c.offers})` : first(c.name)),
+    const contactName = async (slug: string) => {
+      const r = await crm("GET", `/jobs/${slug}`); const cs = (r.json?.data ?? r.json)?.contact_slug;
+      if (!cs) return null;
+      const c = await crm("GET", `/contacts/${cs}`); const d = c.json?.data ?? c.json ?? {};
+      return [d.first_name, d.last_name].filter(Boolean).join(" ") || null;
     };
-    const { data: wplan } = await db.rpc("weekly_plan");
-    const planRows = ((wplan?.consultants ?? []) as any[]).filter((x) => people.some((c: any) => c.name === x.consultant));
-    if (action === "report") return toolText({ ...rep, shout_outs: shout, plan: planRows, thresholds: "10+ CVs sent, 4+ interview requests, 10+ BD calls, any offer",
+    const eow = await loadEow(db, p, contactName);
+    if ("error" in eow) return toolText({ error: eow.error });
+    const { rep, shout, planRows } = eow;
+    if (action === "report") return toolText({ ...rep, shout_outs: shout, plan: planRows, thresholds: EOW_THRESHOLDS,
       notes: "Same counting as /week. Candidates assigned counts each candidate put on a job, credited to whoever assigned them (tracked from 01/09/2026). Rows with no activity are left out; leavers tagged left. Candidate names are internal: this email is for the team only." });
 
     if (action === "draft") {
@@ -3730,51 +3721,16 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       const box = await myMailbox(actor.id);
       if (!box) return toolText({ error: "not_connected", message: "Connect your inbox first (inbox action=connect). The draft is saved in your own Outlook." });
       if (!graphConfigured()) return toolText({ error: "not_configured", message: "Microsoft 365 link not set up yet." });
-      const h = (s: any) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
-      const para = (s: any) => String(s ?? "").trim() ? `<p>${h(s).replace(/\n/g, "<br>")}</p>` : "";
-      const list = (xs: string[]) => xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
-      const dmy = (s: any) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s ?? "")); return m ? `${m[3]}/${m[2]}/${m[1]}` : h(s); };
       const c = args?.comments ?? {};
       const t = rep.totals ?? {};
-      const shoutLine = (label: string, xs: string[], comment: any) => xs.length ? `<li><b>${label}:</b> ${h(list(xs))}.${String(comment ?? "").trim() ? " " + h(comment) : ""}</li>` : "";
-      const TH = 'style="background:#0b4479;color:#fff;padding:6px 10px;border:1px solid #d9d9d9;text-align:left"';
-      const TD = (i: number) => `style="padding:6px 10px;border:1px solid #d9d9d9;${i % 2 ? "background:#f1eee8;" : ""}"`;
-      const table = (head: string[], rows: any[][]) => `<table style="border-collapse:collapse;font-family:Calibri,Arial,sans-serif;font-size:14px;margin:8px 0 18px">`
-        + `<tr>${head.map((x) => `<th ${TH}>${h(x)}</th>`).join("")}</tr>`
-        + rows.map((r, i) => `<tr>${r.map((x) => `<td ${TD(i)}>${h(x)}</td>`).join("")}</tr>`).join("") + `</table>`;
-      const team = table(["Team member", "Jobs added", "Candidates assigned", "CVs sent", "IV requests", "Interviews", "Offers", "BD calls"],
-        [...(rep.consultants ?? []).map((r: any) => [r.left ? `${r.name} (left)` : r.name, r.jobs_added, r.candidates_assigned, r.cv_sent, r.interview_requests, r.interviews, r.offers, r.bd_calls]),
-         ["Total", t.jobs_added, t.candidates_assigned, t.cv_sent, t.interview_requests, t.interviews, t.offers, t.bd_calls]]);
-      const offersT = (rep.offers ?? []).length ? table(["Candidate", "Company", "Job", "Current stage", "Stage date", "Offered by"],
-        rep.offers.map((o: any) => [o.candidate, o.company, o.job, o.current_stage, dmy(o.current_stage_date), o.offered_by])) : "<p>No offers this week.</p>";
-      const jobsT = (rep.jobs ?? []).length ? table(["Job", "Company", "Contact", "Status", "Date added", "Owner"],
-        rep.jobs.map((j: any) => [j.title, j.company, j.contact ?? "", j.status, dmy(j.date_added), j.owner])) : "<p>No new jobs this week.</p>";
-      // Priority 5: actuals against each consultant's plan (worked back from billing), with the gap.
-      const gap = (a: any, p: any) => { const d = Number(a ?? 0) - Number(p ?? 0); return d >= 0 ? `${a} of ${p}` : `${a} of ${p} (${d})`; };
-      const planT = planRows.length ? table(["Team member", "CVs sent", "IV requests", "Interviews", "Step to work on", "Quarter so far"],
-        planRows.map((x: any) => [x.consultant, gap(x.this_week?.cv_sent, x.plan?.cv_sent), gap(x.this_week?.interview_request, x.plan?.interview_request),
-          gap(x.this_week?.first_interview, x.plan?.first_interview), x.ratio_to_work_on ?? "",
-          x.quarter_position?.target == null ? `£${Number(x.quarter_position?.won_by_close_date ?? 0).toLocaleString("en-GB")} (no target set)`
-            : `£${Number(x.quarter_position?.won_by_close_date ?? 0).toLocaleString("en-GB")} of £${Number(x.quarter_position.target).toLocaleString("en-GB")}`])) : "";
-      const html = `<div style="font-family:Calibri,Arial,sans-serif;font-size:15px">`
-        + `<p>${h(args?.greeting ?? "Hi all,")}</p>` + para(args?.intro)
-        + `<p>Here's how the week shaped up:</p><ul>`
-        + `<li>📄 ${t.cv_sent ?? 0} CVs sent to clients</li><li>📞 ${t.interview_requests ?? 0} interview requests secured</li>`
-        + `<li>☎️ ${t.bd_calls ?? 0} BD calls made</li><li>🎉 ${t.offers ?? 0} offer${t.offers === 1 ? "" : "s"} landed</li></ul>`
-        + `<p>Shout-outs:</p><ul>`
-        + shoutLine("10+ CVs sent", shout.cv_sent, c.cv_sent) + shoutLine("4+ interview requests", shout.interview_requests, c.interview_requests)
-        + shoutLine("10+ BD calls", shout.bd_calls, c.bd_calls) + shoutLine("Offers landed: congrats to", shout.offers, c.offers) + `</ul>`
-        + para(args?.closing)
-        + `<p><b>Team</b></p>${team}`
-        + (planT ? `<p><b>Against plan</b> (each person's weekly plan, worked back from their billing target)</p>${planT}` : "")
-        + `<p><b>Offers</b></p>${offersT}<p><b>Jobs</b></p>${jobsT}</div>`;
+      const html = renderEowHtml(eow, { greeting: args?.greeting, intro: args?.intro, closing: args?.closing, comments: c });
 
       // Recipients: as given, else every current consultant with an email on record.
       let to: string[] = Array.isArray(args?.to) ? args.to.map((x: any) => String(x).trim()).filter(Boolean) : [];
       if (!to.length) { const { data: cs } = await db.from("consultants").select("email").is("deleted_at", null).eq("active", true); to = (cs ?? []).map((x: any) => x.email).filter(Boolean); }
       const bad = to.filter((e) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
       if (bad.length) return toolText({ error: "bad_address", addresses: bad });
-      const subject = String(args?.subject ?? `End of week: ${dmy(p.p_from)}`).trim();
+      const subject = String(args?.subject ?? eowSubject(p.p_from)).trim();
       if (!args?.confirm) return toolText({ mode: "preview", action: "eow_email_draft", to, subject, window: rep.window, totals: t, shout_outs: shout,
         comments_used: c, intro: args?.intro ?? null, closing: args?.closing ?? null, tables: { team_rows: (rep.consultants ?? []).length, offers: (rep.offers ?? []).length, jobs: (rep.jobs ?? []).length },
         what_happens: "Saved to your Outlook Drafts as a formatted email with the three tables. Never sent: you review and send it from Outlook.",
