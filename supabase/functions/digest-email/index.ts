@@ -6,7 +6,7 @@
 //                           what someone does today
 //   evening  17:30 Mon-Fri  backward-looking, sent once activity is 99.6% done for the day
 //   weekly   08:00 Mon      the slow movers: cold roles, job order forms, last week closed out
-//   eow      16:30 Fri      the end-of-week team email, to Dale only (see sendEow below)
+//   eow      15:30 Fri      the end-of-week team email, to Dale only (see sendEow below)
 //   eod      15:30 Mon-Fri  end-of-day KPI stats, to Dale only (see sendEod below)
 //
 // A midday digest was deliberately NOT built. It would capture ~68% of the day (incomplete),
@@ -315,7 +315,7 @@ function renderWeekly(d: any) {
 
 // ---------- the Friday end-of-week email to Dale ----------
 // Same content as the eow_email tool's Outlook draft (shared renderer), sent via Resend every
-// Friday at 16:30 London to the one address in app_settings.eow_to_email. Dale reviews it, adds
+// Friday at 15:30 London (0161) to the one address in app_settings.eow_to_email. Dale reviews it, adds
 // his comments and forwards it to the team. Window: Monday of this London week to tomorrow,
 // end-exclusive, so a Friday send covers Monday to Friday. public.eow_sends allows one send per
 // week: the row is claimed before sending and released if Resend refuses, so a retry can go out.
