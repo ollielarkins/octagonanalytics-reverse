@@ -7,7 +7,7 @@
 //   evening  17:30 Mon-Fri  backward-looking, sent once activity is 99.6% done for the day
 //   weekly   08:00 Mon      the slow movers: cold roles, job order forms, last week closed out
 //   eow      16:30 Fri      the end-of-week team email, to Dale only (see sendEow below)
-//   eod      15:30 Mon-Fri  end-of-day KPI stats, to Dale only (see sendEod; off until 0160)
+//   eod      15:30 Mon-Fri  end-of-day KPI stats, to Dale only (see sendEod below)
 //
 // A midday digest was deliberately NOT built. It would capture ~68% of the day (incomplete),
 // arrive after the morning it might have influenced, and repeat itself at 17:30.
@@ -394,9 +394,8 @@ async function sendEow(dry: boolean) {
 // ---------- the weekday 15:30 end-of-day stats email to Dale ----------
 // The /eod report as an email: today's activity on the five weekly KPIs, firm and per consultant,
 // against where the week stands. Same plain Calibri tables as the EOW email so Dale can forward it.
-// Sent to app_settings.eod_to_email; public.eod_sends allows one send per day. Neither the table
-// nor the schedule exists until migration 0160 is applied, which waits on the org rule allowing
-// this send, so until then a non-dry call fails before Resend is ever reached.
+// Sent to app_settings.eod_to_email; public.eod_sends (migration 0160) allows one send per day,
+// and without that table a non-dry call fails before Resend is ever reached.
 const BD_CATS = ["Contact - Prospect (BD)"];
 const CLIENT_CATS = ["Contact - Client", "Contact - Client Info"];
 const KPI_KEYS = ["cv_sent", "interview_request", "first_interview", "bd_calls", "client_calls", "placed"];

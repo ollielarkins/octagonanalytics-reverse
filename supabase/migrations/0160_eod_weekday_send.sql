@@ -1,11 +1,11 @@
 -- 0160_eod_weekday_send.sql
 -- The end-of-day stats email (digest-email?kind=eod), sent to Dale every weekday at 15:30 London.
 --
--- NOT APPLIED on 10/11/2026: the org instructions then allowed only the Friday EOW email to be sent
--- automatically. Apply only once they also allow this one. Until then eod_sends does not exist, so
--- a non-dry call to kind=eod fails at the claim and never reaches Resend.
+-- Written while the org rule allowed only the Friday EOW auto-send; applied 10/11/2026 once the
+-- rule also allowed a weekday 15:30 EOD email to Dale. Without eod_sends a non-dry call to
+-- kind=eod fails at the claim and never reaches Resend.
 --
--- After applying, set the recipient by hand (kept out of this public repo):
+-- The recipient is set by hand (kept out of this public repo):
 --   insert into public.app_settings (key, value) values ('eod_to_email', '<address>')
 --   on conflict (key) do update set value = excluded.value;
 
