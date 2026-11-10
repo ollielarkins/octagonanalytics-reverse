@@ -114,7 +114,7 @@ Candidate data is personal data. These are rules, not style preferences.
 </CardGrid>
 
 - **Call notes** are read live through `/call-logs/search` for one person at a time, and every read writes a `read_call_notes` audit row.
-- **Email:** parse `is_email_opted_out` explicitly, because RecruitCRM returns it as the string `"true"` or `"false"`. Sent email cannot be recalled. Inbox replies, Push & Tell and `/eow` are saved as Outlook drafts, never sent. The only automatic send is the Friday 16:30 end-of-week email to one address (`app_settings.eow_to_email`), once per week (`eow_sends`).
+- **Email:** parse `is_email_opted_out` explicitly, because RecruitCRM returns it as the string `"true"` or `"false"`. Sent email cannot be recalled. Inbox replies, Push & Tell and `/eow` are saved as Outlook drafts, never sent. The only automatic sends are the weekday 15:30 end-of-day email and the Friday 15:30 end-of-week email, each to one address (`app_settings.eod_to_email`, `eow_to_email`) and at most once per day or week (`eod_sends`, `eow_sends`).
 - **No AI on the server:** drafting happens in the person's own Claude, so email and candidate content goes to Anthropic only when that person asks for a draft.
 
 ## Off-limit enforcement
