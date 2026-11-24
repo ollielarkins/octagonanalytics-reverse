@@ -74,6 +74,8 @@ html,body{margin:0;background:transparent;color:var(--o-text);font-family:var(--
 .title{font-size:var(--font-heading-md-size,16px);font-weight:var(--font-weight-medium,500)}
 .cap{margin-left:auto;font-size:12px;color:var(--o-text-3);text-align:right}
 .note{font-size:12px;color:var(--o-text-3);margin-top:12px}
+.rev{display:flex;align-items:center;gap:12px;margin-top:12px;padding:10px 12px;border:1px solid var(--o-border-2);border-left:3px solid var(--o-chip);border-radius:var(--o-r-md);font-size:13px}
+.rev>span{flex:1}.rev .btn{flex:none}
 .sec{font-size:var(--font-heading-md-size,16px);font-weight:var(--font-weight-medium,500);margin:24px 0 12px}
 .chip{display:inline-block;font-size:12px;font-weight:500;padding:2px 8px;border-radius:var(--o-r-full);background:var(--o-chip);color:var(--o-on-chip)}
 .warn{margin:0 0 14px;padding:8px 12px;border-radius:var(--o-r-md);background:var(--o-warn-bg);color:var(--o-warn);font-size:13px}
@@ -182,6 +184,9 @@ const RUNTIME_JS = String.raw`
 var GBP=function(n){return n==null?'—':'£'+Math.round(Number(n)).toLocaleString('en-GB')};
 var N=function(n){return n==null?'—':Number(n).toLocaleString('en-GB')};
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+// 3.102.0: the Google review nudge the server adds on a close (Placed, deal Won, job filled by us).
+function reviewBlock(g){if(!g||typeof g!=='object')return '';var u=String(g.review_url||''),ok=/^https:\/\//.test(u);
+ return '<div class="rev"><span>Ask '+esc(g.ask||'the client')+' for a Google review of Octagon Group while it\'s fresh.'+(ok?'':' <span class="m">Review link not set up yet.</span>')+'</span>'+(ok?'<button class="btn btn-g" data-act="open:'+esc(u)+'">Open review page</button>':'')+'</div>'}
 function D(s){var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(s==null?'':s));return m?m[3]+'/'+m[2]+'/'+m[1]:esc(s)}
 function lc(s){return String(s).replace(/^[A-Z][a-z]/,function(c){return c.toLowerCase()})}
 // Leavers (left:true) stay below current staff and are tagged, never dropped (see the dashboard skill's house rules).
@@ -311,7 +316,7 @@ create_job:['New job','Create job'],update_job:['Edit job','Save changes'],hando
 log_activity:['Log activity','Log it'],manage_client:['Client record','Save'],pitch_candidate:['Record pitch','Record pitch'],
 job_dpe:['Record DPE','Record DPE'],delete_record:['Delete record',''],
 send_email:['Email','Save draft'],push_tell:['Push & Tell email','Save to Outlook Drafts'],eow_email:['End-of-week email','Save to Outlook Drafts'],off_limit:['Off-limit status','Apply'],hotlist:['Hotlist','Apply'],inbox:['Inbox','Apply'],manage_tokens:['Revoke access','Revoke'],webhook_subscriptions:['Webhook','Apply'],client_status:['Change status','Apply changes'],draft_reply:['Reply draft','Save to Outlook Drafts'],dpe_email:['DPE email','Save to Outlook Drafts']};
-var HIDE=/^(mode|action|instruction|acting_as|preview|_card|card_note|carried_forward|untouched|what_happens|reason_prompt|note|opted_out_check|changing|identifier|deal_id|job_id|target_type)$|(_slug|^slug|status_id|stage_id)$/;
+var HIDE=/^(mode|action|instruction|acting_as|preview|_card|card_note|google_review|carried_forward|untouched|what_happens|reason_prompt|note|opted_out_check|changing|identifier|deal_id|job_id|target_type)$|(_slug|^slug|status_id|stage_id)$/;
 var MONEY=/(^|_)(value|fee|salary|amount|salary_min|salary_max)$/;
 var LONG=/^(body|email_text|note_preview|would_post|summary)$/;
 var WARN=/^(warning|caution|billing_note)$/;
@@ -353,10 +358,11 @@ window.OCT={name:'octagon-confirm',title:'Octagon',full:false,
 accept:function(d){return !!(d&&d._card)},
 render:function(d,ctx){var c=d._card,t=c.tool,title=(T[t]||[lab(t)])[0];
 if(c.kind==='error'){var already=d.error==='already_applied';return head(title)+'<div class="'+(already?'note':'warn')+'" style="margin-top:0">'+esc(d.message||d.error||'Something went wrong.')+'</div>'}
-if(c.kind==='done')return head(title,'<span class="ok">Done</span>')+fields(d)+'<div class="foot"><div class="state ok">✓ Applied in RecruitCRM.</div></div>';
+if(c.kind==='done')return head(title,'<span class="ok">Done</span>')+fields(d)+'<div class="foot"><div class="state ok">✓ Applied in RecruitCRM.</div></div>'+reviewBlock(d.google_review);
 var chip=c.state==='done'?'<span class="ok">Done</span>':c.state==='cancel'?'Cancelled':c.state==='fail'?'Not applied':'<span class="chip">Preview</span>';
-return head(title,chip)+fields(d)+foot(c,d,ctx)},
+return head(title,chip)+fields(d)+foot(c,d,ctx)+(c.state==='done'?reviewBlock(c.review):'')},
 act:function(name,d,api){var c=d._card;
+if(name.indexOf('open:')===0){try{api.app.openLink({url:name.slice(5)})}catch(e){}return}
 if(name.indexOf('more:')===0){var el=document.getElementById('b-'+name.slice(5));if(el){var o=el.classList.toggle('open');var bt=document.querySelector('[data-act="'+name+'"]');if(bt)bt.textContent=o?'Show less':'Show all'}return}
 if(c.state==='busy'||c.state==='done')return;
 var tell=function(text){try{api.app.updateModelContext({content:[{type:'text',text:text}]})}catch(e){}};
@@ -367,7 +373,7 @@ api.app.callServerTool({name:c.tool,arguments:args}).then(function(r){var sc=r&&
 if(!res&&txt){try{res=JSON.parse(txt)}catch(e){res={message:txt}}}
 var err=r&&r.isError||(res&&res.error);
 if(err){c.state='fail';c.fail_msg=(res&&(res.message||res.error))||'That did not go through.';api.set(d);tell('The recruiter pressed confirm on the '+c.tool+' preview card, but it failed: '+JSON.stringify(res||txt).slice(0,1200)+'. Nothing was applied.');return}
-c.state='done';c.done_msg=name==='draft'?'Draft saved. Nothing was sent.':((['draft_reply','dpe_email','push_tell','eow_email'].indexOf(c.tool)>=0)?'Saved to your Outlook Drafts.':'Done. Applied in RecruitCRM.');api.set(d);
+c.state='done';c.review=res&&res.google_review||null;c.done_msg=name==='draft'?'Draft saved. Nothing was sent.':((['draft_reply','dpe_email','push_tell','eow_email'].indexOf(c.tool)>=0)?'Saved to your Outlook Drafts.':'Done. Applied in RecruitCRM.');api.set(d);
 tell('The recruiter confirmed the '+c.tool+' change with the preview card button and it has ALREADY BEEN APPLIED'+(name==='draft'?' (saved as a draft, not sent)':'')+'. Result: '+JSON.stringify(res).slice(0,1500)+'. Do not call '+c.tool+' with confirm=true again for this change.')})
 .catch(function(e){c.state='fail';c.fail_msg='Could not reach the connector. Nothing was changed.';api.set(d)})}};
 // DPE scoring screen (job_dpe): the consultant picks each score; the card shows the live total and
@@ -562,7 +568,7 @@ accept:function(d){return !!(d&&d._view&&R[d._view.tool])},
 render:function(d,ctx){var r=R[d._view.tool],full=ctx.mode==='fullscreen',body;
  if(d.error&&d._view.tool!=='my_day')return head(r.title(d))+'<div class="note" style="margin-top:0">'+esc(d.message||d.error)+'</div>';
  var f=r.full?r.full(d):null;body=(full||(!ctx.canFull&&f))&&f?f:r.sum(d);
- var o=head(r.title(d),r.cap?r.cap(d):'')+body;
+ var o=head(r.title(d),r.cap?r.cap(d):'')+body+reviewBlock(d.google_review);
  if(f&&ctx.canFull)o+=full?'<div class="foot"><span class="hint">Live from RecruitCRM</span><button class="btn btn-g" data-mode="inline">Back to chat</button></div>':'<div class="foot"><span class="hint">Live from RecruitCRM</span><button class="btn btn-p" data-mode="fullscreen">Open full view</button></div>';
  return o},
 act:function(name,d,api){
