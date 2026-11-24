@@ -29,7 +29,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.101.1" };
+const SERVER = { name: "octagon-analytics", version: "3.102.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -859,6 +859,17 @@ const tomorrowUK = () => {
   return new Date(Date.parse(today + "T12:00:00Z") + 86400_000).toISOString().slice(0, 10);
 };
 const JOB_CLOSING = ["closed", "cancelled", "canceled", "on hold", "on-hold", "onhold"];
+// 24/11/2026: every close (candidate Placed, deal Won, job closed "Filled by us") reminds the
+// consultant to ask for a Google review of Octagon Group. The link is the Google review page, not
+// the client's or Octagon's website. The link is Octagon's own share link (public, not a secret);
+// GOOGLE_REVIEW_URL overrides it if it ever changes.
+const GOOGLE_REVIEW_URL = "https://share.google/oow48xg34ur21LO9c";
+function googleReviewReminder(event: "placed" | "won" | "filled"): Record<string, unknown> {
+  const url = (Deno.env.get("GOOGLE_REVIEW_URL") ?? "").trim() || GOOGLE_REVIEW_URL;
+  const who = event === "filled" ? "the hiring manager" : "the candidate and the hiring manager";
+  return { google_review: { ask: who, review_url: url ?? "[Google review link]",
+    instruction: `Remind the recruiter, in one line after the result, to ask ${who} for a Google review of Octagon Group while it's fresh, with the review link${url ? "" : " (not set up yet: say an admin needs to add it)"}. Offer to draft the request (draft only, never send). Nudge once; don't repeat it in the same chat.` } };
+}
 const DEAL_LOSING = ["lost", "declined"];
 // Fire-and-forget usage telemetry (no PII args) — feeds admin_digest()/the Slack bot.
 // 3.70.1: a failed call also records WHY, as a short code plus the HTTP status (e.g.
@@ -1663,6 +1674,10 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
       } catch (_e) { meetings_needing_type = null; }
     }
     const extra: any = meetings_needing_type ? { meetings_needing_type, meetings_line: `${meetings_needing_type} of your meetings from the last 14 days have no type - run meeting_review to pick them, so client visits count.` } : {};
+    // 24/11/2026: placements made straight in RecruitCRM never pass through update_hiring_stage, so
+    // the Google review nudge also rides on your own day while anything was placed in the last 7 days.
+    const p7 = data?.placed_last_7d;
+    if (!args?.consultant && (Array.isArray(p7) ? p7.length : Number(p7 ?? 0)) > 0) Object.assign(extra, googleReviewReminder("placed"));
     // 3.99.0: one command to try, only when the person's own records give it a reason and they
     // haven't used it in 28 days (command_tip, migration 0144). Own day only.
     if (!args?.consultant && actor.id) {
@@ -1811,7 +1826,8 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     if (!r.ok) return toolText({ error: "recruitcrm_error", status: r.status, detail: r.text?.slice(0, 200) });
     await audit({ actor: String(actor.id), action: "update_hiring_stage", entity: "candidate", entity_id: args.candidate_slug, before: cur, after: { status_id: args.status_id, name: proposed?.stage_name, job_slug: args.job_slug, create_placement: !!args.create_placement, start_date: startNote ? args.start_date : undefined }, via: "claude" });
     const refreshed = await refreshCandidate(args.candidate_slug);
-    return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately." });
+    return toolText({ mode: "applied", candidate_slug: args.candidate_slug, job_slug: args.job_slug, new_status_id: args.status_id, new_stage: proposed?.stage_name, mirror_events_refreshed: refreshed, note: "RecruitCRM updated and the mirror was refreshed immediately.",
+      ...(placed ? googleReviewReminder("placed") : {}) });
   }
   if (name === "notes_kpi") {
     const { data, error } = await db.rpc("notes_kpi_report", {
@@ -3259,6 +3275,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
     }
     return toolText({ mode: "applied", deal_id: deal.recruitcrm_id, name: body.name, stage: stage ? stage.label : curStageLabel, value: body.deal_value, lost_reason: dealReasonResult,
       custom_fields: cfResult,
+      ...(dealStageMoving && /\bwon\b/i.test(String(stage?.label ?? "")) ? googleReviewReminder("won") : {}),
       note: cfResult && !cfResult.ok ? "The deal saved, but not every field landed as previewed: say which, and give the manual step (set it on the deal in RecruitCRM). Do not try another way such as a browser."
         : "Deal updated in RecruitCRM and the mirror refreshed." });
   }
@@ -4095,6 +4112,7 @@ async function runTool(name: string, args: any, req: Request, actor: any) {
                      : "Reason logged for reporting, but the note could not be written to RecruitCRM." };
     }
     return toolText({ mode: "applied", job_id: job.recruitcrm_id, job_title: job.title, changed: Object.keys(Object.fromEntries(changing)), job_order_form: jofResult, closure_reason: jobReasonResult,
+      ...(jobClosing && jobReason === "Filled by us" ? googleReviewReminder("filled") : {}),
       not_applied: webNotApplied.length ? webNotApplied : undefined,
       note: webNotApplied.length ? `${webNotApplied.join(", ")} did not save in RecruitCRM: say so plainly and give the manual step (set it on the job in RecruitCRM). Do not try another way such as a browser.`
         : jofResult && !jofResult.ok ? "Some job order form answers did not save: say which, and do not try another way such as a browser." : "Job updated in RecruitCRM and the mirror refreshed." });
