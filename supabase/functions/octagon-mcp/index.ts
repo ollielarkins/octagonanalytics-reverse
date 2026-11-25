@@ -29,7 +29,7 @@ import { MCP_APP_MIME, DASH_UI, SCORE_UI, CONFIRM_UI, REPORT_UI, MIXED_UI, DASHB
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const TOKEN = (Deno.env.get("RECRUIT_CRM_API_TOKEN") ?? Deno.env.get("RECRUITCRM_API_TOKEN") ?? "").trim();
 const BASE = "https://api.recruitcrm.io/v1";
-const SERVER = { name: "octagon-analytics", version: "3.102.0" };
+const SERVER = { name: "octagon-analytics", version: "3.103.0" };
 
 // 3.70.1: a 429 is retried twice (Retry-After honoured, capped at 5s). RecruitCRM rejects a
 // rate-limited request before acting on it, so this is safe for POSTs too. The token is shared with
@@ -867,8 +867,14 @@ const GOOGLE_REVIEW_URL = "https://share.google/oow48xg34ur21LO9c";
 function googleReviewReminder(event: "placed" | "won" | "filled"): Record<string, unknown> {
   const url = (Deno.env.get("GOOGLE_REVIEW_URL") ?? "").trim() || GOOGLE_REVIEW_URL;
   const who = event === "filled" ? "the hiring manager" : "the candidate and the hiring manager";
-  return { google_review: { ask: who, review_url: url ?? "[Google review link]",
+  const out: Record<string, unknown> = { google_review: { ask: who, review_url: url ?? "[Google review link]",
     instruction: `Remind the recruiter, in one line after the result, to ask ${who} for a Google review of Octagon Group while it's fresh, with the review link${url ? "" : " (not set up yet: say an admin needs to add it)"}. Offer to draft the request (draft only, never send). Nudge once; don't repeat it in the same chat.` } };
+  // 25/11/2026: a placement (candidate Placed or deal Won) has both a happy client and a happy
+  // candidate, so it also asks each for a short testimonial Octagon can quote. Same one line as
+  // the review nudge, never a second message. Quoting it anywhere needs their permission.
+  if (event !== "filled") out.testimonial = { ask: "the client and the candidate",
+    instruction: "In the same line as the review reminder, also suggest asking the client and the candidate for a short testimonial Octagon can quote, with their permission to use it and how they'd like to be named. Offer to draft the request (draft only, never send; never write the testimonial for them)." };
+  return out;
 }
 const DEAL_LOSING = ["lost", "declined"];
 // Fire-and-forget usage telemetry (no PII args) — feeds admin_digest()/the Slack bot.
