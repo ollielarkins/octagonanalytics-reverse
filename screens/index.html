@@ -220,10 +220,11 @@ h1 em{font-style:normal;background:linear-gradient(90deg,var(--rasp-soft),var(--
    billing dashboard. News comes from Dale's Google Sheet. If the feed is unreachable, the billing
    slides fall back to the sheet's tabs, so a TV never goes blank.
 
-   The feed needs a screen key. Open each TV once at
+   The feed needs a screen key, which travels in the link people are given:
      https://YOUR-SCREENS-SITE.netlify.app/#key=THE_SCREEN_KEY
-   The page keeps the key on that TV and removes it from the address bar. Never put the key in this
-   file: the page is public. Revoke a key by setting revoked_at in screen_keys.
+   The key stays in the address bar so the link can be bookmarked or refreshed, and the page also
+   remembers it on that device. The part after # is never sent to Netlify. Never put the key in
+   this file: the page is public. Revoke a key by setting revoked_at in screen_keys.
    ========================================================================= */
 const FEED_URL = "https://kzcmssldvtjnbwwunuwm.supabase.co/functions/v1/screens-feed";
 const SHEET = "https://docs.google.com/spreadsheets/d/1fxj5E1PpzTImlezczHqFhBlV8cbzBQKm1-6EmrAeCDM/export?format=csv&gid=";
@@ -301,7 +302,6 @@ function screenKey(){
   const m = location.hash.match(/key=([A-Za-z0-9_-]{32,200})/);
   if(m){
     try{ localStorage.setItem("octScreenKey", m[1]); }catch(e){}
-    history.replaceState(null, "", location.pathname + location.search);
     return m[1];
   }
   try{ return localStorage.getItem("octScreenKey"); }catch(e){ return null; }
