@@ -182,7 +182,8 @@ body{font-family:'Poppins',system-ui,'Segoe UI',Arial,sans-serif;color:var(--ink
    migrations 0163 and 0164), with the same definitions as the dashboards. There is no spreadsheet.
 
    The feed needs a screen key, which travels in the link people are given:
-     https://YOUR-SCREENS-SITE.netlify.app/#key=THE_SCREEN_KEY
+     https://octagon-screens.netlify.app/#key=THE_SCREEN_KEY
+   Add &slide=N (1-8) to hold one slide instead of rotating.
    The key stays in the address bar so the link can be bookmarked or refreshed, and the page also
    remembers it on that device. The part after # is never sent to Netlify. Never put the key in
    this file: the page is public. Revoke a key by setting revoked_at in screen_keys.
@@ -398,6 +399,14 @@ async function init(){
   // Wait for the first good feed before starting the rotation; keep retrying every 30 seconds
   while(!F){ await new Promise(r => setTimeout(r, 30000)); await poll(); }
   document.getElementById("wait").remove();
+  // #key=...&slide=3 holds one slide (1-8) without rotating: for showing or screenshotting a design
+  const pin = +(location.hash.match(/slide=(\d+)/) || [])[1];
+  if(pin >= 1 && pin <= SLIDES.length){
+    const s = document.createElement("style");
+    s.textContent = ".slide,.slide *{transition:none!important;animation:none!important}";
+    document.head.appendChild(s);
+    cur = pin - 2; next(); return;
+  }
   next();
   setInterval(next, SLIDE_MS);
 }
