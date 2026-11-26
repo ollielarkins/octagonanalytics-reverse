@@ -69,7 +69,7 @@ flowchart LR
 | `supabase/functions/recruitcrm-probe/`, `recruitcrm-discover/` | Throwaway API probes, locked; not part of the product |
 | `supabase/config.toml` | `verify_jwt` per function, with the reason for each |
 | `web/octagon-connect.html` | The connector's login page (token to OAuth handoff) |
-| `screens/index.html` | The office TV page (hosted on Netlify), fed by `screens-feed`; News still comes from Dale's sheet |
+| `screens/index.html` | The office TV page (hosted on Netlify), fed only by `screens-feed` (0163, 0164); no spreadsheet |
 | `scripts/` | Repo checks: widget bundle build, widget and connect-page checks |
 | `rollout/` | Org instructions for claude.ai and recruiter templates |
 | `slack/` | The Octagon Coach Slack app manifest |
