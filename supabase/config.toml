@@ -34,6 +34,13 @@ verify_jwt = false
 # per-consultant figures to anyone. Left open (verify_jwt = false) only so old callers get a clear 410.
 verify_jwt = false
 
+[functions.screens-feed]
+# The office TV screens (screens/index.html on Netlify, 0163). A TV page cannot hold a Supabase JWT, so
+# this is open, and every request must carry a screen key (x-screen-key) whose SHA-256 hash is in
+# screen_keys and not revoked; otherwise 401 and no data. Serves billing by consultant and open
+# roles by company only.
+verify_jwt = false
+
 [functions.feedback]
 # Posted from the connect page on octagongroup.co.uk by people who may not have a working token —
 # an auth failure is exactly the thing they would be reporting. Protected by field validation, a
