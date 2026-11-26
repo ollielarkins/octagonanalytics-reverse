@@ -39,7 +39,7 @@ What protects the data today. Each point is checked against the code named.
 | Webhook | `recruitcrm-webhook` requires the shared `WEBHOOK_SECRET` | `recruitcrm-webhook` |
 | Leaver auto-revoke | When RecruitCRM marks a consultant inactive or deleted, their tokens are switched off and their inbox stops being polled, with an audit row | trigger in 0136 |
 | Inbox | Only the person's own mailbox can be connected; metadata is purged after 30 days | `octagon-mcp`, `inbox-retention` cron |
-| No public figures | Since 03/11/2026 no unauthenticated endpoint serves firm figures: `dashboard` and `dashboard-data` return 410 with no data; `feedback` accepts submissions and returns none | `dashboard/`, `dashboard-data/`, `feedback/` |
+| No public figures | Since 03/11/2026 no unauthenticated endpoint serves firm figures: `dashboard` and `dashboard-data` return 410 with no data; `feedback` accepts submissions and returns none. `screens-feed` (26/11/2026) serves the office TVs only with a screen key, stored as a SHA-256 hash in `screen_keys` and revoked by setting `revoked_at`; it returns billing by consultant and open roles by company, no candidate or contact data | `dashboard/`, `dashboard-data/`, `feedback/`, `screens-feed/` |
 | Database | RLS on every public table (41 of 41 at 04/11/2026); report RPCs revoked from `anon` and `authenticated`; `SECURITY DEFINER` helpers pin `search_path` | migrations, e.g. 0107 |
 | Data residency | Supabase in `eu-west-1`. The contacts mirror holds no email or phone (0145) | project settings, 0145 |
 

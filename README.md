@@ -69,6 +69,7 @@ flowchart LR
 | `supabase/functions/recruitcrm-probe/`, `recruitcrm-discover/` | Throwaway API probes, locked; not part of the product |
 | `supabase/config.toml` | `verify_jwt` per function, with the reason for each |
 | `web/octagon-connect.html` | The connector's login page (token to OAuth handoff) |
+| `screens/index.html` | The office TV page (hosted on Netlify), fed by `screens-feed`; News still comes from Dale's sheet |
 | `scripts/` | Repo checks: widget bundle build, widget and connect-page checks |
 | `rollout/` | Org instructions for claude.ai and recruiter templates |
 | `slack/` | The Octagon Coach Slack app manifest |
@@ -138,6 +139,7 @@ the EU), Postgres 17.
 | `coach-dm`, `digest-email`, `inbox-sync` | true | Locked: service role or `CRON_SECRET`. Driven by `pg_cron` |
 | `coach-actions`, `slack-command` | false | Slack request signature, each with its own app's signing secret |
 | `feedback` | false | Public form: field validation, length cap, honeypot, per-IP rate limit. Stores submissions, serves no data |
+| `screens-feed` | false | Office TV screens (0163). Needs a screen key (`x-screen-key`, hashed in `screen_keys`, revocable). Billing by consultant and open roles by company only |
 | `dashboard`, `dashboard-data` | false | Retired 03/11/2026. Return 410 Gone and no data |
 | `recruitcrm-probe`, `recruitcrm-discover` | true | Throwaway probes |
 
@@ -158,6 +160,7 @@ they survive the clock change.
 | 07:30 daily | Sync health digest to the admin bot |
 | 12:30, 16:45 weekdays; 08:45 Mondays | Octagon Coach DMs (shadow mode) |
 | Fridays | Weekly usage table |
+| 00:30 UTC Mondays | Office TV rank snapshot, the baseline for the up/down arrows (0163) |
 
 Add every new permanent job to `cron_manifest` in the same migration. As of 04/11/2026
 `recruitcrm-assignment-sweep` and `weekly-usage-slack` run but are not declared in it.
