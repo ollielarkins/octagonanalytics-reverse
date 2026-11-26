@@ -382,9 +382,14 @@ function tick(){
   document.getElementById("clock").textContent = now.toLocaleTimeString("en-GB", {hour:"2-digit", minute:"2-digit"});
   document.getElementById("date").textContent = now.toLocaleDateString("en-GB", {weekday:"long", day:"numeric", month:"long"});
 }
+// Fill the whole screen whatever its shape: scale to the tighter side, then stretch the other side
+// so there are no empty bands. The layout is flex and grid, so it widens or deepens to suit.
 function fit(){
   const s = Math.min(innerWidth / 1920, innerHeight / 1080);
-  document.getElementById("stage").style.transform = `translate(-50%,-50%) scale(${s})`;
+  const st = document.getElementById("stage");
+  st.style.width = (innerWidth / s) + "px";
+  st.style.height = (innerHeight / s) + "px";
+  st.style.transform = `translate(-50%,-50%) scale(${s})`;
 }
 
 async function init(){
