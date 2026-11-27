@@ -286,7 +286,8 @@ function sYTD(){
 }
 
 function sQuarter(){
-  const qn = Math.floor(new Date(F.quarter_start).getMonth() / 3) + 1;
+  // Octagon's financial year runs April to March, so Oct-Dec is Q3 and Jan-Mar is Q4
+  const qn = Math.floor(((new Date(F.quarter_start).getMonth() + 9) % 12) / 3) + 1;
   const list = F.quarter.filter(keep);
   const total = F.quarter.reduce((s, p) => s + (+p.revenue || 0), 0);
   const target = F.quarter.filter(p => !p.left).reduce((s, p) => s + (+p.target || 0), 0);
