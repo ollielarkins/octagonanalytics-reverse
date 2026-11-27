@@ -267,7 +267,7 @@ const hero = (eyebrow, title, stats) => `
 function sYTD(){
   const all = F.ytd.filter(keep), list = all.slice(0, 10);
   const total = F.ytd.reduce((s, p) => s + (+p.revenue || 0), 0);
-  const h = hero("Top billers", `${F.year} year to date`, [[money(total), "Billed by the team"], [String(F.ytd.length), "People billing"]]);
+  const h = hero("Top billers · financial year from 1 April", `${F.year} year to date`, [[money(total), "Billed by the team"], [String(F.ytd.length), "People billing"]]);
   if(!list.length) return h + `<div class="body"><div class="empty">No billing yet this year</div></div>`;
   const max = list[0].revenue || 1;
   const top = list.slice(0, 3).map((p, i) => `
