@@ -120,11 +120,11 @@ body{font-family:'Poppins',system-ui,'Segoe UI',Arial,sans-serif;color:var(--ink
 
 /* This week */
 .wk{flex:1;display:grid;grid-template-columns:repeat(4,1fr);grid-auto-rows:1fr;gap:18px;min-height:0}
-.w{padding:20px 24px;display:flex;flex-direction:column;justify-content:space-between}
-.w .top{display:flex;align-items:center;gap:16px;margin-bottom:12px}
-.w .nm{font-size:22px;font-weight:600;color:var(--navy-800);line-height:1.2}
-.kpi{display:grid;grid-template-columns:122px 1fr 64px;align-items:center;gap:12px;font-size:16px;color:var(--muted);margin-top:8px}
-.kpi b{font-size:20px;color:var(--navy-800);text-align:right}
+.w{padding:14px 22px;display:flex;flex-direction:column;justify-content:space-between}
+.w .top{display:flex;align-items:center;gap:12px;margin-bottom:2px}
+.w .nm{font-size:20px;font-weight:600;color:var(--navy-800);line-height:1.2}
+.kpi{display:grid;grid-template-columns:122px 1fr 64px;align-items:center;gap:12px;font-size:15px;line-height:1.25;color:var(--muted);margin-top:4px}
+.kpi b{font-size:18px;color:var(--navy-800);text-align:right}
 .kpi b.hit{color:var(--teal-700)}
 
 /* Placements and roles: the site's job card */
@@ -322,13 +322,13 @@ function sOffers(){
 
 function sWeek(){
   const t = F.week_totals;
-  const h = hero("This week so far", "Team activity", [[t.cv_sent, "CVs sent"], [t.interview_request, "Interview requests"], [t.first_interview, "1st interviews"], [t.placed, "Placed"]]);
+  const h = hero("This week so far", "Team activity", [[t.cv_sent, "CVs sent"], [t.interview_request, "Interview requests"], [t.first_interview, "1st interviews"], [t.bd_calls, "BD calls"], [t.client_calls, "Client calls"], [t.placed, "Placed"]]);
   const list = F.week.slice(0, 12);
   if(!list.length) return h + `<div class="body"><div class="empty">No activity logged yet this week</div></div>`;
   const kpi = (label, a, tgt, k, d) => `<div class="kpi"><span>${label}</span><div class="track"><i class="${tgt && a >= tgt ? "t" : ""}" style="width:${tgt ? Math.min(100, a/tgt*100) : Math.min(100, a*8)}%;animation-delay:${d}s"></i></div><b class="num${tgt && a >= tgt ? " hit" : ""}">${a}${tgt ? `/${tgt}` : ""}</b></div>`;
   const cards = list.map((p, k) => `
-    <div class="card bar w"><div class="top">${av(p.name, 56)}<div class="nm">${nm(p.name)}</div></div>
-      <div>${kpi("CVs sent", p.cv_sent, p.cv_sent_target, k, .2+k*.04)}${kpi("IV requests", p.interview_request, p.interview_request_target, k, .25+k*.04)}${kpi("1st interviews", p.first_interview, p.first_interview_target, k, .3+k*.04)}</div></div>`).join("");
+    <div class="card bar w"><div class="top">${av(p.name, 40)}<div class="nm">${nm(p.name)}</div></div>
+      <div>${kpi("CVs sent", p.cv_sent, p.cv_sent_target, k, .2+k*.04)}${kpi("IV requests", p.interview_request, p.interview_request_target, k, .25+k*.04)}${kpi("1st interviews", p.first_interview, p.first_interview_target, k, .3+k*.04)}${kpi("BD calls", p.bd_calls, p.bd_calls_target, k, .35+k*.04)}${kpi("Client calls", p.client_calls, p.client_calls_target, k, .4+k*.04)}</div></div>`).join("");
   return h + `<div class="body"><div class="wk">${cards}</div></div>`;
 }
 
